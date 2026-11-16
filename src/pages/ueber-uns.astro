@@ -1,0 +1,35 @@
+---
+import Layout from "../waldstatt/Layout.astro";
+import meta from "../waldstatt/meta";
+---
+
+<Layout
+  title={`Über uns – ${meta.name}`}
+  description={`Wer hinter ${meta.name} steckt und wie unsere Spiele entstehen.`}
+>
+  <article class="prose prose-lg mx-auto px-4 py-12">
+    <h1>Über uns</h1>
+    <p>
+      {meta.name} ist ein kleines Hobby-Spielestudio. Wir programmieren Spiele,
+      die direkt im Browser laufen, ohne Installation.
+    </p>
+    <h2>Wie alles begann</h2>
+    <p>
+      Am Nationalen Zukunftstag, dem 12. November 2026, haben wir aus Skizzen
+      auf Papier unsere ersten spielbaren Prototypen gebaut: Moto Devil und Car
+      Drive. Seither entwickeln wir beide weiter.
+    </p>
+    <h2>Wie wir arbeiten</h2>
+    <p>
+      Jede Idee beginnt als Skizze. Daraus schreiben wir einen kurzen Plan: Was
+      fehlt, wie könnte die Lösung aussehen, und was lassen wir bewusst weg?
+      Dann bauen wir einen Prototyp und probieren ihn aus.
+    </p>
+    <h2>Womit wir bauen</h2>
+    <p>
+      Unsere Spiele sind in Rust mit der Spiel-Engine Bevy geschrieben und
+      laufen als WebAssembly im Browser. Der Quellcode ist auf GitHub
+      öffentlich.
+    </p>
+  </article>
+</Layout>

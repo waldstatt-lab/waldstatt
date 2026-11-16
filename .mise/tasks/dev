@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Start the Astro dev server with live reload on http://localhost:4321"
+set -euo pipefail
+# Extra arguments go to Astro, e.g. `mise run dev --host`.
+npm run dev -- "$@"

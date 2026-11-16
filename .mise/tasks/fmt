@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Format the sources with Prettier"
+set -euo pipefail
+npm run fmt

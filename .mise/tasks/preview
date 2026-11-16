@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Serve the built site from dist/ on http://localhost:4321"
+set -euo pipefail
+# Run `mise run build` first.
+npm run preview -- "$@"

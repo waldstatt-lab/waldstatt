@@ -1,0 +1,47 @@
+---
+import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
+import { render } from "astro:content";
+import { getGames } from "../../lib/games";
+import { href } from "../../lib/url";
+import Layout from "../../waldstatt/Layout.astro";
+import meta from "../../waldstatt/meta";
+
+export const getStaticPaths = (async () =>
+  (await getGames()).map((game) => ({
+    params: { game: game.id },
+    props: { game },
+  }))) satisfies GetStaticPaths;
+
+type Props = InferGetStaticPropsType<typeof getStaticPaths>;
+
+const { game } = Astro.props;
+const { Content } = await render(game);
+---
+
+<Layout
+  title={`${game.data.title} – ${meta.name}`}
+  description={game.data.tagline}
+>
+  <div class="mx-auto max-w-3xl px-4 py-12">
+    <a class="link" href={href("/#spiele")}>
+      Alle Spiele
+    </a>
+    <h1 class="mt-6 text-5xl font-bold">{game.data.title}</h1>
+    <p class="mt-4 text-xl">{game.data.tagline}</p>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a class="btn btn-primary btn-lg" href={game.data.playUrl}>
+        {game.data.title} spielen
+      </a>
+      <a class="btn btn-ghost btn-lg" href={game.data.sourceUrl}>
+        Quellcode auf GitHub
+      </a>
+    </div>
+    <p class="mt-4 text-sm">
+      Läuft in einem aktuellen Browser auf dem Computer, mit Tastatur oder
+      Controller.
+    </p>
+    <article class="prose prose-lg mt-12">
+      <Content />
+    </article>
+  </div>
+</Layout>

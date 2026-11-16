@@ -1,0 +1,25 @@
+---
+import type { CollectionEntry } from "astro:content";
+import { href } from "../lib/url";
+
+interface Props {
+  game: CollectionEntry<"games">;
+}
+
+const { game } = Astro.props;
+---
+
+<article class="card border border-base-300 bg-base-100">
+  <div class="card-body">
+    <h3 class="card-title text-2xl">{game.data.title}</h3>
+    <p>{game.data.tagline}</p>
+    <div class="card-actions mt-4">
+      <a class="btn btn-primary" href={game.data.playUrl}>
+        Spielen
+      </a>
+      <a class="btn btn-ghost" href={href(`/spiele/${game.id}/`)}>
+        Mehr zu {game.data.title}
+      </a>
+    </div>
+  </div>
+</article>

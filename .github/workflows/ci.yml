@@ -1,0 +1,28 @@
+# Checks every pull request: formatting, the Astro type check, and the build.
+# Pushes to main are not checked again; Pages builds the site there.
+# See CONTRIBUTING.md.
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Installs Node.js as pinned in .mise/config.toml.
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+      - name: Install dependencies
+        run: mise run install
+      - name: Formatting, type check, and build
+        run: mise run check

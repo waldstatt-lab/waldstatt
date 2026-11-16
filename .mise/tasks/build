@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Build the static site into dist/"
+set -euo pipefail
+npm run build

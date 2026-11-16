@@ -1,0 +1,6 @@
+# Project tool versions and settings for mise (https://mise.jdx.dev).
+# File tasks live in .mise/tasks/; list them with `mise tasks`.
+
+[tools]
+# Current Node.js LTS; Astro 7 needs Node >= 22.23.4. CI uses the same version.
+node = "26.13.1"

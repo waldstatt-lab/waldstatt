@@ -1,0 +1,7 @@
+/* The site's stylesheet, loaded by its pages through Layout.astro. */
+@import "tailwindcss";
+@import "./theme.css";
+@plugin "@tailwindcss/typography";
+@plugin "daisyui" {
+  themes: false;
+}

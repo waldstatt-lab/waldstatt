@@ -1,0 +1,4 @@
+# Project documentation keeps its own hand-wrapped Markdown style.
+/*.md
+/docs/
+package-lock.json
