@@ -34,3 +34,4 @@ does not prove correctness.
 | Record | Status |
 | --- | --- |
 | [0001 — Build a static site with Astro and daisyUI on GitHub Pages](0001-build-a-static-site-with-astro-and-daisyui.md) | accepted |
+| [0002 — Make the Waldstatt a browser game that gates its content](0002-make-the-waldstatt-a-browser-game.md) | proposed; would amend 0001, 0004 |

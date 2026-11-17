@@ -42,3 +42,4 @@ What this pitch explicitly does not include.
 
 | Pitch | Status |
 | --- | --- |
+| [Ein Aufbauspiel im Wald](pitch--aufbauspiel-im-wald.md) | proposed |
