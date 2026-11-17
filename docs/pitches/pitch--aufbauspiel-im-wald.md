@@ -63,6 +63,12 @@ a stock limit. The app icons are pixel art encoded as PNG at build time.
   read it or play on the stage; zooming out turns it back. Nothing on the map
   opens a panel or dialog: other buildings show a short status label, tearing
   down takes a second tap, and the dam names what will drown while placing.
+- In the plan view, buildings, trees and Waldleute are drawn from straight
+  above; the map can be dragged and zoomed in, and zooming out returns to the
+  isometric view.
+- The theatre is a wooden amphitheatre with stands all round, and its stage is
+  painted on the map: the preview with wooden signs for the programme and the
+  keys, played by tapping the signs or with the keyboard.
 
 This is a hobby project, so the pitch sets no appetite. The game should still
 grow in playable slices, each a sensible place to stop: forest, felling and huts;

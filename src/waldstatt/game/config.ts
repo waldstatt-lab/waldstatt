@@ -177,12 +177,12 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Theater",
     group: "Spiele",
     cost: cost(40),
-    w: 9,
-    h: 12,
+    w: 12,
+    h: 13,
     work: 24,
     limit: "one",
     about:
-      "Eine Bühne, auf der du die Spiele anspielst, deren Spielhaus steht.",
+      "Ein hölzernes Amphitheater: Auf der Bühne spielst du die Spiele an, deren Spielhaus steht.",
   },
   kloster: {
     name: "Kloster Einsiedeln",
@@ -218,8 +218,18 @@ export const groups: Group[] = [
 export const TEXT_SCALE = 32;
 export const TEXT_MARGIN = 0.3;
 
-/** The theatre's stage: the back part of its footprint, in tiles. */
-export const STAGE = { inset: 0.5, depth: 9 };
+/**
+ * The theatre: a wooden amphitheatre. Its stage lies in the middle; tiered
+ * stands rise all round it. In tiles from the footprint's corner.
+ */
+export const STAGE = {
+  u0: 2.5,
+  v0: 2.4,
+  u1: 9.5,
+  v1: 10.4,
+  rows: 3,
+  row: 0.75,
+};
 
 /** The heading of the controls section in the games' Markdown. */
 export const controlsHeading = "Steuerung";

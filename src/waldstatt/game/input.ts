@@ -14,6 +14,12 @@ export interface Tile {
 }
 
 export interface MapHandlers {
+  /** A press at an exact tile position, e.g. on a stage's sign; true if taken. */
+  press(at: { x: number; y: number }): boolean;
+  /** The press ended. */
+  release(): void;
+  /** A key for something on the map, such as the stage; true if taken. */
+  key(event: KeyboardEvent, down: boolean): boolean;
   /** Whether a one-finger or left-button drag marks an area (the saw). */
   sawing(): boolean;
   tap(tile: Tile, pointer: string): void;
@@ -39,6 +45,8 @@ export function attachInput(
   let sawFrom: Tile | null = null;
   let pinch = 0;
   let cursor: Tile | null = null;
+  /** A press taken by something on the map, held until the pointer lifts. */
+  let pressing = false;
 
   const local = (event: PointerEvent | WheelEvent) => {
     const box = host.getBoundingClientRect();
@@ -58,9 +66,18 @@ export function attachInput(
     if ((event.target as Element).closest?.("[data-world-ui]")) return;
     host.focus({ preventScroll: true });
     const point = local(event);
+    // The cursor tile is for the keyboard; a pointer hides it.
+    if (cursor) {
+      cursor = null;
+      renderer.setCursor(null);
+    }
     pointers.set(event.pointerId, point);
     host.setPointerCapture(event.pointerId);
     if (pointers.size === 1) {
+      if (handlers.press(renderer.screenToTile(point.x, point.y))) {
+        pressing = true;
+        return;
+      }
       downAt = { ...point, time: performance.now(), id: event.pointerId };
       moved = false;
       const marks =
@@ -85,6 +102,7 @@ export function attachInput(
       return;
     }
     pointers.set(event.pointerId, point);
+    if (pressing) return;
     if (downAt && Math.hypot(point.x - downAt.x, point.y - downAt.y) > tapSlop)
       moved = true;
     if (pointers.size >= 2) {
@@ -107,6 +125,12 @@ export function attachInput(
 
   const end = (event: PointerEvent, cancelled: boolean) => {
     if (!pointers.has(event.pointerId)) return;
+    if (pressing) {
+      pointers.delete(event.pointerId);
+      pressing = false;
+      handlers.release();
+      return;
+    }
     const point = local(event);
     pointers.delete(event.pointerId);
     if (pointers.size > 0) {
@@ -153,9 +177,13 @@ export function attachInput(
   });
 
   host.addEventListener("keydown", (event) => {
-    // Keys on the stage or a sign's links are theirs.
+    // Keys on a plate's links are theirs.
     if (event.target !== host) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (handlers.key(event, true)) {
+      event.preventDefault();
+      return;
+    }
     const steps: Record<string, [number, number]> = {
       ArrowLeft: [-1, 0],
       ArrowRight: [1, 0],
@@ -191,6 +219,11 @@ export function attachInput(
       handlers.cancel();
     }
   });
+
+  host.addEventListener("keyup", (event) => {
+    if (event.target === host) handlers.key(event, false);
+  });
+  host.addEventListener("blur", () => handlers.release());
 
   function zoomCentre(factor: number) {
     const box = host.getBoundingClientRect();

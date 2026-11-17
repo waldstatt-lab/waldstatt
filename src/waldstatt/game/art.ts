@@ -854,99 +854,128 @@ function anleitung(P: Painter, w: number, d: number) {
   board(P, w, d, true);
 }
 
+/** The bands of the stands round the stage: row r, its back, sides and front. */
+export function standBands(w: number, d: number) {
+  const S = STAGE;
+  const gap = 0.12;
+  const bands = [];
+  for (let r = 0; r < S.rows; r++) {
+    const inner = gap + r * S.row;
+    const outer = gap + (r + 1) * S.row;
+    const u0 = Math.max(0.1, S.u0 - outer);
+    const u1 = Math.min(w - 0.1, S.u1 + outer);
+    const back = { u0, u1, v0: Math.max(0.1, S.v0 - outer), v1: S.v0 - inner };
+    const front = {
+      u0,
+      u1,
+      v0: S.v1 + inner,
+      v1: Math.min(d - 0.1, S.v1 + outer),
+    };
+    bands.push({
+      r,
+      back,
+      left: { u0, u1: S.u0 - inner, v0: back.v1, v1: front.v0 },
+      right: { u0: S.u1 + inner, u1, v0: back.v1, v1: front.v0 },
+      front,
+      height: 8 + r * 9,
+    });
+  }
+  return bands;
+}
+
+const plank = {
+  top: "#b98a52",
+  left: "#8a5a32",
+  right: "#6b4423",
+  line: "#4a3320",
+};
+
+/**
+ * A wooden amphitheatre: tiered stands all round the stage. The stage itself
+ * is left empty: its picture lies on the ground below (stage.ts), so the
+ * stands in front of it hide its edge.
+ */
 function theater(P: Painter, w: number, d: number) {
-  const front = STAGE.depth;
-  P.poly(
-    [
-      [0, front, 0],
-      [w, front, 0],
-      [w, d, 0],
-      [0, d, 0],
-    ],
-    "#b49a6a",
-  );
+  const S = STAGE;
+  const earth = "#b49a6a";
+  for (const [u0, v0, u1, v1] of [
+    [0, 0, w, S.v0],
+    [0, S.v0, S.u0, S.v1],
+    [S.u1, S.v0, w, S.v1],
+    [0, S.v1, w, d],
+  ])
+    P.poly(
+      [
+        [u0, v0, 0],
+        [u1, v0, 0],
+        [u1, v1, 0],
+        [u0, v1, 0],
+      ],
+      earth,
+    );
   const rnd = random(4);
-  for (let i = 0; i < 160; i++) {
-    const [x, y] = P.p(rnd() * w, front + rnd() * (d - front));
+  for (let i = 0; i < 220; i++) {
+    const u = rnd() * w;
+    const v = rnd() * d;
+    if (u > S.u0 && u < S.u1 && v > S.v0 && v < S.v1) continue;
+    const [x, y] = P.p(u, v);
     P.ctx.fillStyle = "rgba(90, 70, 40, 0.25)";
     P.ctx.fillRect(x, y, 1.6, 1);
   }
-  // Benches in curved rows facing the stage.
-  const cu = w / 2;
-  for (let r = 3; r >= 1; r--) {
-    const v = front + r * 0.85;
-    const pts: [number, number][] = [];
-    for (let a = 0; a <= 16; a++) {
-      const t = a / 16;
-      const u = 0.6 + t * (w - 1.2);
-      pts.push([u, v + Math.pow((u - cu) / (w / 2), 2) * -0.7]);
+  const bands = standBands(w, d);
+  type Box = { u0: number; u1: number; v0: number; v1: number };
+  const tier = (b: Box, z: number, along: "u" | "v") => {
+    P.box(b.u0, b.v0, b.u1, b.v1, 0, z, plank);
+    // Planks along the row, and their shadows.
+    const steps = 3;
+    for (let k = 1; k < steps; k++) {
+      const t = k / steps;
+      if (along === "u") {
+        const v = b.v0 + (b.v1 - b.v0) * t;
+        P.line([b.u0, v, z], [b.u1, v, z], "#8a5a32", 0.7);
+      } else {
+        const u = b.u0 + (b.u1 - b.u0) * t;
+        P.line([u, b.v0, z], [u, b.v1, z], "#8a5a32", 0.7);
+      }
     }
-    for (let k = 0; k < pts.length - 1; k++) {
-      const [u0, v0] = pts[k];
-      const [u1, v1] = pts[k + 1];
-      P.poly(
-        [
-          [u0, v0, 4],
-          [u1, v1, 4],
-          [u1, v1 + 0.25, 4],
-          [u0, v0 + 0.25, 4],
-        ],
-        "#a8743f",
-        "#6b4423",
-        0.6,
-      );
-      P.poly(
-        [
-          [u0, v0 + 0.25, 0],
-          [u1, v1 + 0.25, 0],
-          [u1, v1 + 0.25, 4],
-          [u0, v0 + 0.25, 4],
-        ],
-        "#7a5230",
-      );
+  };
+  const railing = (
+    b: Box,
+    z: number,
+    side: "back" | "left" | "right" | "front",
+  ) => {
+    const posts: [number, number][] = [];
+    if (side === "front" || side === "back") {
+      const v = side === "front" ? b.v1 - 0.05 : b.v0 + 0.05;
+      for (let u = b.u0 + 0.1; u <= b.u1; u += 0.6) posts.push([u, v]);
+    } else {
+      const u = side === "left" ? b.u0 + 0.05 : b.u1 - 0.05;
+      for (let v = b.v0 + 0.1; v <= b.v1; v += 0.6) posts.push([u, v]);
     }
+    for (const [u, v] of posts)
+      P.box(u - 0.04, v - 0.04, u + 0.04, v + 0.04, z, z + 9, logs);
+    const [a, c] = [posts[0], posts[posts.length - 1]];
+    P.line([a[0], a[1], z + 8], [c[0], c[1], z + 8], "#5a3a20", 1.2);
+  };
+  const outer = bands.length - 1;
+  // Back to front: the back and left stands from the outside in, then the
+  // stage, then the right and front stands from the inside out.
+  for (const band of [...bands].reverse()) {
+    tier(band.back, band.height, "u");
+    if (band.r === outer) railing(band.back, band.height, "back");
   }
-  // The stage's edge; the stage floor shows the preview (HTML).
-  P.box(0.2, front - 0.25, w - 0.2, front, 0, 6, {
-    top: "#b98a52",
-    left: "#8a5a32",
-    right: "#6b4423",
-    line: "#4a3320",
-  });
-  // The back wall with its curtain, and two towers at the sides.
-  P.box(0.1, 0, w - 0.1, 0.3, 0, 96, {
-    top: "#5a3a20",
-    left: "#6b4423",
-    right: "#4a3018",
-    line: "#3a2614",
-  });
-  P.poly(
-    [
-      [0.5, 0.31, 6],
-      [w - 0.5, 0.31, 6],
-      [w - 0.5, 0.31, 86],
-      [0.5, 0.31, 86],
-    ],
-    "#9b2c35",
-  );
-  for (let u = 0.6; u < w - 0.5; u += 0.22)
-    P.line([u, 0.31, 7], [u, 0.31, 85], "rgba(60, 10, 15, 0.45)", 1.4);
-  P.poly(
-    [
-      [0.4, 0.31, 84],
-      [w - 0.4, 0.31, 84],
-      [w - 0.4, 0.31, 92],
-      [0.4, 0.31, 92],
-    ],
-    "#d8b45a",
-  );
-  for (const u of [0.1, w - 0.6])
-    P.box(u, 0, u + 0.5, front, 0, 104, {
-      top: "#8a5a32",
-      left: "#7a4a28",
-      right: "#5a3418",
-      line: "#3a2614",
-    });
+  for (const band of [...bands].reverse()) {
+    tier(band.left, band.height, "v");
+    if (band.r === outer) railing(band.left, band.height, "left");
+  }
+  for (const band of bands) {
+    tier(band.right, band.height, "v");
+    if (band.r === outer) railing(band.right, band.height, "right");
+  }
+  for (const band of bands) {
+    tier(band.front, band.height, "u");
+    if (band.r === outer) railing(band.front, band.height, "front");
+  }
 }
 
 function kloster(P: Painter, w: number, d: number) {

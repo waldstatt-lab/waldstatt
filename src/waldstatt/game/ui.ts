@@ -8,12 +8,13 @@
  * the menu asks first. Nodes are created with the DOM API, never from HTML
  * strings.
  */
-import { balance, groups, kinds, type Kind } from "./config";
+import { balance, groups, kinds, STAGE, type Kind } from "./config";
 import type { MapHandlers, Tile } from "./input";
 import { PLAN } from "./iso";
 import type { WorldLayer } from "./overlay";
 import type { Renderer } from "./render";
 import { hints, type Game } from "./sim";
+import { STAGE_RES, type Stage } from "./stage";
 import type { Building } from "./state";
 import type { GameInfo } from "./texts";
 import { damSite } from "./world";
@@ -46,6 +47,8 @@ export interface UiOptions {
   renderer: Renderer;
   games: GameInfo[];
   world: WorldLayer;
+  /** The theatre's stage and its corner in tiles, if a theatre stands. */
+  stage(): { stage: Stage; x: number; y: number } | null;
   reset(): void;
   moved(): void;
 }
@@ -63,7 +66,7 @@ export class Ui {
   private reading: {
     b: Building;
     back: { x: number; y: number; zoom: number };
-    /** The zoom the text was opened at; zooming well out of it leaves. */
+    /** The closest zoom so far; zooming out from it leads back to the map. */
     zoom: number;
   } | null = null;
   private suppliesDirty = true;
@@ -178,8 +181,11 @@ export class Ui {
 
   frame() {
     const r = this.o.renderer;
-    if (this.reading && !r.flying && r.camera.zoom < this.reading.zoom * 0.7)
-      this.leaveReading(true);
+    if (this.reading && !r.flying) {
+      // Zooming in is fine; any zooming out turns back to the map.
+      this.reading.zoom = Math.max(this.reading.zoom, r.camera.zoom);
+      if (r.camera.zoom < this.reading.zoom * 0.97) this.leaveReading(true);
+    }
     if (!this.suppliesDirty) return;
     this.suppliesDirty = false;
     const s = this.o.game.state;
@@ -424,8 +430,30 @@ export class Ui {
 
   // --- Map handlers -------------------------------------------------------------
 
+  /** The stage, while the view is turned onto the theatre. */
+  private playing() {
+    if (this.reading?.b.kind !== "theater") return null;
+    return this.o.stage();
+  }
+
   handlers(): MapHandlers {
     return {
+      press: (at) => {
+        const on = this.playing();
+        if (!on || this.placing) return false;
+        const result = on.stage.pressAt(
+          (at.x - on.x) * STAGE_RES,
+          (at.y - on.y) * STAGE_RES,
+        );
+        if (result.open) window.location.href = result.open;
+        return result.handled;
+      },
+      release: () => this.o.stage()?.stage.release(),
+      key: (event, down) => {
+        const on = this.playing();
+        if (!on || this.placing || event.key === "Escape") return false;
+        return on.stage.key(event, down);
+      },
       sawing: () => this.tool === "saw" && !this.placing && !this.reading,
       tap: (tile, pointer) => {
         if (this.placing) {
@@ -502,12 +530,7 @@ export class Ui {
   private activateTile(tile: Tile) {
     const g = this.o.game;
     const b = g.buildingAt(tile.x, tile.y);
-    if (this.reading) {
-      // Another text or the stage is read in turn; anything else leads back.
-      if (b && b.id !== this.reading.b.id && this.readable(b)) this.read(b);
-      else if (!b || b.id !== this.reading.b.id) this.leaveReading();
-      return;
-    }
+    if (this.reading && b?.id === this.reading.b.id) return;
     if (this.tool === "demolish") {
       if (b) this.demolish(b);
       else {
@@ -601,7 +624,15 @@ export class Ui {
   /** Turns the view top-down onto a text, a plate or the stage. */
   private read(b: Building) {
     const r = this.o.renderer;
-    const area = this.o.world.area(b.id) ?? { x: b.x, y: b.y, w: b.w, h: b.h };
+    const area =
+      b.kind === "theater"
+        ? {
+            x: b.x + STAGE.u0,
+            y: b.y + STAGE.v0,
+            w: STAGE.u1 - STAGE.u0,
+            h: STAGE.v1 - STAGE.v0,
+          }
+        : (this.o.world.area(b.id) ?? { x: b.x, y: b.y, w: b.w, h: b.h });
     const box = this.mapHost().getBoundingClientRect();
     // Clear of the back button above and the toolbox below.
     const usable = { w: box.width * 0.92, h: (box.height - 200) * 0.95 };
@@ -628,11 +659,9 @@ export class Ui {
     this.o.moved();
     const what =
       b.kind === "theater"
-        ? "Die Bühne. Die Tasten aus der Steuerung spielen an."
+        ? "Die Bühne. Tipp die Schilder an oder spiel mit den Tasten aus der Steuerung."
         : `${this.label(b.kind, b.game)}.`;
     this.announce(`${what} Escape oder «Zurück zur Karte» kehrt zurück.`);
-    if (b.kind === "theater")
-      window.setTimeout(() => this.o.world.play(b.id), 750);
   }
 
   /**
@@ -643,6 +672,7 @@ export class Ui {
     if (!this.reading) return;
     const back = this.reading.back;
     this.reading = null;
+    this.o.stage()?.stage.release();
     this.backBar.hidden = true;
     const r = this.o.renderer;
     this.o.renderer.flyTo(

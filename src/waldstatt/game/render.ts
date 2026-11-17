@@ -9,7 +9,8 @@
  *   to front.
  *
  * The view is usually isometric. To read a text or play on the stage it turns
- * into a top-down plan with north up; upright things fade meanwhile. The
+ * into a top-down plan with north up: while it turns, the upright pictures
+ * blend into top-down ones (plan.ts) drawn on the ground. The
  * camera position is in tiles; zoom scales world units to screen pixels.
  */
 import {
@@ -36,8 +37,16 @@ import {
   workerFrame,
 } from "./art";
 import { kinds } from "./config";
+import {
+  PLAN_RES,
+  planPicture,
+  planTreeAtlas,
+  planTreeSize,
+  planWorker,
+} from "./plan";
 import { apply, invert, iso, projection, TH, type Linear } from "./iso";
 import type { Game, Placement } from "./sim";
+import { STAGE_RES, type Stage } from "./stage";
 import { key } from "./sim";
 import type { Building, Camera } from "./state";
 import { lines, type Lake } from "./waters";
@@ -81,11 +90,14 @@ interface ChunkView {
   ground: Graphics;
   trees: Map<string, Upright>;
   marks: Map<string, Upright>;
+  /** The trees from above, made only while the view is not isometric. */
+  planTrees: Map<string, Sprite> | null;
   dirty: boolean;
 }
 
 interface BuildingView {
   upright: Upright;
+  plan: Container;
   signature: string;
   bar?: Graphics;
 }
@@ -142,6 +154,18 @@ export class Renderer {
   private lakeLayer = new Graphics();
   private lake = new Graphics();
   private marksOnGround = new Container();
+  /** Buildings, trees and Waldleute from above, for the plan view. */
+  private planLayer = new Container();
+  private planBuildings = new Container();
+  private planTreeLayer = new Container();
+  private planWorkerLayer = new Container();
+  private planTrees: Texture[];
+  private planWorkerTexture: Texture;
+  private planWorkers = new Map<number, Sprite>();
+  private planArt = new Map<string, Texture>();
+  /** The theatre's stage, painted on the ground (stage.ts). */
+  private stageLayer = new Container();
+  private stageSprite: Sprite | null = null;
   private previewLayer = new Container();
   private lakePreview = new Graphics();
   private ghost = new Graphics();
@@ -206,6 +230,21 @@ export class Renderer {
       workerFrame.h,
       5,
     );
+    const crowns = Texture.from(planTreeAtlas()).source;
+    this.planTrees = Array.from(
+      { length: 6 },
+      (_, i) =>
+        new Texture({
+          source: crowns,
+          frame: new Rectangle(
+            i * planTreeSize * PLAN_RES,
+            0,
+            planTreeSize * PLAN_RES,
+            planTreeSize * PLAN_RES,
+          ),
+        }),
+    );
+    this.planWorkerTexture = Texture.from(planWorker());
     const mark = ribbon();
     this.ribbonArt = {
       texture: Texture.from(mark.canvas),
@@ -235,6 +274,8 @@ export class Renderer {
       this.riverLayer,
       this.lakeLayer,
       this.lake,
+      this.planLayer,
+      this.stageLayer,
       this.marksOnGround,
       this.previewLayer,
       this.ghost,
@@ -242,6 +283,12 @@ export class Renderer {
       this.selection,
       this.cursor,
     );
+    this.planLayer.addChild(
+      this.planBuildings,
+      this.planTreeLayer,
+      this.planWorkerLayer,
+    );
+    this.planLayer.visible = false;
     this.ghostSprite.alpha = 0.7;
     this.ghostSprite.visible = false;
     this.upright.addChild(
@@ -299,10 +346,16 @@ export class Renderer {
     return { x: width / 2 - c.x * z, y: height / 2 - c.y * z, z };
   }
 
-  /** The camera, for the HTML layer: offset, zoom and projection. */
-  transform(): { x: number; y: number; zoom: number; L: Linear } {
+  /** The camera, for the HTML layer: offset, zoom, projection and how far turned. */
+  transform(): {
+    x: number;
+    y: number;
+    zoom: number;
+    L: Linear;
+    plan: number;
+  } {
     const o = this.offset();
-    return { x: o.x, y: o.y, zoom: o.z, L: this.L };
+    return { x: o.x, y: o.y, zoom: o.z, L: this.L, plan: ease(this.plan) };
   }
 
   screenToTile(sx: number, sy: number): { x: number; y: number } {
@@ -350,10 +403,13 @@ export class Renderer {
     this.plan = plan;
     this.L = projection(ease(plan));
     this.relayout();
-    const fade = 1 - 0.7 * ease(plan);
-    this.objects.alpha = fade;
-    this.markLayer.alpha = fade;
-    this.workerLayer.alpha = fade;
+    // The upright pictures blend into the ones from above.
+    const e = ease(plan);
+    this.upright.alpha = 1 - e;
+    this.upright.visible = e < 0.999;
+    this.planLayer.alpha = e;
+    this.planLayer.visible = e > 0.001;
+    if (e <= 0.001 && !this.flight) this.dropPlanTrees();
     this.lastCamera = "";
   }
 
@@ -414,6 +470,8 @@ export class Renderer {
         this.drawGround(chunk);
       }
     }
+    if (this.planLayer.visible)
+      for (const chunk of this.chunks.values()) this.ensurePlanTrees(chunk);
     this.updateWorkers();
     for (const b of this.game.state.buildings) {
       const view = this.buildings.get(b.id);
@@ -486,6 +544,7 @@ export class Renderer {
       ground: new Graphics(),
       trees: new Map(),
       marks: new Map(),
+      planTrees: null,
       dirty: false,
     };
     this.drawGround(chunk);
@@ -503,6 +562,8 @@ export class Renderer {
     chunk.ground.destroy();
     for (const u of chunk.trees.values()) u.object.destroy();
     for (const u of chunk.marks.values()) u.object.destroy();
+    if (chunk.planTrees)
+      for (const sprite of chunk.planTrees.values()) sprite.destroy();
     this.chunks.delete(key(chunk.cx, chunk.cy));
   }
 
@@ -645,6 +706,32 @@ export class Renderer {
     if (tree instanceof Sprite) tree.tint = 0xffc4b0;
   }
 
+  /** The crowns of a chunk's trees from above, made when first needed. */
+  private ensurePlanTrees(chunk: ChunkView) {
+    if (chunk.planTrees) return;
+    chunk.planTrees = new Map();
+    for (const [k, u] of chunk.trees) {
+      const [x, y] = k.split(",").map(Number);
+      const sprite = new Sprite(this.planTrees[treeVariant(x, y)]);
+      const size = 0.8 + hash(x, y, 12) * 0.3;
+      sprite.anchor.set(0.5);
+      sprite.scale.set(size / PLAN_RES);
+      sprite.rotation = hash(x, y, 14) * Math.PI * 2;
+      sprite.position.set(u.x, u.y);
+      if (this.game.isMarked(x, y)) sprite.tint = 0xff9c88;
+      this.planTreeLayer.addChild(sprite);
+      chunk.planTrees.set(k, sprite);
+    }
+  }
+
+  private dropPlanTrees() {
+    for (const chunk of this.chunks.values()) {
+      if (!chunk.planTrees) continue;
+      for (const sprite of chunk.planTrees.values()) sprite.destroy();
+      chunk.planTrees = null;
+    }
+  }
+
   /** A tree was felled, marked or unmarked. */
   tree(x: number, y: number) {
     const chunk = this.chunkAt(x, y);
@@ -655,7 +742,11 @@ export class Renderer {
       tree.object.destroy();
       chunk.trees.delete(k);
       chunk.dirty = true;
+      chunk.planTrees?.get(k)?.destroy();
+      chunk.planTrees?.delete(k);
     }
+    const crown = chunk.planTrees?.get(k);
+    if (crown) crown.tint = this.game.isMarked(x, y) ? 0xff9c88 : 0xffffff;
     const mark = chunk.marks.get(k);
     const marked = this.game.isMarked(x, y);
     if (mark && !marked) {
@@ -698,6 +789,16 @@ export class Renderer {
     return art;
   }
 
+  private planTexture(b: Pick<Building, "kind" | "w" | "h" | "game">): Texture {
+    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}`;
+    let texture = this.planArt.get(name);
+    if (!texture) {
+      texture = Texture.from(planPicture(b.kind, b.w, b.h, b.game));
+      this.planArt.set(name, texture);
+    }
+    return texture;
+  }
+
   private dress(sprite: Sprite, art: Art) {
     sprite.texture = art.texture;
     sprite.scale.set(1 / RES);
@@ -714,6 +815,7 @@ export class Renderer {
     if (existing && !removed && existing.signature === signature) return;
     if (existing) {
       existing.upright.object.destroy({ children: true });
+      existing.plan.destroy({ children: true });
       this.buildings.delete(b.id);
     }
     this.repaintFootprint(b);
@@ -732,12 +834,26 @@ export class Renderer {
       depth: 0.1,
       sort: { x: b.x + b.w - 0.5, y: b.y + b.h - 0.5 },
     };
-    const view: BuildingView = { upright, signature };
+    const plan = new Container();
+    plan.position.set(b.x, b.y);
+    const top = new Sprite(this.planTexture(b));
+    top.scale.set(1 / PLAN_RES);
+    plan.addChild(top);
+    this.planBuildings.addChild(plan);
+    const view: BuildingView = { upright, plan, signature };
     if (b.state === "drowned") {
       container.alpha = 0.32;
       sprite.tint = 0x7fb0e0;
+      plan.alpha = 0.32;
+      top.tint = 0x7fb0e0;
     } else if (b.state === "site") {
       sprite.alpha = 0.4;
+      top.alpha = 0.4;
+      plan.addChild(
+        new Graphics()
+          .rect(0.1, 0.1, b.w - 0.2, b.h - 0.2)
+          .stroke({ width: 0.1, color: 0x8a5a32 }),
+      );
       container.addChild(this.scaffold(b));
       view.bar = new Graphics();
       container.addChild(view.bar);
@@ -800,8 +916,10 @@ export class Renderer {
 
   /** Rebuilds every building picture, e.g. after the flood. */
   rebuildAll() {
-    for (const view of this.buildings.values())
+    for (const view of this.buildings.values()) {
       view.upright.object.destroy({ children: true });
+      view.plan.destroy({ children: true });
+    }
     this.buildings.clear();
     for (const b of this.game.state.buildings) this.building(b);
   }
@@ -840,6 +958,73 @@ export class Renderer {
         this.workerSprites.delete(id);
       }
     }
+    // The same Waldleute from above, while the plan shows.
+    for (const w of this.game.workers) {
+      let top = this.planWorkers.get(w.id);
+      if (!top) {
+        top = new Sprite(this.planWorkerTexture);
+        top.anchor.set(0.5);
+        top.scale.set(1 / PLAN_RES);
+        this.planWorkerLayer.addChild(top);
+        this.planWorkers.set(w.id, top);
+      }
+      top.position.set(w.x, w.y - 0.15);
+      top.rotation = w.facing > 0 ? 0 : Math.PI;
+    }
+    for (const [id, top] of this.planWorkers) {
+      if (!seen.has(id)) {
+        top.destroy();
+        this.planWorkers.delete(id);
+      }
+    }
+  }
+
+  // --- The stage -------------------------------------------------------------
+
+  /** Lays the stage's picture on the ground at (x, y), or removes it. */
+  setStage(stage: Stage | null, x = 0, y = 0) {
+    if (this.stageSprite) {
+      this.stageSprite.texture.destroy(true);
+      this.stageSprite.destroy();
+      this.stageSprite = null;
+    }
+    if (!stage) return;
+    const sprite = new Sprite(Texture.from(stage.canvas));
+    sprite.scale.set(1 / STAGE_RES);
+    sprite.position.set(x, y);
+    this.stageLayer.addChild(sprite);
+    this.stageSprite = sprite;
+  }
+
+  /** Uploads the stage's picture when it changed. */
+  updateStage(stage: Stage) {
+    if (!this.stageSprite || !stage.dirty) return;
+    this.stageSprite.texture.source.update();
+    stage.dirty = false;
+  }
+
+  /** Whether a rectangle of tiles shows on screen. */
+  onScreen(x: number, y: number, w: number, h: number): boolean {
+    const o = this.offset();
+    const { width, height } = this.app.screen;
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const [cx, cy] of [
+      [x, y],
+      [x + w, y],
+      [x, y + h],
+      [x + w, y + h],
+    ]) {
+      const p = apply(this.L, cx, cy);
+      xs.push(o.x + p.x * o.z);
+      ys.push(o.y + p.y * o.z);
+    }
+    return (
+      Math.max(...xs) > 0 &&
+      Math.min(...xs) < width &&
+      Math.max(...ys) > 0 &&
+      Math.min(...ys) < height
+    );
   }
 
   // --- Overlays -------------------------------------------------------------

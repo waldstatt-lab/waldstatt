@@ -7,13 +7,11 @@
  */
 import { Application } from "pixi.js";
 import { href } from "../../lib/url";
-import { kinds, type Kind } from "./config";
+import { kinds, STAGE, type Kind } from "./config";
 import { attachInput } from "./input";
-import { carGame } from "./previewCar";
-import { motoGame } from "./previewMoto";
 import { textLength, WorldLayer } from "./overlay";
-import { mountPreview } from "./preview";
 import { Renderer } from "./render";
+import { Stage } from "./stage";
 import { Game, type Events } from "./sim";
 import { clearSaved, load, save } from "./state";
 import { readGames } from "./texts";
@@ -46,6 +44,31 @@ async function start(root: HTMLElement) {
 
   // The rules exist before the picture and interface; their events wait.
   let renderer: Renderer | undefined;
+  // The theatre's stage, while a finished theatre stands.
+  let stage: Stage | null = null;
+  let stageAt = { x: 0, y: 0 };
+  const syncStage = () => {
+    const theatre = game.state.buildings.find(
+      (b) => b.kind === "theater" && b.state === "done",
+    );
+    if (!theatre) {
+      if (stage) renderer?.setStage(null);
+      stage = null;
+      return;
+    }
+    const at = { x: theatre.x + STAGE.u0, y: theatre.y + STAGE.v0 };
+    if (!stage || at.x !== stageAt.x || at.y !== stageAt.y) {
+      stage = new Stage(
+        STAGE.u1 - STAGE.u0,
+        STAGE.v1 - STAGE.v0,
+        () => games.filter((g) => game.done("spielhaus", g.id)),
+        () => still.matches,
+        (text) => ui?.announce(text),
+      );
+      stageAt = at;
+      renderer?.setStage(stage, at.x, at.y);
+    } else stage.refresh();
+  };
   let world: WorldLayer | undefined;
   let ui: Ui | undefined;
   let saveTimer = 0;
@@ -75,7 +98,7 @@ async function start(root: HTMLElement) {
     building: (b, removed) => {
       renderer?.building(b, removed);
       world?.building(b, removed);
-      if (b.kind === "spielhaus") world?.refreshStage();
+      if (b.kind === "theater" || b.kind === "spielhaus") syncStage();
       ui?.building(b, !!removed);
       if (!ui || removed) return;
       if (b.state === "done" && !announced.has(b.id)) {
@@ -137,25 +160,14 @@ async function start(root: HTMLElement) {
   app.canvas.setAttribute("aria-hidden", "true");
 
   renderer = new Renderer(app, game, () => still.matches);
-  world = new WorldLayer(
-    host,
-    game,
-    games,
-    root.querySelector<HTMLTemplateElement>("template[data-stage]"),
-    (section, id) =>
-      id === "moto-devil"
-        ? mountPreview(section, motoGame)
-        : id === "car-drive"
-          ? mountPreview(section, carGame)
-          : false,
-    (b) => ui?.focus(b),
-  );
+  world = new WorldLayer(host, game, games, (b) => ui?.focus(b));
   ui = new Ui({
     root,
     game,
     renderer,
     games,
     world,
+    stage: () => (stage ? { stage, x: stageAt.x, y: stageAt.y } : null),
     reset: () => {
       saving = false;
       window.clearTimeout(saveTimer);
@@ -164,6 +176,7 @@ async function start(root: HTMLElement) {
     },
     moved: scheduleSave,
   });
+  syncStage();
   attachInput(host, renderer, ui.handlers());
 
   for (const element of root.querySelectorAll<HTMLElement>("[data-ready-show]"))
@@ -184,6 +197,13 @@ async function start(root: HTMLElement) {
     const dt = Math.min(0.1, ticker.deltaMS / 1000);
     game.step(dt, still.matches);
     renderer?.frame(dt);
+    if (stage && renderer) {
+      const area = { w: STAGE.u1 - STAGE.u0, h: STAGE.v1 - STAGE.v0 };
+      if (renderer.onScreen(stageAt.x, stageAt.y, area.w, area.h)) {
+        stage.frame(dt);
+        renderer.updateStage(stage);
+      }
+    }
     if (renderer && world)
       world.frame(renderer.transform(), app.screen.width, app.screen.height);
     ui?.frame();

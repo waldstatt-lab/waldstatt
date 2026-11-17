@@ -18,50 +18,12 @@ const rendered = await Promise.all(
   games.map(async (game) => ({ game, Content: (await render(game)).Content })),
 );
 
-const previews: Record<
-  string,
-  {
-    help: string;
-    keys: { action: string; label: string; text: string }[];
-    stats: { name: string; label: string; unit?: string }[];
-  }
-> = {
-  "moto-devil": {
-    help: "Eine kleine Übungsstrecke auf der Bühne, nicht das Spiel: Gib Gas, spring über die Rampe, kipp das Motorrad bis zum Salto und halte die Leertaste nach dem Sprung für den Düsenschub. Fallen gibt es hier keine – die warten im echten Spiel.",
-    keys: [
-      { action: "gas", label: "W / ↑", text: "Gas" },
-      { action: "brake", label: "S / ↓", text: "Bremsen" },
-      { action: "back", label: "A / ←", text: "Kippen" },
-      { action: "forward", label: "D / →", text: "Kippen" },
-      { action: "jump", label: "Leertaste", text: "Springen, halten: Düse" },
-      { action: "turn", label: "E", text: "Umdrehen" },
-      { action: "restart", label: "R", text: "Neu" },
-    ],
-    stats: [{ name: "saltos", label: "Saltos" }],
-  },
-  "car-drive": {
-    help: "Eine kleine Übungsstrecke auf der Bühne, nicht das Spiel: Wechsle mit den Tasten aus dem Spiel die Spur und zünde den Boost, wenn die Strasse frei ist. Blinkende Autos wechseln gleich die Spur.",
-    keys: [
-      { action: "left", label: "A / ←", text: "Links" },
-      { action: "right", label: "D / →", text: "Rechts" },
-      { action: "boost", label: "Leertaste", text: "Boost" },
-      { action: "restart", label: "R", text: "Neustart" },
-    ],
-    stats: [
-      { name: "metres", label: "Strecke", unit: "m" },
-      { name: "level", label: "Level" },
-      { name: "coins", label: "Münzen" },
-    ],
-  },
-};
-
 const gameData = games.map((game) => ({
   id: game.id,
   title: game.data.title,
   tagline: game.data.tagline,
   playUrl: game.data.playUrl,
   sourceUrl: game.data.sourceUrl,
-  preview: Object.hasOwn(previews, game.id),
 }));
 // Inside <script>, "<" could end the element early; JSON allows it escaped.
 const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
@@ -260,61 +222,6 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
       </div>
     </form>
   </dialog>
-
-  <!-- The theatre's previews; overlay.ts clones them onto the stage on the map. -->
-  <template data-stage>
-    {gameData
-      .filter((game) => game.preview)
-      .map((game) => {
-        const preview = previews[game.id];
-        const id = `wg-preview-${game.id}`;
-        return (
-          <section
-            class="wg-preview"
-            tabindex="0"
-            role="group"
-            aria-labelledby={`${id}-title`}
-            aria-describedby={`${id}-help`}
-            data-preview={game.id}
-            data-label-demo="Vorführung – drück eine Taste, dann spielst du."
-            data-label-manual="Du spielst."
-          >
-            <div class="wg-preview-screen">
-              <canvas aria-hidden="true" />
-            </div>
-            <div class="wg-preview-panel">
-              <h3 id={`${id}-title`}>{game.title}</h3>
-              <p id={`${id}-help`}>{preview.help}</p>
-              <p class="wg-preview-stats">
-                {preview.stats.map((stat) => (
-                  <span>
-                    {stat.label}: <strong data-stat={stat.name}>0</strong>
-                    {stat.unit && ` ${stat.unit}`}
-                  </span>
-                ))}
-              </p>
-              <p class="wg-preview-mode">
-                <span data-preview-mode />
-                <span data-preview-status />
-              </p>
-              <div class="wg-preview-keys">
-                {preview.keys.map((key) => (
-                  <button
-                    type="button"
-                    class="wg-key"
-                    tabindex="-1"
-                    data-action={key.action}
-                  >
-                    <kbd>{key.label}</kbd> {key.text}
-                  </button>
-                ))}
-              </div>
-              <p class="sr-only" aria-live="polite" data-preview-live />
-            </div>
-          </section>
-        );
-      })}
-  </template>
 
   <p class="sr-only" aria-live="polite" data-live></p>
 

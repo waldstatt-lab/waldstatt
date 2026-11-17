@@ -23,7 +23,7 @@ the map. Its folder `src/waldstatt/` holds:
 
 | Path | Contents |
 | --- | --- |
-| `Game.astro` | The page: map host, toolbox, menus, the back button, the confirmation for «Neu beginnen», the theatre's preview sections as a template, and inert `<template>`s with the Ortstafel, the Chronik and each game's rendered Markdown |
+| `Game.astro` | The page: map host, toolbox, menus, the back button, the confirmation for «Neu beginnen», and inert `<template>`s with the Ortstafel, the Chronik and each game's rendered Markdown |
 | `Forest.astro` | The still picture: the start of the generated forest as SVG, shown until the game is ready and instead of it |
 | `Icon.astro`, `icons.ts` | Pixel icons as colour grids for the toolbox, the Waldmensch's portrait and the app icon |
 | `png.ts` | A small PNG encoder for the app icons at build time |
@@ -35,12 +35,14 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/state.ts` | The save in `localStorage`: versioned JSON, validated on load, reset by key prefix |
 | `game/sim.ts` | The rules: marking and felling, Waldleute and their tasks, building sites, sheep and the printing press, the flood, the Waldmensch's hints |
 | `game/texts.ts` | Reads the templates and splits each text into sections at its `<h2>` headings |
-| `game/art.ts` | The painted art on canvases at twice the resolution: trees, Waldleute, buildings in the isometric view, ground textures |
-| `game/render.ts` | PixiJS: the ground in tile units under the view's projection (textured tiles in chunks of 16 × 16, rivers, lakes, placing, sawing and cursor overlays), and trees, buildings and Waldleute upright on top, sorted back to front; the camera's flights and the turn between the views |
-| `game/overlay.ts` | The HTML lying on the map under the same projection: texts, Spielhaus plates and the theatre's stage; upright pins for water names and status labels; and the measuring of texts that sets their footprint |
+| `game/art.ts` | The painted art for the isometric view on canvases at twice the resolution: trees, Waldleute, buildings, the amphitheatre's stands, ground textures |
+| `game/plan.ts` | The same buildings, trees and Waldleute seen from straight above, for the plan view |
+| `game/render.ts` | PixiJS: the ground in tile units under the view's projection (textured tiles in chunks of 16 × 16, rivers, lakes, the top-down art, the stage, placing, sawing and cursor overlays), and trees, buildings and Waldleute upright on top, sorted back to front; the camera's flights and the turn between the views |
+| `game/overlay.ts` | The HTML lying on the map under the same projection: texts and Spielhaus plates; upright pins for water names and status labels; and the measuring of texts that sets their footprint |
+| `game/stage.ts` | The theatre's stage, painted into one canvas on the amphitheatre's floor: the preview, a status line and wooden signs for the programme, the keys and the real game |
 | `game/input.ts` | Pointer, touch, wheel and keyboard input on the map |
 | `game/ui.ts` | The HTML interface, reading on the map, and announcements |
-| `game/preview.ts`, `previewMoto.ts`, `previewCar.ts` | The theatre's previews, copied from the studio website and repainted as a stage set |
+| `game/preview.ts`, `previewMoto.ts`, `previewCar.ts` | The previews' rules, copied from the studio website and repainted as a stage set |
 | `game/main.ts` | Start-up, saving and the service worker registration |
 
 `src/pages/` holds the home page and three endpoints: the web
@@ -91,30 +93,39 @@ either turns the view to its text (below) or shows a short status label over it
 for a few seconds. Choosing the dam names the buildings that will drown in the
 placing bar; only «Neu beginnen» in the menu asks for confirmation.
 
-**Content on the map.** What visitors read and use lies on the ground as real
-HTML, cloned from the templates, in a layer under the same projection as the
-ground, at 32 text pixels per tile. Each text takes as much ground as it needs:
-the Ortstafel (the name), the Chronik (the about texts), each game's Spielidee
-(its Markdown without the controls) and Anleitung (the controls table) are as
-long as their text, measured once in a hidden copy with the map's styles
+**Content on the map.** What visitors read lies on the ground as real HTML,
+cloned from the templates, in a layer under the same projection as the ground,
+at 32 text pixels per tile. Each text takes as much ground as it needs: the
+Ortstafel (the name), the Chronik (the about texts), each game's Spielidee (its
+Markdown without the controls) and Anleitung (the controls table) are as long
+as their text, measured once in a hidden copy with the map's styles
 (`textLength()`), so the longer the text, the more forest must go. Scrolls lie
 between two rollers, the Ortstafel on a board, the Anleitung on a notice board.
-Each Spielhaus has a plate in front with «Spielen» and «Quellcode». The
-theatre's stage lies on its floor before a curtained back wall and plays the
-previews of the games whose Spielhaus stands: the rule sets of the studio website's
-previews, copied into the Waldstatt and redrawn as a painted stage.
+Each Spielhaus has a plate in front with «Spielen» and «Quellcode».
+
+The theatre is a wooden amphitheatre: tiered stands with railings rise all
+round a stage in its middle. The stage is painted on the map, not HTML
+(`stage.ts`): a canvas texture lying on the amphitheatre's floor, so the stands
+in front of it hide its edge. It shows the preview of a game whose Spielhaus
+stands, a status line, and wooden signs for the programme, for each key of the
+game's controls and for the real game. The previews are the rule sets of
+the studio website's previews, copied into the Waldstatt and redrawn as a painted stage; a
+demonstration plays until somebody takes over, and again after eight idle
+seconds. The stage runs only while it is on screen.
 
 A tap on a text, a plate or the stage turns the view: the camera flies to it
 while the isometric view blends into a top-down plan with north up
 (`projection()` in `iso.ts`), so the text lies upright and fills the width at a
-comfortable size; trees, buildings and Waldleute fade meanwhile. On the stage
-the preview takes focus, and the keys from the controls table play it. The
-button «Zurück zur Karte», Escape, a tap elsewhere or zooming well out of the
-text turns the view back. The monastery is pure prestige, drawn without
-religious symbols. The dam can only stand where the Sihl leaves the basin;
-choosing it shows the future Sihlsee. When it is finished, the basin floods for
-good: trees in it disappear, and drowned buildings stay as ruins under the
-water.
+comfortable size. Meanwhile trees, buildings and Waldleute blend from their
+isometric pictures into ones seen from straight above (`plan.ts`). In the plan
+the map can be dragged and zoomed in; zooming out, the button «Zurück zur
+Karte» or Escape turns the view back. On the stage, taps on its signs press
+them (held while the pointer stays down), the keys from the controls table
+play, and the long sign opens the real game. The monastery is pure prestige,
+drawn without religious symbols. The dam can only stand where the Sihl leaves
+the basin; choosing it shows the future Sihlsee. When it is finished, the basin
+floods for good: trees in it disappear, and drowned buildings stay as ruins
+under the water.
 
 **State and offline.** The save is one versioned JSON document under
 `waldstatt-games/save`: supplies, felled trees as a bitset per chunk, marks,
@@ -134,9 +145,11 @@ offline. The worker is not registered in development.
 
 **Access.** The map is a focusable `role="application"`: arrow keys move a
 cursor tile, Shift and arrows pan, + and − zoom, Enter or Space applies the tool
-or opens a building, Escape cancels; keys on the stage or a sign belong to them.
-Every tool, menu item and link is a real button or link with a German name;
-status, finished buildings and the Waldmensch's hints are announced politely,
+or opens a building, Escape cancels. While the view is turned onto the stage,
+the keys from the game's controls play it instead. Every tool, menu item and
+link is a real button or link with a German name; status, finished buildings,
+the stage's status while somebody plays and the Waldmensch's hints are
+announced politely,
 and the texts on the map are in the page as a region «Im Wald». With reduced
 motion Waldleute do not walk or swing their tools, and the previews play no
 demonstration. Screen-reader users and search engines can hardly reach the

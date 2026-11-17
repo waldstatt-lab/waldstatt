@@ -19,7 +19,6 @@ export interface GameInfo {
   tagline: string;
   playUrl: string;
   sourceUrl: string;
-  preview: boolean;
 }
 
 function template(key: string): HTMLTemplateElement | null {

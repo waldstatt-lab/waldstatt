@@ -2,12 +2,13 @@
  * The HTML on the map. What visitors read and use lies on the ground as real
  * text under the same projection as the ground, so it takes as much space on
  * the map as it needs: scroll texts, the Ortstafel and printed notices on
- * their footprint, each Spielhaus's plate with its links in front of it, and
- * the theatre's stage with the previews. Pins stand upright over the map:
+ * their footprint, and each Spielhaus's plate with its links in front of it.
+ * (The theatre's stage is painted on the map: stage.ts.) Pins stand upright
+ * over the map:
  * the water names and short status labels. Nodes are cloned from the page's
  * templates or built with the DOM API, never from HTML strings.
  */
-import { kinds, STAGE, TEXT_MARGIN, TEXT_SCALE, type Kind } from "./config";
+import { kinds, TEXT_MARGIN, TEXT_SCALE, type Kind } from "./config";
 import { apply, type Linear } from "./iso";
 import type { Game } from "./sim";
 import type { Building } from "./state";
@@ -107,14 +108,13 @@ export function textLength(
 }
 
 export class WorldLayer {
-  /** Texts, plates and the stage, lying on the ground. */
+  /** Texts and plates, lying on the ground. */
   readonly root: HTMLElement;
   /** Upright labels over the map. */
   private pins: HTMLElement;
   private items = new Map<number, Item>();
   private waterPins: (Pin & { basin: boolean })[] = [];
   private toasts = new Map<number, { pin: Pin; until: number }>();
-  private mounted = new Set<string>();
   private lastKey = "";
   private clock = 0;
   private L: Linear | null = null;
@@ -123,9 +123,7 @@ export class WorldLayer {
     host: HTMLElement,
     private game: Game,
     private games: GameInfo[],
-    private stageTemplate: HTMLTemplateElement | null,
-    private mountPreview: (section: HTMLElement, game: string) => boolean,
-    /** Called when a plate or the stage is clicked: turn the view to it. */
+    /** Called when a plate is clicked: turn the view to it. */
     private focus: (b: Building) => void,
   ) {
     this.root = el("div", { className: "wg-world" });
@@ -168,16 +166,9 @@ export class WorldLayer {
     const existing = this.items.get(b.id);
     const info = kinds[b.kind];
     const wanted =
-      !removed &&
-      b.state === "done" &&
-      (!!info.fit || b.kind === "spielhaus" || b.kind === "theater");
+      !removed && b.state === "done" && (!!info.fit || b.kind === "spielhaus");
     if (existing) {
-      // The theatre's programme may have grown; then it is built anew.
-      const stale =
-        !wanted ||
-        (b.kind === "theater" &&
-          existing.element.dataset.programme !== this.programme());
-      if (!stale) return;
+      if (wanted) return;
       existing.element.remove();
       this.items.delete(b.id);
     }
@@ -194,30 +185,13 @@ export class WorldLayer {
     this.lastKey = "";
   }
 
-  /** Called when any Spielhaus changes, so the stage's programme follows. */
-  refreshStage() {
-    const theatre = this.game.state.buildings.find(
-      (b) => b.kind === "theater" && b.state === "done",
-    );
-    if (theatre) this.building(theatre);
-  }
-
-  /** The rectangle a building's text or stage covers, in tiles. */
+  /** The rectangle a building's text or plate covers, in tiles. */
   area(id: number): Area | undefined {
     return this.items.get(id)?.area;
   }
 
-  /** Focuses the stage's preview, once the view has turned. */
-  play(id: number) {
-    this.items
-      .get(id)
-      ?.element.querySelector<HTMLElement>("[data-preview]:not([hidden])")
-      ?.focus({ preventScroll: true });
-  }
-
   private make(b: Building): { element: HTMLElement; area: Area } | null {
     if (b.kind === "spielhaus") return this.plate(b);
-    if (b.kind === "theater") return this.stage(b);
     const element = sheet(b.kind, this.gameInfo(b.game));
     if (!element) return null;
     const { side, end } = margins(b.kind);
@@ -259,92 +233,6 @@ export class WorldLayer {
       element: plate,
       area: { x: b.x + 0.1, y: b.y + b.h - 1.35, w: b.w - 0.2, h: 1.25 },
     };
-  }
-
-  private programme(): string {
-    return this.games
-      .filter((g) => g.preview && this.game.done("spielhaus", g.id))
-      .map((g) => g.id)
-      .join(",");
-  }
-
-  /** The stage on the theatre's floor, playing the previews. */
-  private stage(b: Building) {
-    const programme = this.programme();
-    const ids = programme ? programme.split(",") : [];
-    const stage = el(
-      "section",
-      { className: "wg-flat wg-stage" },
-      el("h3", { className: "wg-sheet-title" }, "Theater der Waldstatt"),
-    );
-    stage.dataset.worldUi = "";
-    stage.dataset.programme = programme;
-    stage.setAttribute("aria-label", "Bühne");
-    const area = {
-      x: b.x + STAGE.inset,
-      y: b.y + STAGE.inset,
-      w: b.w - 2 * STAGE.inset,
-      h: STAGE.depth - STAGE.inset - 0.3,
-    };
-    // A click on the stage turns the view to it; then the keys play.
-    stage.addEventListener("click", (event) => {
-      if ((event.target as Element).closest("a, button")) return;
-      this.focus(b);
-    });
-    if (!ids.length) {
-      stage.append(
-        el("p", {}, "Das Programm ist leer: Bau zuerst ein Spielhaus."),
-      );
-      return { element: stage, area };
-    }
-    const buttons = el("div", { className: "wg-stage-programme" });
-    buttons.setAttribute("role", "group");
-    buttons.setAttribute("aria-label", "Programm");
-    const play = el("a", { className: "wg-chip wg-primary" });
-    const shows = new Map<string, HTMLElement>();
-    for (const id of ids) {
-      const source = this.stageTemplate?.content.querySelector<HTMLElement>(
-        `[data-preview="${id}"]`,
-      );
-      if (!source) continue;
-      const show = source.cloneNode(true) as HTMLElement;
-      show.hidden = true;
-      shows.set(id, show);
-      const button = el(
-        "button",
-        { type: "button", className: "wg-chip" },
-        this.gameInfo(id)?.title ?? id,
-      );
-      button.dataset.programme = id;
-      button.addEventListener("click", () => {
-        choose(id);
-        this.focus(b);
-      });
-      buttons.append(button);
-    }
-    const choose = (id: string) => {
-      for (const button of buttons.querySelectorAll<HTMLElement>("button"))
-        button.setAttribute(
-          "aria-pressed",
-          String(button.dataset.programme === id),
-        );
-      for (const [show, element] of shows) {
-        if (show === id && !this.mounted.has(id)) {
-          if (this.mountPreview(element, id)) this.mounted.add(id);
-        }
-        element.hidden = show !== id;
-      }
-      const game = this.gameInfo(id);
-      if (game) {
-        play.href = game.playUrl;
-        play.textContent = `${game.title} richtig spielen`;
-      }
-    };
-    // Previews mounted on an older stage do not carry over.
-    this.mounted.clear();
-    stage.append(buttons, ...shows.values(), el("p", {}, play));
-    choose(ids[0]);
-    return { element: stage, area };
   }
 
   /** A short status label over a building, for a few seconds. */
