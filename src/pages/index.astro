@@ -1,32 +1,12 @@
 ---
-import { getGames } from "../lib/games";
-import GameCard from "../waldstatt/GameCard.astro";
+import Game from "../waldstatt/Game.astro";
 import Layout from "../waldstatt/Layout.astro";
 import meta from "../waldstatt/meta";
-
-const games = await getGames();
 ---
 
-<Layout title={meta.name} description={meta.tagline}>
-  <section class="hero bg-base-200 py-16">
-    <div class="hero-content text-center">
-      <div class="max-w-2xl">
-        <h1 class="text-5xl font-bold">{meta.name}</h1>
-        <p class="py-6 text-xl">{meta.tagline}</p>
-        <p>
-          Wir sind ein kleines Hobby-Spielestudio. Unsere Spiele laufen direkt
-          im Browser, ohne Installation.
-        </p>
-      </div>
-    </div>
-  </section>
-  <section id="spiele" class="mx-auto max-w-5xl px-4 py-12">
-    <h2 class="text-3xl font-bold">Unsere Spiele</h2>
-    <p class="mt-2">Entstanden am Nationalen Zukunftstag 2026.</p>
-    <div class="mt-8 grid gap-6 md:grid-cols-2">
-      {games.map((game) => (
-        <GameCard game={game} />
-      ))}
-    </div>
-  </section>
+<Layout
+  title={meta.name}
+  description={`${meta.tagline} Ein kleines Aufbauspiel im Wald der Waldstatt Einsiedeln.`}
+>
+  <Game />
 </Layout>

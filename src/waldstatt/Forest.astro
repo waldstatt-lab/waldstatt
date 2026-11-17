@@ -1,0 +1,94 @@
+---
+/**
+ * The still picture shown before the game starts, and instead of it without
+ * JavaScript or WebGL: the first stretch of the generated forest, with the
+ * Alp and the Sihl flowing together, as SVG at build time. Decorative.
+ */
+import { hasBaseTree, isRiver, treeJitter, treeVariant } from "./game/world";
+
+const cols = { from: -18, to: 18 };
+const rows = { from: -15, to: 7 };
+const T = 16;
+const water: { x: number; y: number }[] = [];
+const trees: { x: number; y: number; v: number }[] = [];
+for (let y = rows.from; y <= rows.to; y++) {
+  for (let x = cols.from; x <= cols.to; x++) {
+    if (isRiver(x, y)) water.push({ x, y });
+    else if (hasBaseTree(x, y)) {
+      const [jx, jy] = treeJitter(x, y);
+      trees.push({
+        x: x * T + T / 2 + jx,
+        y: y * T + T + jy,
+        v: treeVariant(x, y),
+      });
+    }
+  }
+}
+const viewBox = `${cols.from * T} ${rows.from * T} ${(cols.to - cols.from + 1) * T} ${(rows.to - rows.from + 1) * T}`;
+const shades = [
+  ["#2f6b3c", "#22552f", "#0f2c18"],
+  ["#3a7a43", "#2b6236", "#12321b"],
+  ["#2b6046", "#1f4d37", "#0e2a1d"],
+];
+---
+
+<svg
+  class="wg-forest"
+  viewBox={viewBox}
+  preserveAspectRatio="xMidYMid slice"
+  aria-hidden="true"
+  focusable="false"
+  shape-rendering="crispEdges"
+>
+  <defs>
+    {shades.map(([light, mid, edge], i) => (
+      <g id={`wg-fir-${i}`}>
+        <rect x="-1" y="-6" width="2" height="5" fill="#4b301d" />
+        <path
+          d="M0 -29 L4 -20 L-4 -20 Z"
+          fill={light}
+          stroke={edge}
+          stroke-width="1"
+        />
+        <path
+          d="M0 -24 L7 -13 L-7 -13 Z"
+          fill={light}
+          stroke={edge}
+          stroke-width="1"
+        />
+        <path
+          d="M0 -17 L9 -5 L-9 -5 Z"
+          fill={mid}
+          stroke={edge}
+          stroke-width="1"
+        />
+      </g>
+    ))}
+    <g id="wg-fir-3">
+      <rect x="-1" y="-11" width="2" height="9" fill="#4b301d" />
+      <circle
+        cx="0"
+        cy="-17"
+        r="8.5"
+        fill="#4f8233"
+        stroke="#264818"
+        stroke-width="1"
+      />
+      <circle cx="-2.5" cy="-19.5" r="4" fill="#6a9a3f" />
+    </g>
+  </defs>
+  <rect
+    x={cols.from * T}
+    y={rows.from * T}
+    width={(cols.to - cols.from + 1) * T}
+    height={(rows.to - rows.from + 1) * T}
+    fill="#1c3420"
+  />
+  {water.map((w) => (
+    <rect x={w.x * T} y={w.y * T} width={T} height={T} fill="#2d6aa0" />
+  ))}
+  <circle cx={T / 2} cy={T / 2} r={T * 2.4} fill="#5b8b3c" />
+  {trees.map((t) => (
+    <use href={`#wg-fir-${t.v}`} x={t.x} y={t.y} />
+  ))}
+</svg>

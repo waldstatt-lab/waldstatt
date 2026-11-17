@@ -1,10 +1,17 @@
 ---
 tags: [adr]
-status: proposed
+status: accepted
 date: 2026-11-17
 amends:
   - 0001-build-a-static-site-with-astro-and-daisyui.md
 sources:
+  - src/waldstatt/Game.astro
+  - src/waldstatt/game/main.ts
+  - src/waldstatt/game/render.ts
+  - src/waldstatt/game/state.ts
+  - src/pages/sw.js.ts
+  - src/pages/manifest.webmanifest.ts
+  - package.json
   - ../../pitches/pitch--aufbauspiel-im-wald.md
 ---
 
@@ -67,8 +74,6 @@ The game makes no network requests other than for the site's own files,
 handles keys only inside focused widgets or the focused map, and honours
 `prefers-reduced-motion`.
 
-Once implemented, this record becomes accepted, and ADRs 0001 and 0004 note that
-it amends them.
 
 ## Consequences
 

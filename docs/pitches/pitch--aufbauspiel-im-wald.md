@@ -34,6 +34,15 @@ clearing. The only interface is a small toolbox at the bottom. Everything
 happens inside `src/pages/` and `src/waldstatt/`.
 The shared game texts stay as they are and are the source of the games' content.
 
+**Amended during implementation.** The game follows the elements below with
+these differences, recorded in the
+[architecture documentation](../architecture/README.md#waldstatt-games):
+Waldleute wade through rivers anywhere rather than at fords; PixiJS draws with
+WebGL only, not WebGPU; the Ortstafel is a signpost read in full rather than a
+scroll; the Anleitung is a notice board that can stand anywhere, not only beside
+its Spielhaus; and the printing press turns parchment into prints on its own,
+up to a stock limit. The app icons are pixel art encoded as PNG at build time.
+
 This is a hobby project, so the pitch sets no appetite. The game should still
 grow in playable slices, each a sensible place to stop: forest, felling and huts;
 then the Spielhaus, so play links can be reached; then parchment, scrolls and the

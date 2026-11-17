@@ -86,11 +86,11 @@ workflows have read-only rights by default; only the deploy job may write Pages.
 For visual or content changes, also check the result in a browser with
 `mise run dev`, or `mise run build` and `mise run preview` for the built site:
 
-- every page the change affects, at desktop width and at a phone width of about
-  390 pixels, without horizontal scrolling;
-- the navigation and the "Spielen" links to the games;
-- readable text in light and dark themes;
-- keyboard navigation with Tab shows a visible focus.
+- the game at desktop width and at a phone width of about 390 pixels, without
+  horizontal scrolling;
+- the toolbox, the menus and dialogs, and the texts and game links found in the
+  forest;
+- play with the keyboard alone, with a visible focus on buttons and links.
 
 Record what was checked; if no browser is available, report that limitation.
 
@@ -102,6 +102,7 @@ changes to generated files.
 ## Architecture decisions
 
 Use the [ADR workflow and index](docs/architecture/decisions/README.md) for lasting
-choices such as the framework, hosting and deployment, or the route structure. Copy the [template](docs/architecture/decisions/_adr-template.md),
+choices such as the framework, hosting and deployment, the route structure, or
+how the game saves. Copy the [template](docs/architecture/decisions/_adr-template.md),
 explain the alternatives and consequences, and identify how reviewers can detect
 drift. Routine implementation details do not need an ADR.

@@ -1,0 +1,417 @@
+---
+/**
+ * The Waldstatt: a building game that fills the home page (ADR 0002). The
+ * map is a PixiJS canvas; the toolbox, menus and dialogs are HTML. The site's
+ * texts lie here in inert templates, rendered at build time from the shared
+ * game Markdown and the studio texts below; the game reveals them as
+ * visitors build. Without JavaScript or WebGL only the still forest and a
+ * note show.
+ */
+import { render } from "astro:content";
+import { getGames } from "../lib/games";
+import Forest from "./Forest.astro";
+import Icon from "./Icon.astro";
+import meta from "./meta";
+
+const games = await getGames();
+const rendered = await Promise.all(
+  games.map(async (game) => ({ game, Content: (await render(game)).Content })),
+);
+
+const previews: Record<
+  string,
+  {
+    help: string;
+    keys: { action: string; label: string; text: string }[];
+    stats: { name: string; label: string; unit?: string }[];
+  }
+> = {
+  "moto-devil": {
+    help: "Eine kleine Übungsstrecke auf der Bühne, nicht das Spiel: Gib Gas, spring über die Rampe, kipp das Motorrad bis zum Salto und halte die Leertaste nach dem Sprung für den Düsenschub. Fallen gibt es hier keine – die warten im echten Spiel.",
+    keys: [
+      { action: "gas", label: "W / ↑", text: "Gas" },
+      { action: "brake", label: "S / ↓", text: "Bremsen" },
+      { action: "back", label: "A / ←", text: "Kippen" },
+      { action: "forward", label: "D / →", text: "Kippen" },
+      { action: "jump", label: "Leertaste", text: "Springen, halten: Düse" },
+      { action: "turn", label: "E", text: "Umdrehen" },
+      { action: "restart", label: "R", text: "Neu" },
+    ],
+    stats: [{ name: "saltos", label: "Saltos" }],
+  },
+  "car-drive": {
+    help: "Eine kleine Übungsstrecke auf der Bühne, nicht das Spiel: Wechsle mit den Tasten aus dem Spiel die Spur und zünde den Boost, wenn die Strasse frei ist. Blinkende Autos wechseln gleich die Spur.",
+    keys: [
+      { action: "left", label: "A / ←", text: "Links" },
+      { action: "right", label: "D / →", text: "Rechts" },
+      { action: "boost", label: "Leertaste", text: "Boost" },
+      { action: "restart", label: "R", text: "Neustart" },
+    ],
+    stats: [
+      { name: "metres", label: "Strecke", unit: "m" },
+      { name: "level", label: "Level" },
+      { name: "coins", label: "Münzen" },
+    ],
+  },
+};
+
+const gameData = games.map((game) => ({
+  id: game.id,
+  title: game.data.title,
+  tagline: game.data.tagline,
+  playUrl: game.data.playUrl,
+  sourceUrl: game.data.sourceUrl,
+  preview: Object.hasOwn(previews, game.id),
+}));
+// Inside <script>, "<" could end the element early; JSON allows it escaped.
+const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
+---
+
+<div class="wg" data-wg>
+  <div class="wg-fallback" data-fallback>
+    <Forest />
+    <div class="wg-fallback-card">
+      <h1>{meta.name}</h1>
+      <p
+        data-fallback-note
+        data-no-webgl="Die Waldstatt braucht WebGL. Dieser Browser bietet es nicht an."
+      >
+        Die Waldstatt braucht JavaScript und WebGL. Ohne sie bleibt der Wald zu.
+      </p>
+    </div>
+  </div>
+
+  <div
+    class="wg-map"
+    data-map
+    data-ready-show
+    tabindex="0"
+    role="application"
+    aria-label={`${meta.name}: der Wald`}
+    aria-describedby="wg-map-help"
+    hidden
+  ></div>
+  <p id="wg-map-help" hidden>
+    Pfeiltasten bewegen die Auswahl, Umschalt mit Pfeiltasten verschiebt die
+    Karte, Plus und Minus zoomen. Die Eingabetaste wendet das Werkzeug an oder
+    öffnet ein Gebäude. Escape bricht ab.
+  </p>
+
+  <aside class="wg-hint" data-hint hidden aria-label="Der Waldmensch">
+    <Icon name="waldmensch" class="wg-portrait" />
+    <p data-hint-text></p>
+    <button type="button" class="wg-button" data-hint-close>
+      Verstanden
+    </button>
+  </aside>
+
+  <div class="wg-placing" data-placing hidden>
+    <p>
+      <span data-placing-text></span>
+      <span class="wg-placing-reason" data-placing-reason></span>
+    </p>
+    <div class="wg-actions">
+      <button type="button" class="wg-button wg-primary" data-place-here>
+        Hier bauen
+      </button>
+      <button type="button" class="wg-button" data-place-cancel>
+        Abbrechen
+      </button>
+    </div>
+  </div>
+
+  <section
+    class="wg-panel wg-info"
+    data-info
+    hidden
+    aria-labelledby="wg-info-title"
+  >
+    <h2 id="wg-info-title" data-info-title></h2>
+    <p data-info-state></p>
+    <div class="wg-actions" data-info-actions></div>
+    <button
+      type="button"
+      class="wg-close"
+      data-info-close
+      aria-label="Gebäude-Info schliessen"
+    >
+      ×
+    </button>
+  </section>
+
+  <div
+    class="wg-panel wg-menu wg-build"
+    id="wg-build-menu"
+    data-build-menu
+    hidden
+  >
+    <h2>Bauen</h2>
+    <ul class="wg-build-list" data-build-list></ul>
+  </div>
+
+  <div class="wg-panel wg-menu wg-main" id="wg-main-menu" data-main-menu hidden>
+    <h2>Menü</h2>
+    <ul>
+      <li>
+        <button type="button" class="wg-button" data-act="home">
+          Zur ersten Lichtung
+        </button>
+      </li>
+      <li class="wg-actions">
+        <button type="button" class="wg-button" data-act="zoom-in">
+          Näher
+        </button>
+        <button type="button" class="wg-button" data-act="zoom-out">
+          Weiter weg
+        </button>
+      </li>
+      <li>
+        <button type="button" class="wg-button" data-act="reset">
+          Neu beginnen …
+        </button>
+      </li>
+    </ul>
+  </div>
+
+  <nav
+    class="wg-toolbox"
+    aria-label="Werkzeugkasten"
+    data-toolbox
+    data-ready-show
+    hidden
+  >
+    <p class="wg-name">{meta.name}</p>
+    <ul class="wg-supplies" aria-label="Vorrat">
+      <li title="Holz">
+        <Icon name="wood" />
+        <span data-supply="wood">0</span>
+        <span class="sr-only"> Holz</span>
+      </li>
+      <li title="Pergament">
+        <Icon name="parchment" />
+        <span data-supply="parchment">0</span>
+        <span class="sr-only"> Pergament</span>
+      </li>
+      <li title="Drucke">
+        <Icon name="prints" />
+        <span data-supply="prints">0</span>
+        <span class="sr-only"> Drucke</span>
+      </li>
+      <li title="Waldleute">
+        <Icon name="workers" />
+        <span data-supply="workers">1</span>
+        <span class="sr-only"> Waldleute</span>
+      </li>
+    </ul>
+    <div class="wg-tools">
+      <button
+        type="button"
+        class="wg-tool"
+        data-tool="axe"
+        aria-pressed="false"
+      >
+        <Icon name="axe" /> Axt
+      </button>
+      <button
+        type="button"
+        class="wg-tool"
+        data-tool="saw"
+        aria-pressed="false"
+      >
+        <Icon name="saw" /> Säge
+      </button>
+      <button
+        type="button"
+        class="wg-tool"
+        data-open="build"
+        aria-expanded="false"
+        aria-controls="wg-build-menu"
+      >
+        <Icon name="build" /> Bauen
+      </button>
+      <button
+        type="button"
+        class="wg-tool"
+        data-open="menu"
+        aria-expanded="false"
+        aria-controls="wg-main-menu"
+      >
+        Menü
+      </button>
+    </div>
+  </nav>
+
+  <dialog class="wg-dialog wg-read" data-read aria-labelledby="wg-read-title">
+    <article class="wg-parchment">
+      <h2 id="wg-read-title" class="wg-read-title" data-read-title></h2>
+      <div class="wg-prose prose" data-read-body></div>
+    </article>
+    <form method="dialog" class="wg-actions">
+      <button class="wg-button wg-primary">Schliessen</button>
+    </form>
+  </dialog>
+
+  <dialog
+    class="wg-dialog wg-confirm"
+    data-confirm
+    aria-labelledby="wg-confirm-title"
+  >
+    <form method="dialog">
+      <h2 id="wg-confirm-title" data-confirm-title></h2>
+      <p data-confirm-text></p>
+      <ul data-confirm-list hidden></ul>
+      <div class="wg-actions">
+        <button
+          class="wg-button wg-primary"
+          value="yes"
+          data-confirm-yes
+        ></button>
+        <button class="wg-button" value="no">
+          Abbrechen
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog
+    class="wg-dialog wg-stage"
+    data-stage
+    aria-labelledby="wg-stage-title"
+  >
+    <h2 id="wg-stage-title">Theater der Waldstatt</h2>
+    <p class="wg-stage-note">
+      Vorstellungen sind kleine Übungsstrecken, nicht die Spiele selbst.
+    </p>
+    <div class="wg-actions" role="group" aria-label="Programm">
+      {gameData
+        .filter((game) => game.preview)
+        .map((game) => (
+          <button
+            type="button"
+            class="wg-button"
+            data-program={game.id}
+            aria-pressed="false"
+            hidden
+          >
+            {game.title}
+          </button>
+        ))}
+    </div>
+    <p data-stage-empty hidden>
+      Das Programm ist leer.
+    </p>
+    {gameData
+      .filter((game) => game.preview)
+      .map((game) => {
+        const preview = previews[game.id];
+        const id = `wg-preview-${game.id}`;
+        return (
+          <section
+            class="wg-preview"
+            tabindex="0"
+            role="group"
+            aria-labelledby={`${id}-title`}
+            aria-describedby={`${id}-help`}
+            data-preview={game.id}
+            data-label-demo="Vorführung – drück eine Taste, dann spielst du."
+            data-label-manual="Du spielst."
+            hidden
+          >
+            <div class="wg-preview-screen">
+              <canvas aria-hidden="true" />
+            </div>
+            <div class="wg-preview-panel">
+              <h3 id={`${id}-title`}>{game.title}</h3>
+              <p id={`${id}-help`}>{preview.help}</p>
+              <p class="wg-preview-stats">
+                {preview.stats.map((stat) => (
+                  <span>
+                    {stat.label}: <strong data-stat={stat.name}>0</strong>
+                    {stat.unit && ` ${stat.unit}`}
+                  </span>
+                ))}
+              </p>
+              <p class="wg-preview-mode">
+                <span data-preview-mode />
+                <span data-preview-status />
+              </p>
+              <div class="wg-preview-keys">
+                {preview.keys.map((key) => (
+                  <button
+                    type="button"
+                    class="wg-key"
+                    tabindex="-1"
+                    data-action={key.action}
+                  >
+                    <kbd>{key.label}</kbd> {key.text}
+                  </button>
+                ))}
+              </div>
+              <p class="sr-only" aria-live="polite" data-preview-live />
+            </div>
+          </section>
+        );
+      })}
+    <div class="wg-actions">
+      <a class="wg-button wg-primary" data-stage-play hidden>
+        Spielen
+      </a>
+      <form method="dialog">
+        <button class="wg-button">Schliessen</button>
+      </form>
+    </div>
+  </dialog>
+
+  <p class="sr-only" aria-live="polite" data-live></p>
+
+  <template data-text="ortstafel">
+    <h2>{meta.name}</h2>
+    <p>
+      «Waldstatt» ist die historische Bezeichnung für Einsiedeln. Der heutige
+      Bezirk Einsiedeln wurde früher als «Waldstatt Einsiedeln» bezeichnet,
+      seine Bewohner als «Waldleute».
+    </p>
+    <p>
+      Wir sind ein kleines Hobby-Spielestudio. Hier rodest du den Wald wie die
+      Waldleute, baust Häuser – und findest dabei unsere Spiele.
+    </p>
+  </template>
+
+  <template data-text="chronik">
+    <h2>Wer wir sind</h2>
+    <p>
+      {meta.name} ist ein kleines Hobby-Spielestudio. Wir programmieren Spiele,
+      die direkt im Browser laufen, ohne Installation.
+    </p>
+    <h2>Wie alles begann</h2>
+    <p>
+      Am Nationalen Zukunftstag, dem 12. November 2026, haben wir aus Skizzen
+      auf Papier unsere ersten spielbaren Prototypen gebaut: Moto Devil und Car
+      Drive. Seither entwickeln wir beide weiter.
+    </p>
+    <h2>Wie wir arbeiten</h2>
+    <p>
+      Jede Idee beginnt als Skizze. Daraus schreiben wir einen kurzen Plan: Was
+      fehlt, wie könnte die Lösung aussehen, und was lassen wir bewusst weg?
+      Dann bauen wir einen Prototyp und probieren ihn aus.
+    </p>
+    <h2>Womit wir bauen</h2>
+    <p>
+      Unsere Spiele sind in Rust mit der Spiel-Engine Bevy geschrieben und
+      laufen als WebAssembly im Browser. Der Quellcode ist auf GitHub
+      öffentlich.
+    </p>
+  </template>
+
+  {rendered.map(({ game, Content }) => (
+    <template data-text={`game:${game.id}`}>
+      <Content />
+    </template>
+  ))}
+
+  <script type="application/json" id="wg-games" is:inline set:html={gameJson} />
+</div>
+
+<script>
+  import "./game/main";
+</script>

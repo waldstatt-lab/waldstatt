@@ -1,0 +1,25 @@
+---
+/** A pixel icon from icons.ts as crisp inline SVG; decorative. */
+import { runs, type IconName } from "./icons";
+
+interface Props {
+  name: IconName;
+  class?: string;
+}
+const { name, class: className } = Astro.props;
+const icon = runs(name);
+---
+
+<svg
+  class:list={["wg-icon", className]}
+  viewBox={`0 0 ${icon.width} ${icon.height}`}
+  width={icon.width * 2}
+  height={icon.height * 2}
+  shape-rendering="crispEdges"
+  aria-hidden="true"
+  focusable="false"
+>
+  {icon.runs.map((r) => (
+    <rect x={r.x} y={r.y} width={r.w} height="1" fill={r.color} />
+  ))}
+</svg>
