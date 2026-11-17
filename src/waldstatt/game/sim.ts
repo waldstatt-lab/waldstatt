@@ -58,11 +58,11 @@ function chunkOf(x: number, y: number) {
 
 export const hints = [
   "Nimm die Axt und zeig mir, welche Bäume fallen sollen.",
-  "Gut! Mit 8 Holz bauen wir unter «Bauen» eine Hütte – dann hilft mir jemand.",
+  "Gut! Mit 8 Holz bauen wir unter «Bauen» eine Hütte – aber nur auf freiem Boden. Fäll also genug Bäume.",
   "Zu zweit geht’s schneller. Die Säge markiert ganze Flächen. Bau als Nächstes ein Spielhaus: Dort wohnen unsere Spiele.",
-  "Im Spielhaus kannst du spielen. Für Schriften brauchen wir Pergament – bau eine Schafweide.",
-  "Mit Pergament legst du Schriftrollen. Sie entrollen sich, so weit der Wald es zulässt.",
-  "Die Druckerei druckt Anleitungen, und im Theater gibt es Vorstellungen unserer Spiele.",
+  "Am Spielhaus hängt das Schild zum Spielen. Für Schriften brauchen wir Pergament – bau eine Schafweide.",
+  "Schriftrollen brauchen viel freien Platz. Steht eine, liest du sie direkt im Wald – zoom einfach näher.",
+  "Die Druckerei druckt Anleitungen, und auf der Bühne des Theaters spielst du unsere Spiele an.",
   "Die Sihl liesse sich stauen. Aber was im Becken steht, geht unter.",
 ];
 
@@ -88,9 +88,6 @@ export class Game {
       if (kinds[b.kind].scroll) b.h = scrollHeight(b.kind, b.game);
       this.occupy(b);
     }
-    // Footprint trees stay marked; an older save may have lost a mark.
-    for (const b of state.buildings)
-      if (b.state === "site") this.markFootprint(b);
     this.syncWorkers();
   }
 
@@ -136,12 +133,11 @@ export class Game {
     return this.occupancy.get(key(x, y));
   }
 
-  /** Marks or unmarks one tree; trees under building sites stay marked. */
-  toggleMark(x: number, y: number): "marked" | "unmarked" | "none" | "site" {
+  /** Marks or unmarks one tree. */
+  toggleMark(x: number, y: number): "marked" | "unmarked" | "none" {
     if (!this.isTree(x, y)) return "none";
     const k = key(x, y);
     if (this.state.marks.has(k)) {
-      if (this.occupancy.get(k)?.state === "site") return "site";
       this.state.marks.delete(k);
       this.events.tree(x, y);
       this.events.dirty();
@@ -258,7 +254,9 @@ export class Game {
           tile = "blocked";
           reason ??= "Hier wird der Sihlsee entstehen.";
         } else if (this.isTree(tx, ty)) {
+          // Buildings stand only on cleared ground.
           tile = "tree";
+          reason ??= "Zuerst die Bäume fällen.";
         }
         tiles.push(tile);
       }
@@ -305,7 +303,6 @@ export class Game {
     };
     this.state.buildings.push(b);
     this.occupy(b);
-    this.markFootprint(b);
     this.events.building(b);
     this.events.supplies();
     this.events.dirty();
@@ -339,32 +336,6 @@ export class Game {
   private occupy(b: Building) {
     for (let y = b.y; y < b.y + b.h; y++)
       for (let x = b.x; x < b.x + b.w; x++) this.occupancy.set(key(x, y), b);
-  }
-
-  private markFootprint(b: Building) {
-    for (let y = b.y; y < b.y + b.h; y++) {
-      for (let x = b.x; x < b.x + b.w; x++) {
-        if (this.isTree(x, y) && !this.isMarked(x, y)) {
-          this.state.marks.add(key(x, y));
-          this.events.tree(x, y);
-        }
-      }
-    }
-  }
-
-  /** Rows a site needs cleared before it can be built: a scroll, its head. */
-  private readyToBuild(b: Building): boolean {
-    const rows = kinds[b.kind].scroll ? balance.scrollHeadRows : b.h;
-    for (let y = b.y; y < b.y + rows; y++)
-      for (let x = b.x; x < b.x + b.w; x++) if (this.isTree(x, y)) return false;
-    return true;
-  }
-
-  /** Whether every tile of a scroll's rows [from, to) is free of trees. */
-  rowsClear(b: Building, from: number, to: number): boolean {
-    for (let y = b.y + from; y < b.y + to; y++)
-      for (let x = b.x; x < b.x + b.w; x++) if (this.isTree(x, y)) return false;
-    return true;
   }
 
   progress(b: Building): number {
@@ -415,7 +386,7 @@ export class Game {
     let best: Worker["task"];
     let bestScore = Infinity;
     for (const b of this.state.buildings) {
-      if (b.state !== "site" || !this.readyToBuild(b)) continue;
+      if (b.state !== "site") continue;
       if (this.siteCrew(b.id) >= balance.workersPerSite) continue;
       const score = Math.hypot(b.x + b.w / 2 - w.x, b.y + b.h / 2 - w.y) - 4;
       if (score < bestScore) {
@@ -428,9 +399,8 @@ export class Game {
       const comma = k.indexOf(",");
       const x = Number(k.slice(0, comma));
       const y = Number(k.slice(comma + 1));
-      const forSite = this.occupancy.get(k)?.state === "site";
-      const score =
-        Math.hypot(x + 0.5 - w.x, y + 0.9 - w.y) + (forSite ? 0 : 6);
+      // Building sites come first: their crews need no trees.
+      const score = Math.hypot(x + 0.5 - w.x, y + 0.9 - w.y) + 6;
       if (score < bestScore) {
         bestScore = score;
         best = { type: "fell", x, y };
@@ -447,9 +417,8 @@ export class Game {
     } else {
       const b = this.state.buildings.find((other) => other.id === best.id);
       if (!b) return this.idle(w);
-      const rows = kinds[b.kind].scroll ? balance.scrollHeadRows : b.h;
       w.tx = b.x + 0.3 + Math.random() * (b.w - 0.6);
-      w.ty = b.y + 0.4 + Math.random() * (rows - 0.6);
+      w.ty = b.y + 0.4 + Math.random() * (b.h - 0.6);
     }
   }
 
@@ -486,7 +455,8 @@ export class Game {
       const dy = w.ty - w.y;
       const distance = Math.hypot(dx, dy);
       const stepLength = balance.walkSpeed * dt;
-      if (dx) w.facing = dx > 0 ? 1 : -1;
+      // Facing follows the direction on screen, where x runs right and y left.
+      if (dx - dy) w.facing = dx - dy > 0 ? 1 : -1;
       if (instant || distance <= stepLength) {
         w.x = w.tx;
         w.y = w.ty;
@@ -522,9 +492,6 @@ export class Game {
     this.events.supplies();
     this.events.dirty();
     this.checkHint();
-    // A scroll strip may have come free.
-    const b = this.occupancy.get(k);
-    if (b) this.events.building(b);
   }
 
   private finish(b: Building) {

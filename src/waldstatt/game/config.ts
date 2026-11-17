@@ -28,11 +28,6 @@ export const balance = {
   /** Stock limits. */
   maxParchment: 30,
   maxPrints: 20,
-  /** Scroll strips: characters of text per tile row, and the minimum rows. */
-  scrollCharsPerRow: 110,
-  scrollMinRows: 2,
-  /** Rows of the scroll's head, which must be cleared before it is laid. */
-  scrollHeadRows: 2,
   /** Share of the wood returned when a building is torn down. */
   refund: 0.5,
   /** Trees the saw marks at most in one stroke. */
@@ -73,7 +68,7 @@ export interface KindInfo {
   limit: "one" | "game" | "many";
   /** The text a visitor can read once it is built. */
   text?: "ortstafel" | "chronik" | "idea" | "controls";
-  /** A scroll unrolls into the forest; each section of its text is a strip. */
+  /** A scroll: its text lies on it, so it is as long as the text needs. */
   scroll?: boolean;
   /** One short line for the build menu. */
   about: string;
@@ -131,7 +126,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Chronik",
     group: "Wissen",
     cost: cost(4, 4),
-    w: 6,
+    w: 7,
     h: 0,
     work: 8,
     limit: "one",
@@ -143,7 +138,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Spielidee",
     group: "Wissen",
     cost: cost(3, 3),
-    w: 5,
+    w: 7,
     h: 0,
     work: 8,
     limit: "game",

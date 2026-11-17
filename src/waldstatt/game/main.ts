@@ -11,13 +11,13 @@ import { kinds, type Kind } from "./config";
 import { attachInput } from "./input";
 import { carGame } from "./previewCar";
 import { motoGame } from "./previewMoto";
+import { WorldLayer } from "./overlay";
 import { mountPreview } from "./preview";
 import { Renderer } from "./render";
 import { Game, type Events } from "./sim";
 import { clearSaved, load, save } from "./state";
 import { readGames, scrollHeight, sectionsFor } from "./texts";
 import { Ui } from "./ui";
-import { lakeTiles } from "./world";
 
 const root = document.querySelector<HTMLElement>("[data-wg]");
 if (root) void start(root);
@@ -46,12 +46,11 @@ async function start(root: HTMLElement) {
 
   // The rules exist before the picture and interface; their events wait.
   let renderer: Renderer | undefined;
+  let world: WorldLayer | undefined;
   let ui: Ui | undefined;
   let saveTimer = 0;
   let saving = true;
   let warned = false;
-  // Sections of each scroll already readable, to announce new ones.
-  const uncovered = new Map<number, number>();
   // Buildings finished before this visit are not news.
   const announced = new Set(
     state.buildings.filter((b) => b.state === "done").map((b) => b.id),
@@ -75,37 +74,24 @@ async function start(root: HTMLElement) {
     tree: (x, y) => renderer?.tree(x, y),
     building: (b, removed) => {
       renderer?.building(b, removed);
+      world?.building(b, removed);
+      if (b.kind === "spielhaus") world?.refreshStage();
       ui?.building(b, !!removed);
-      if (!ui || !renderer || removed) return;
-      const name = kinds[b.kind].name;
+      if (!ui || removed) return;
       if (b.state === "done" && !announced.has(b.id)) {
         // Only announce once, when the work completes.
         announced.add(b.id);
-        ui.announce(`${name} ist fertig.`);
-      }
-      if (kinds[b.kind].scroll && b.state === "done") {
-        const revealed = renderer.revealed(b);
-        const shown = revealed.filter(Boolean).length;
-        if (shown > (uncovered.get(b.id) ?? shown)) {
-          ui.announce(
-            `${name}: ${shown} von ${revealed.length} Abschnitten lesbar.`,
-          );
-        }
-        uncovered.set(b.id, shown);
+        ui.announce(
+          kinds[b.kind].text
+            ? `${kinds[b.kind].name} ist fertig. Der Text steht jetzt im Wald.`
+            : `${kinds[b.kind].name} ist fertig.`,
+        );
       }
     },
     supplies: () => ui?.supplies(),
     flooded: (drowned) => {
-      const tiles = lakeTiles();
-      const xs = tiles.map(([x]) => x);
-      const ys = tiles.map(([, y]) => y);
-      renderer?.repaint(
-        Math.min(...xs),
-        Math.min(...ys),
-        Math.max(...xs),
-        Math.max(...ys),
-      );
-      renderer?.rebuildAll();
+      renderer?.flooded();
+      world?.flooded();
       ui?.announce(
         drowned.length
           ? `Der Damm steht, der Sihlsee entsteht. ${drowned.length === 1 ? "Ein Gebäude ging" : `${drowned.length} Gebäude gingen`} unter.`
@@ -116,7 +102,7 @@ async function start(root: HTMLElement) {
     dirty: scheduleSave,
   };
   const scrollFor = (kind: Kind, game?: string) =>
-    scrollHeight(sectionsFor(kinds[kind], game));
+    scrollHeight(sectionsFor(kinds[kind], game), kinds[kind].w);
   const game = new Game(
     state,
     games.map((g) => g.id),
@@ -146,23 +132,25 @@ async function start(root: HTMLElement) {
   new ResizeObserver(() => app.resize()).observe(host);
   app.canvas.setAttribute("aria-hidden", "true");
 
-  renderer = new Renderer(
-    app,
+  renderer = new Renderer(app, game, () => still.matches);
+  world = new WorldLayer(
+    host,
     game,
-    (b) => sectionsFor(kinds[b.kind], b.game),
-    () => still.matches,
+    games,
+    root.querySelector<HTMLTemplateElement>("template[data-stage]"),
+    (section, id) =>
+      id === "moto-devil"
+        ? mountPreview(section, motoGame)
+        : id === "car-drive"
+          ? mountPreview(section, carGame)
+          : false,
   );
   ui = new Ui({
     root,
     game,
     renderer,
     games,
-    mountPreview: (section, id) =>
-      id === "moto-devil"
-        ? mountPreview(section, motoGame)
-        : id === "car-drive"
-          ? mountPreview(section, carGame)
-          : false,
+    world,
     reset: () => {
       saving = false;
       window.clearTimeout(saveTimer);
@@ -191,6 +179,8 @@ async function start(root: HTMLElement) {
     const dt = Math.min(0.1, ticker.deltaMS / 1000);
     game.step(dt, still.matches);
     renderer?.frame(dt);
+    if (renderer && world)
+      world.frame(renderer.transform(), app.screen.width, app.screen.height);
     ui?.frame(dt);
   });
 

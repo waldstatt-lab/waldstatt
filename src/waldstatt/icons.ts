@@ -90,6 +90,16 @@ export const icons: Record<string, string[]> = {
     "............",
     "............",
   ],
+  demolish: [
+    "....AAAA....",
+    "...AAAAAA...",
+    "....AAAA....",
+    ".....WW.....",
+    ".....WW.....",
+    ".rr..WW..rr.",
+    "rrrr.WW.rrrr",
+    ".rr..WW..rr.",
+  ],
   build: [
     ".....rr.....",
     "....rrrr....",

@@ -38,10 +38,26 @@ The shared game texts stay as they are and are the source of the games' content.
 these differences, recorded in the
 [architecture documentation](../architecture/README.md#waldstatt-games):
 Waldleute wade through rivers anywhere rather than at fords; PixiJS draws with
-WebGL only, not WebGPU; the Ortstafel is a signpost read in full rather than a
-scroll; the Anleitung is a notice board that can stand anywhere, not only beside
-its Spielhaus; and the printing press turns parchment into prints on its own,
-up to a stock limit. The app icons are pixel art encoded as PNG at build time.
+WebGL only, not WebGPU; the Ortstafel is a signpost rather than a scroll; the
+Anleitung is a notice board that can stand anywhere, not only beside its
+Spielhaus; and the printing press turns parchment into prints on its own, up to
+a stock limit. The app icons are pixel art encoded as PNG at build time.
+
+**Amended after the first version**, at the studio's request:
+
+- The map is an isometric view with painted, shaded art instead of top-down
+  pixel art.
+- Everything is read and used on the map, not in dialogs: scroll texts lie on
+  their scrolls, signs and printed notices stand by their buildings, and the
+  theatre's stage is playable in place. Far out only names show.
+- Buildings, scrolls included, stand only on cleared ground; scrolls no longer
+  unroll into the forest, but are as long as their text needs.
+- The waters are real, from swisstopo and BAFU data: the Alp, the Sihl and the
+  rivers and lakes around them, from the Zürichsee to the Ägerisee. The Sihlsee
+  did not exist before its dam, so it stays a basin until the game's dam floods
+  it.
+- Tearing down is a tool in the toolbox, and the build menu keeps its scroll
+  position.
 
 This is a hobby project, so the pitch sets no appetite. The game should still
 grow in playable slices, each a sensible place to stop: forest, felling and huts;

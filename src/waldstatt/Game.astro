@@ -1,7 +1,7 @@
 ---
 /**
  * The Waldstatt: a building game that fills the home page (ADR 0002). The
- * map is a PixiJS canvas; the toolbox, menus and dialogs are HTML. The site's
+ * map is a PixiJS canvas; the toolbox, menus and texts on the map are HTML. The site's
  * texts lie here in inert templates, rendered at build time from the shared
  * game Markdown and the studio texts below; the game reveals them as
  * visitors build. Without JavaScript or WebGL only the still forest and a
@@ -170,6 +170,10 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
           Neu beginnen …
         </button>
       </li>
+      <li class="wg-credit">
+        Gewässer: Bundesamt für Landestopografie swisstopo (VECTOR25) und
+        Bundesamt für Umwelt BAFU
+      </li>
     </ul>
   </div>
 
@@ -223,6 +227,14 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
       <button
         type="button"
         class="wg-tool"
+        data-tool="demolish"
+        aria-pressed="false"
+      >
+        <Icon name="demolish" /> Abreissen
+      </button>
+      <button
+        type="button"
+        class="wg-tool"
         data-open="build"
         aria-expanded="false"
         aria-controls="wg-build-menu"
@@ -240,16 +252,6 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
       </button>
     </div>
   </nav>
-
-  <dialog class="wg-dialog wg-read" data-read aria-labelledby="wg-read-title">
-    <article class="wg-parchment">
-      <h2 id="wg-read-title" class="wg-read-title" data-read-title></h2>
-      <div class="wg-prose prose" data-read-body></div>
-    </article>
-    <form method="dialog" class="wg-actions">
-      <button class="wg-button wg-primary">Schliessen</button>
-    </form>
-  </dialog>
 
   <dialog
     class="wg-dialog wg-confirm"
@@ -273,33 +275,8 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
     </form>
   </dialog>
 
-  <dialog
-    class="wg-dialog wg-stage"
-    data-stage
-    aria-labelledby="wg-stage-title"
-  >
-    <h2 id="wg-stage-title">Theater der Waldstatt</h2>
-    <p class="wg-stage-note">
-      Vorstellungen sind kleine Übungsstrecken, nicht die Spiele selbst.
-    </p>
-    <div class="wg-actions" role="group" aria-label="Programm">
-      {gameData
-        .filter((game) => game.preview)
-        .map((game) => (
-          <button
-            type="button"
-            class="wg-button"
-            data-program={game.id}
-            aria-pressed="false"
-            hidden
-          >
-            {game.title}
-          </button>
-        ))}
-    </div>
-    <p data-stage-empty hidden>
-      Das Programm ist leer.
-    </p>
+  <!-- The theatre's previews; overlay.ts clones them onto the stage on the map. -->
+  <template data-stage>
     {gameData
       .filter((game) => game.preview)
       .map((game) => {
@@ -315,7 +292,6 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
             data-preview={game.id}
             data-label-demo="Vorführung – drück eine Taste, dann spielst du."
             data-label-manual="Du spielst."
-            hidden
           >
             <div class="wg-preview-screen">
               <canvas aria-hidden="true" />
@@ -352,15 +328,7 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
           </section>
         );
       })}
-    <div class="wg-actions">
-      <a class="wg-button wg-primary" data-stage-play hidden>
-        Spielen
-      </a>
-      <form method="dialog">
-        <button class="wg-button">Schliessen</button>
-      </form>
-    </div>
-  </dialog>
+  </template>
 
   <p class="sr-only" aria-live="polite" data-live></p>
 

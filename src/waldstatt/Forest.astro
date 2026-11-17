@@ -89,6 +89,6 @@ const shades = [
   ))}
   <circle cx={T / 2} cy={T / 2} r={T * 2.4} fill="#5b8b3c" />
   {trees.map((t) => (
-    <use href={`#wg-fir-${t.v}`} x={t.x} y={t.y} />
+    <use href={`#wg-fir-${t.v >= 4 ? 3 : t.v % 3}`} x={t.x} y={t.y} />
   ))}
 </svg>

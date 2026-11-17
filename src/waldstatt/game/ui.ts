@@ -1,19 +1,21 @@
 /**
- * The HTML interface over the map: the toolbox with supplies and tools, the
- * build menu, placing buildings, the building info, the reading view, the
- * theatre, confirmations, the Waldmensch's hints and the announcements for
- * screen readers. Text comes from the page, the balance table or fixed
- * strings; nodes are created with the DOM API, never from HTML strings.
+ * The HTML interface over the map: the toolbox with supplies and tools
+ * (axe, saw, tearing down), the build menu, placing buildings, the building
+ * info, confirmations, the Waldmensch's hints and the announcements for
+ * screen readers. Texts are read on the map itself (overlay.ts). Text comes
+ * from the page, the balance table or fixed strings; nodes are created with
+ * the DOM API, never from HTML strings.
  */
 import { balance, groups, kinds, type Kind } from "./config";
 import type { MapHandlers, Tile } from "./input";
+import type { WorldLayer } from "./overlay";
 import type { Renderer } from "./render";
 import { hints, type Game } from "./sim";
 import type { Building } from "./state";
-import { sectionsFor, type GameInfo } from "./texts";
+import type { GameInfo } from "./texts";
 import { damSite } from "./world";
 
-type Tool = "none" | "axe" | "saw";
+type Tool = "none" | "axe" | "saw" | "demolish";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -40,8 +42,7 @@ export interface UiOptions {
   game: Game;
   renderer: Renderer;
   games: GameInfo[];
-  /** Mounts the theatre's preview of a game; returns false if it has none. */
-  mountPreview(section: HTMLElement, game: string): boolean;
+  world: WorldLayer;
   reset(): void;
   moved(): void;
 }
@@ -61,10 +62,13 @@ export class Ui {
   private placingBar: HTMLElement;
   private hint: HTMLElement;
   private live: HTMLElement;
-  private read: HTMLDialogElement;
-  private stage: HTMLDialogElement;
   private confirmDialog: HTMLDialogElement;
-  private mounted = new Set<string>();
+  private menuItems: {
+    kind: Kind;
+    game?: string;
+    button: HTMLButtonElement;
+    about: HTMLElement;
+  }[] = [];
 
   constructor(private o: UiOptions) {
     const root = o.root;
@@ -75,8 +79,6 @@ export class Ui {
     this.placingBar = need(root, "[data-placing]");
     this.hint = need(root, "[data-hint]");
     this.live = need(root, "[data-live]");
-    this.read = need(root, "[data-read]");
-    this.stage = need(root, "[data-stage]");
     this.confirmDialog = need(root, "[data-confirm]");
 
     for (const button of this.toolbox.querySelectorAll<HTMLButtonElement>(
@@ -118,17 +120,11 @@ export class Ui {
     need(this.placingBar, "[data-place-cancel]").addEventListener("click", () =>
       this.stopPlacing(),
     );
-    for (const button of this.stage.querySelectorAll<HTMLButtonElement>(
-      "[data-program]",
-    ))
-      button.addEventListener("click", () =>
-        this.showPreview(button.dataset.program ?? ""),
-      );
 
     document.addEventListener("keydown", (event) => {
       // The map handles its own Escape (input.ts).
       if (event.key !== "Escape" || event.target === this.mapHost()) return;
-      if (this.read.open || this.stage.open || this.confirmDialog.open) return;
+      if (this.confirmDialog.open) return;
       if (!this.buildMenu.hidden || !this.mainMenu.hidden) {
         this.closeMenus(true);
         event.preventDefault();
@@ -181,7 +177,7 @@ export class Ui {
         "[data-supply]",
       ))
         element.textContent = values[element.dataset.supply ?? ""] ?? "";
-      if (!this.buildMenu.hidden) this.renderBuildMenu();
+      if (!this.buildMenu.hidden) this.updateBuildMenu();
     }
     this.infoClock += dt;
     if (this.selected && this.infoClock > 0.4) {
@@ -209,13 +205,17 @@ export class Ui {
       this.announce("Axt: Bäume antippen, die fallen sollen.");
     if (this.tool === "saw")
       this.announce("Säge: über die Bäume ziehen, die fallen sollen.");
+    if (this.tool === "demolish")
+      this.announce(
+        "Abreissen: ein Gebäude antippen. Die Hälfte des Holzes kommt zurück.",
+      );
   }
 
   private toggleMenu(menu: HTMLElement, button: HTMLButtonElement) {
     const open = menu.hidden;
     this.closeMenus();
     if (!open) return;
-    if (menu === this.buildMenu) this.renderBuildMenu();
+    if (menu === this.buildMenu) this.updateBuildMenu();
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
     menu.querySelector<HTMLElement>("button, a")?.focus();
@@ -275,11 +275,11 @@ export class Ui {
     return parts.join(", ");
   }
 
+  /** Builds the menu once; updateBuildMenu() keeps it current in place. */
   private renderBuildMenu() {
     const list = need(this.buildMenu, "[data-build-list]");
-    const focused = (document.activeElement as HTMLElement | null)?.dataset
-      ?.build;
     list.replaceChildren();
+    this.menuItems = [];
     for (const group of groups) {
       const items = el("ul", { className: "wg-build-items" });
       for (const [kind, info] of Object.entries(kinds) as [
@@ -290,17 +290,15 @@ export class Ui {
         const games =
           info.limit === "game" ? this.o.games.map((g) => g.id) : [undefined];
         for (const game of games) {
-          const reason = this.o.game.unavailable(kind, game);
-          const id = `${kind}:${game ?? ""}`;
+          const about = el("span", { className: "wg-build-about" });
           const button = el(
             "button",
             { type: "button", className: "wg-build-item" },
             el("span", { className: "wg-build-name" }, this.label(kind, game)),
             el("span", { className: "wg-build-cost" }, this.costText(kind)),
-            el("span", { className: "wg-build-about" }, reason ?? info.about),
+            about,
           );
-          button.dataset.build = id;
-          if (reason) button.setAttribute("aria-disabled", "true");
+          button.dataset.build = `${kind}:${game ?? ""}`;
           button.addEventListener("click", () => {
             const why = this.o.game.unavailable(kind, game);
             if (why) return this.announce(why);
@@ -308,14 +306,25 @@ export class Ui {
             this.startPlacing(kind, game);
           });
           items.append(el("li", {}, button));
+          this.menuItems.push({ kind, game, button, about });
         }
       }
       list.append(
         el("li", {}, el("h3", { className: "wg-build-group" }, group), items),
       );
     }
-    if (focused)
-      list.querySelector<HTMLElement>(`[data-build="${focused}"]`)?.focus();
+    this.updateBuildMenu();
+  }
+
+  /** Updates availability and reasons without touching scroll or focus. */
+  private updateBuildMenu() {
+    for (const item of this.menuItems) {
+      const reason = this.o.game.unavailable(item.kind, item.game);
+      const text = reason ?? kinds[item.kind].about;
+      if (item.about.textContent !== text) item.about.textContent = text;
+      if (reason) item.button.setAttribute("aria-disabled", "true");
+      else item.button.removeAttribute("aria-disabled");
+    }
   }
 
   // --- Placing ----------------------------------------------------------------
@@ -327,8 +336,8 @@ export class Ui {
     const name = this.label(kind, game);
     need(this.placingBar, "[data-placing-text]").textContent =
       kind === "damm"
-        ? `${name}: nur an der Engstelle der Sihl. Blau wird der Sihlsee.`
-        : `${name} platzieren: auf die Karte tippen oder klicken.`;
+        ? `${name}: nur dort, wo die Sihl das Tal verlässt. Blau wird der Sihlsee.`
+        : `${name} platzieren: auf freien Boden tippen oder klicken.`;
     this.placingBar.hidden = false;
     const r = this.o.renderer;
     if (kind === "damm") {
@@ -352,8 +361,7 @@ export class Ui {
   private anchor(tile: Tile): Tile {
     if (!this.placing) return tile;
     const { w, h } = this.o.game.size(this.placing.kind, this.placing.game);
-    const rows = kinds[this.placing.kind].scroll ? balance.scrollHeadRows : h;
-    return { x: tile.x - Math.floor(w / 2), y: tile.y - Math.floor(rows / 2) };
+    return { x: tile.x - Math.floor(w / 2), y: tile.y - Math.floor(h / 2) };
   }
 
   private ghostAt(tile: Tile) {
@@ -366,9 +374,7 @@ export class Ui {
     need<HTMLButtonElement>(this.placingBar, "[data-place-here]").disabled =
       !spot.ok;
     need(this.placingBar, "[data-placing-reason]").textContent = spot.ok
-      ? spot.tiles.includes("tree")
-        ? "Gelb markierte Bäume werden zuerst gefällt."
-        : ""
+      ? ""
       : (spot.reason ?? "");
   }
 
@@ -490,13 +496,16 @@ export class Ui {
   private activateTile(tile: Tile) {
     const g = this.o.game;
     const b = g.buildingAt(tile.x, tile.y);
+    if (this.tool === "demolish") {
+      if (b) this.askDemolish(b);
+      else this.announce("Tippe auf ein Gebäude, das weg soll.");
+      return;
+    }
     if (b) return this.select(b);
     if (this.tool === "axe") {
       const result = g.toggleMark(tile.x, tile.y);
       if (result === "marked") this.announce("Baum markiert.");
       else if (result === "unmarked") this.announce("Markierung entfernt.");
-      else if (result === "site")
-        this.announce("Dieser Baum muss für eine Baustelle fallen.");
       return;
     }
     if (this.selected) this.select(null);
@@ -519,12 +528,7 @@ export class Ui {
       if (removed) this.select(null);
       else this.fillInfo(b, true);
     }
-    if (!this.buildMenu.hidden) this.renderBuildMenu();
-  }
-
-  private revealedCount(b: Building): [number, number] {
-    const revealed = this.o.renderer.revealed(b);
-    return [revealed.filter(Boolean).length, revealed.length];
+    if (!this.buildMenu.hidden) this.updateBuildMenu();
   }
 
   private stateText(b: Building): string {
@@ -533,24 +537,19 @@ export class Ui {
       return "Überflutet. Liegt auf dem Grund des Sihlsees.";
     if (b.state === "site") {
       const percent = Math.round(this.o.game.progress(b) * 100);
-      const rows = info.scroll ? "Der Kopf der Rolle" : "Der Bauplatz";
       return percent === 0
-        ? `Baustelle. ${rows} muss zuerst frei sein, dann wird gebaut.`
+        ? "Baustelle. Die Waldleute kommen."
         : `Im Bau: ${percent} %.`;
     }
-    if (info.scroll) {
-      const [shown, all] = this.revealedCount(b);
-      return shown === all
-        ? `Ganz entrollt: ${all} von ${all} Abschnitten lesbar.`
-        : `${shown} von ${all} Abschnitten lesbar. Der Rest liegt noch unter Bäumen.`;
-    }
+    if (info.text)
+      return "Der Text steht im Wald über dem Gebäude. Zoom näher, um ihn zu lesen.";
     const texts: Partial<Record<Kind, string>> = {
       huette: "Hier wohnt ein Waldmensch.",
       schafweide: `Die Schafe geben Pergament (höchstens ${balance.maxParchment}).`,
       druckerei: `Druckt aus Pergament Drucke (höchstens ${balance.maxPrints}).`,
       kloster: "Das Kloster Einsiedeln, vereinfacht. Der Stolz der Waldstatt.",
       damm: "Der Damm staut die Sihl zum Sihlsee.",
-      theater: "Vorstellungen der Spiele, deren Spielhaus steht.",
+      theater: "Auf der Bühne spielst du die Spiele an, deren Spielhaus steht.",
       spielhaus: this.o.games.find((g) => g.id === b.game)?.tagline ?? "",
     };
     return texts[b.kind] ?? info.about;
@@ -585,120 +584,46 @@ export class Ui {
           );
         }
       }
-      if (info.text) {
+      if (info.text || b.kind === "theater") {
         const button = el(
           "button",
           { type: "button", className: "wg-button wg-primary" },
-          "Lesen",
+          b.kind === "theater" ? "Zur Bühne" : "Lesen",
         );
-        button.addEventListener("click", () => this.openRead(b));
+        button.addEventListener("click", () => this.focusOn(b));
         actions.append(button);
       }
-      if (b.kind === "theater") {
-        const button = el(
-          "button",
-          { type: "button", className: "wg-button wg-primary" },
-          "Vorstellung",
-        );
-        button.addEventListener("click", () => this.openStage());
-        actions.append(button);
-      }
-    }
-    if (this.o.game.canDemolish(b)) {
-      const refund = Math.floor(info.cost.wood * balance.refund);
-      const button = el(
-        "button",
-        { type: "button", className: "wg-button" },
-        `Abreissen (${refund} Holz zurück)`,
-      );
-      button.addEventListener("click", () => {
-        void this.confirm({
-          title: `${this.label(b.kind, b.game)} abreissen?`,
-          text: `Du bekommst ${refund} Holz zurück.`,
-          yes: "Abreissen",
-        }).then((yes) => {
-          if (!yes) return;
-          this.o.game.demolish(b);
-          this.announce(`${this.label(b.kind, b.game)} abgerissen.`);
-        });
-      });
-      actions.append(button);
     }
   }
 
-  // --- Reading view --------------------------------------------------------------
+  /** Brings a building's text or stage into view, close enough to read. */
+  private focusOn(b: Building) {
+    const r = this.o.renderer;
+    r.camera.zoom = r.clampZoom(Math.max(r.camera.zoom, 1.3));
+    r.centerOn(b.x + b.w / 2, b.y + b.h / 2);
+    // A standing text or the stage rises above the building: show its middle.
+    r.pan(0, this.o.world.focusOffset(b.id) * r.camera.zoom);
+    this.o.moved();
+    this.select(null);
+  }
 
-  private openRead(b: Building) {
-    const info = kinds[b.kind];
-    const sections = sectionsFor(info, b.game);
-    const revealed = info.scroll
-      ? this.o.renderer.revealed(b)
-      : sections.map(() => true);
-    need(this.read, "[data-read-title]").textContent = this.label(
-      b.kind,
-      b.game,
-    );
-    const body = need(this.read, "[data-read-body]");
-    body.replaceChildren();
-    sections.forEach((section, i) => {
-      if (revealed[i]) body.append(el("section", {}, ...section.nodes()));
-      else
-        body.append(
-          el(
-            "section",
-            { className: "wg-covered" },
-            el(
-              "p",
-              {},
-              "Noch unter Bäumen. Fäll sie, dann entrollt sich hier der nächste Abschnitt.",
-            ),
-          ),
-        );
+  private askDemolish(b: Building) {
+    if (!this.o.game.canDemolish(b))
+      return this.announce(
+        b.state === "drowned"
+          ? "Das liegt unter Wasser."
+          : "Der Damm bleibt stehen.",
+      );
+    const refund = Math.floor(kinds[b.kind].cost.wood * balance.refund);
+    void this.confirm({
+      title: `${this.label(b.kind, b.game)} abreissen?`,
+      text: `Du bekommst ${refund} Holz zurück.`,
+      yes: "Abreissen",
+    }).then((yes) => {
+      if (!yes) return;
+      this.o.game.demolish(b);
+      this.announce(`${this.label(b.kind, b.game)} abgerissen.`);
     });
-    this.read.showModal();
-    body.scrollTop = 0;
-  }
-
-  // --- Theatre ----------------------------------------------------------------------
-
-  private openStage() {
-    const playable = this.o.games.filter(
-      (g) => g.preview && this.o.game.done("spielhaus", g.id),
-    );
-    for (const button of this.stage.querySelectorAll<HTMLButtonElement>(
-      "[data-program]",
-    )) {
-      const id = button.dataset.program ?? "";
-      button.hidden = !playable.some((g) => g.id === id);
-    }
-    need(this.stage, "[data-stage-empty]").hidden = playable.length > 0;
-    this.stage.showModal();
-    if (playable[0]) this.showPreview(playable[0].id);
-  }
-
-  private showPreview(id: string) {
-    const game = this.o.games.find((g) => g.id === id);
-    if (!game) return;
-    for (const button of this.stage.querySelectorAll<HTMLButtonElement>(
-      "[data-program]",
-    ))
-      button.setAttribute(
-        "aria-pressed",
-        String(button.dataset.program === id),
-      );
-    for (const section of this.stage.querySelectorAll<HTMLElement>(
-      "[data-preview]",
-    )) {
-      const show = section.dataset.preview === id;
-      if (show && !this.mounted.has(id)) {
-        if (this.o.mountPreview(section, id)) this.mounted.add(id);
-      }
-      section.hidden = !show || !this.mounted.has(id);
-    }
-    const play = need<HTMLAnchorElement>(this.stage, "[data-stage-play]");
-    play.href = game.playUrl;
-    play.textContent = `${game.title} richtig spielen`;
-    play.hidden = false;
   }
 
   // --- Confirmations ------------------------------------------------------------------

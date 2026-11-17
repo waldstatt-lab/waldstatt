@@ -166,7 +166,8 @@ export function mountPreview(
 
   // Sharp at any size: the canvas matches its CSS size in device pixels.
   new ResizeObserver(() => {
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    // The stage is zoomed with the map, so draw at twice the size.
+    const ratio = Math.min(window.devicePixelRatio || 1, 2) * 2;
     const width = Math.max(1, Math.round(surface.clientWidth * ratio));
     surface.width = width;
     surface.height = Math.round((width * game.height) / game.width);
