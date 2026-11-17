@@ -58,6 +58,11 @@ a stock limit. The app icons are pixel art encoded as PNG at build time.
   it.
 - Tearing down is a tool in the toolbox, and the build menu keeps its scroll
   position.
+- Texts, plates and the stage lie flat on the ground and take as much space as
+  their text. Tapping one turns the view into a top-down plan with north up, to
+  read it or play on the stage; zooming out turns it back. Nothing on the map
+  opens a panel or dialog: other buildings show a short status label, tearing
+  down takes a second tap, and the dam names what will drown while placing.
 
 This is a hobby project, so the pitch sets no appetite. The game should still
 grow in playable slices, each a sensible place to stop: forest, felling and huts;

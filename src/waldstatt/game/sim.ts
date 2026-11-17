@@ -61,8 +61,8 @@ export const hints = [
   "Gut! Mit 8 Holz bauen wir unter «Bauen» eine Hütte – aber nur auf freiem Boden. Fäll also genug Bäume.",
   "Zu zweit geht’s schneller. Die Säge markiert ganze Flächen. Bau als Nächstes ein Spielhaus: Dort wohnen unsere Spiele.",
   "Am Spielhaus hängt das Schild zum Spielen. Für Schriften brauchen wir Pergament – bau eine Schafweide.",
-  "Schriftrollen brauchen viel freien Platz. Steht eine, liest du sie direkt im Wald – zoom einfach näher.",
-  "Die Druckerei druckt Anleitungen, und auf der Bühne des Theaters spielst du unsere Spiele an.",
+  "Schriftrollen brauchen so viel Platz wie ihr Text. Tippst du eine an, dreht sich die Karte, und du liest sie direkt im Wald.",
+  "Die Druckerei druckt Anleitungen. Tippst du die Bühne des Theaters an, spielst du unsere Spiele direkt darauf an.",
   "Die Sihl liesse sich stauen. Aber was im Becken steht, geht unter.",
 ];
 
@@ -85,7 +85,7 @@ export class Game {
   ) {
     for (const [x, y] of lakeTiles()) this.lake.add(key(x, y));
     for (const b of state.buildings) {
-      if (kinds[b.kind].scroll) b.h = scrollHeight(b.kind, b.game);
+      if (kinds[b.kind].fit) b.h = scrollHeight(b.kind, b.game);
       this.occupy(b);
     }
     this.syncWorkers();
@@ -199,7 +199,7 @@ export class Game {
     const info = kinds[kind];
     return {
       w: info.w,
-      h: info.scroll ? this.scrollHeight(kind, game) : info.h,
+      h: info.fit ? this.scrollHeight(kind, game) : info.h,
     };
   }
 

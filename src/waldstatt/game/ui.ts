@@ -1,13 +1,16 @@
 /**
  * The HTML interface over the map: the toolbox with supplies and tools
- * (axe, saw, tearing down), the build menu, placing buildings, the building
- * info, confirmations, the Waldmensch's hints and the announcements for
- * screen readers. Texts are read on the map itself (overlay.ts). Text comes
- * from the page, the balance table or fixed strings; nodes are created with
- * the DOM API, never from HTML strings.
+ * (axe, saw, tearing down), the build menu, placing buildings, the
+ * Waldmensch's hints and the announcements for screen readers. Things on the
+ * map react directly, without panels or dialogs: a text, a Spielhaus plate or
+ * the stage turns the view top-down onto it, other buildings show a short
+ * status label, and tearing down takes a second tap. Only «Neu beginnen» in
+ * the menu asks first. Nodes are created with the DOM API, never from HTML
+ * strings.
  */
 import { balance, groups, kinds, type Kind } from "./config";
 import type { MapHandlers, Tile } from "./input";
+import { PLAN } from "./iso";
 import type { WorldLayer } from "./overlay";
 import type { Renderer } from "./render";
 import { hints, type Game } from "./sim";
@@ -47,19 +50,29 @@ export interface UiOptions {
   moved(): void;
 }
 
+/** The largest zoom for reading, so text stays a comfortable size. */
+const readingZoom = 1.2;
+
 export class Ui {
   private tool: Tool = "none";
   private placing: { kind: Kind; game?: string; at?: Tile } | null = null;
   private sawFrom: Tile | null = null;
-  private selected: Building | null = null;
+  /** The building torn down by the next tap with the Abreissen tool. */
+  private doomed: Building | null = null;
+  /** While reading or playing: the building, and where the camera was. */
+  private reading: {
+    b: Building;
+    back: { x: number; y: number; zoom: number };
+    /** The zoom the text was opened at; zooming well out of it leaves. */
+    zoom: number;
+  } | null = null;
   private suppliesDirty = true;
-  private infoClock = 0;
 
   private toolbox: HTMLElement;
   private buildMenu: HTMLElement;
   private mainMenu: HTMLElement;
-  private info: HTMLElement;
   private placingBar: HTMLElement;
+  private backBar: HTMLElement;
   private hint: HTMLElement;
   private live: HTMLElement;
   private confirmDialog: HTMLDialogElement;
@@ -75,8 +88,8 @@ export class Ui {
     this.toolbox = need(root, "[data-toolbox]");
     this.buildMenu = need(root, "[data-build-menu]");
     this.mainMenu = need(root, "[data-main-menu]");
-    this.info = need(root, "[data-info]");
     this.placingBar = need(root, "[data-placing]");
+    this.backBar = need(root, "[data-back]");
     this.hint = need(root, "[data-hint]");
     this.live = need(root, "[data-live]");
     this.confirmDialog = need(root, "[data-confirm]");
@@ -105,9 +118,6 @@ export class Ui {
       if (action !== "zoom-in" && action !== "zoom-out") this.closeMenus();
       this.menuAction(action);
     });
-    need(this.info, "[data-info-close]").addEventListener("click", () =>
-      this.select(null),
-    );
     need(this.hint, "[data-hint-close]").addEventListener("click", () => {
       o.game.state.hint = o.game.currentHint() + 1;
       this.hint.hidden = true;
@@ -120,9 +130,12 @@ export class Ui {
     need(this.placingBar, "[data-place-cancel]").addEventListener("click", () =>
       this.stopPlacing(),
     );
+    need(this.backBar, "button").addEventListener("click", () =>
+      this.leaveReading(),
+    );
 
     document.addEventListener("keydown", (event) => {
-      // The map handles its own Escape (input.ts).
+      // The map handles its own Escape (input.ts); the stage leaves on Escape.
       if (event.key !== "Escape" || event.target === this.mapHost()) return;
       if (this.confirmDialog.open) return;
       if (!this.buildMenu.hidden || !this.mainMenu.hidden) {
@@ -130,8 +143,8 @@ export class Ui {
         event.preventDefault();
       } else if (this.placing) {
         this.stopPlacing();
-      } else if (this.selected) {
-        this.select(null);
+      } else if (this.reading) {
+        this.leaveReading();
       }
     });
     document.addEventListener("pointerdown", (event) => {
@@ -163,27 +176,24 @@ export class Ui {
     this.suppliesDirty = true;
   }
 
-  frame(dt: number) {
-    if (this.suppliesDirty) {
-      this.suppliesDirty = false;
-      const s = this.o.game.state;
-      const values: Record<string, string> = {
-        wood: String(s.wood),
-        parchment: String(s.parchment),
-        prints: String(s.prints),
-        workers: String(this.o.game.workers.length),
-      };
-      for (const element of this.toolbox.querySelectorAll<HTMLElement>(
-        "[data-supply]",
-      ))
-        element.textContent = values[element.dataset.supply ?? ""] ?? "";
-      if (!this.buildMenu.hidden) this.updateBuildMenu();
-    }
-    this.infoClock += dt;
-    if (this.selected && this.infoClock > 0.4) {
-      this.infoClock = 0;
-      this.fillInfo(this.selected, true);
-    }
+  frame() {
+    const r = this.o.renderer;
+    if (this.reading && !r.flying && r.camera.zoom < this.reading.zoom * 0.7)
+      this.leaveReading(true);
+    if (!this.suppliesDirty) return;
+    this.suppliesDirty = false;
+    const s = this.o.game.state;
+    const values: Record<string, string> = {
+      wood: String(s.wood),
+      parchment: String(s.parchment),
+      prints: String(s.prints),
+      workers: String(this.o.game.workers.length),
+    };
+    for (const element of this.toolbox.querySelectorAll<HTMLElement>(
+      "[data-supply]",
+    ))
+      element.textContent = values[element.dataset.supply ?? ""] ?? "";
+    if (!this.buildMenu.hidden) this.updateBuildMenu();
   }
 
   // --- Tools and menus ------------------------------------------------------
@@ -192,6 +202,7 @@ export class Ui {
     if (this.placing) this.stopPlacing();
     this.tool = this.tool === tool ? "none" : tool;
     this.sawFrom = null;
+    this.setDoomed(null);
     this.o.renderer.setSaw(null);
     for (const button of this.toolbox.querySelectorAll<HTMLButtonElement>(
       "[data-tool]",
@@ -207,7 +218,7 @@ export class Ui {
       this.announce("Säge: über die Bäume ziehen, die fallen sollen.");
     if (this.tool === "demolish")
       this.announce(
-        "Abreissen: ein Gebäude antippen. Die Hälfte des Holzes kommt zurück.",
+        "Abreissen: ein Gebäude zweimal antippen. Die Hälfte des Holzes kommt zurück.",
       );
   }
 
@@ -240,6 +251,7 @@ export class Ui {
     const r = this.o.renderer;
     const box = this.mapHost().getBoundingClientRect();
     if (action === "home") {
+      if (this.reading) this.leaveReading();
       r.centerOn(0.5, 0.5);
       this.o.moved();
     } else if (action === "zoom-in") {
@@ -330,14 +342,20 @@ export class Ui {
   // --- Placing ----------------------------------------------------------------
 
   private startPlacing(kind: Kind, game?: string) {
-    this.select(null);
+    if (this.reading) this.leaveReading();
+    this.setDoomed(null);
     this.placing = { kind, game };
     this.mapHost().dataset.mode = "place";
     const name = this.label(kind, game);
-    need(this.placingBar, "[data-placing-text]").textContent =
-      kind === "damm"
-        ? `${name}: nur dort, wo die Sihl das Tal verlässt. Blau wird der Sihlsee.`
-        : `${name} platzieren: auf freien Boden tippen oder klicken.`;
+    let text = `${name} platzieren: auf freien Boden tippen oder klicken.`;
+    if (kind === "damm") {
+      const drowned = this.o.game.wouldDrown();
+      text = `${name}: nur dort, wo die Sihl das Tal verlässt. Blau wird der Sihlsee`;
+      text += drowned.length
+        ? ` – darin gehen unter: ${drowned.map((b) => this.label(b.kind, b.game)).join(", ")}.`
+        : ".";
+    }
+    need(this.placingBar, "[data-placing-text]").textContent = text;
     this.placingBar.hidden = false;
     const r = this.o.renderer;
     if (kind === "damm") {
@@ -353,7 +371,7 @@ export class Ui {
       this.ghostAt({ x: Math.floor(centre.x), y: Math.floor(centre.y) });
     }
     this.announce(
-      `${name}: mit Pfeiltasten verschieben, Eingabetaste baut, Escape bricht ab.`,
+      `${text} Mit Pfeiltasten verschieben, Eingabetaste baut, Escape bricht ab.`,
     );
     this.mapHost().focus();
   }
@@ -378,25 +396,12 @@ export class Ui {
       : (spot.reason ?? "");
   }
 
-  private async tryPlace(tile: Tile) {
+  private tryPlace(tile: Tile) {
     if (!this.placing) return;
     const { kind, game } = this.placing;
     const at = this.anchor(tile);
     const spot = this.o.game.placement(kind, game, at.x, at.y);
     if (!spot.ok) return this.announce(spot.reason ?? "Hier nicht.");
-    if (kind === "damm") {
-      const drowned = this.o.game.wouldDrown();
-      const yes = await this.confirm({
-        title: "Damm bauen?",
-        text:
-          drowned.length === 0
-            ? "Wenn der Damm steht, staut die Sihl zum Sihlsee. Im Becken steht noch nichts."
-            : `Wenn der Damm steht, staut die Sihl zum Sihlsee. ${drowned.length === 1 ? "Ein Gebäude geht" : `${drowned.length} Gebäude gehen`} unter:`,
-        list: drowned.map((b) => this.label(b.kind, b.game)),
-        yes: "Damm bauen",
-      });
-      if (!yes || !this.placing) return;
-    }
     const b = this.o.game.place(kind, game, at.x, at.y);
     if (!b)
       return this.announce(
@@ -421,10 +426,10 @@ export class Ui {
 
   handlers(): MapHandlers {
     return {
-      sawing: () => this.tool === "saw" && !this.placing,
+      sawing: () => this.tool === "saw" && !this.placing && !this.reading,
       tap: (tile, pointer) => {
         if (this.placing) {
-          if (pointer === "mouse") void this.tryPlace(tile);
+          if (pointer === "mouse") this.tryPlace(tile);
           else this.ghostAt(tile);
           return;
         }
@@ -451,8 +456,8 @@ export class Ui {
           });
       },
       activate: (tile) => {
-        if (this.placing) return void this.tryPlace(tile);
-        if (this.tool === "saw") {
+        if (this.placing) return this.tryPlace(tile);
+        if (this.tool === "saw" && !this.reading) {
           if (!this.sawFrom) {
             this.sawFrom = tile;
             this.o.renderer.setSaw({
@@ -479,7 +484,8 @@ export class Ui {
           this.sawFrom = null;
           this.o.renderer.setSaw(null);
         } else if (this.placing) this.stopPlacing();
-        else if (this.selected) this.select(null);
+        else if (this.reading) this.leaveReading();
+        else if (this.doomed) this.setDoomed(null);
         else if (this.tool !== "none") this.setTool(this.tool);
       },
       moved: () => this.o.moved(),
@@ -496,134 +502,162 @@ export class Ui {
   private activateTile(tile: Tile) {
     const g = this.o.game;
     const b = g.buildingAt(tile.x, tile.y);
-    if (this.tool === "demolish") {
-      if (b) this.askDemolish(b);
-      else this.announce("Tippe auf ein Gebäude, das weg soll.");
+    if (this.reading) {
+      // Another text or the stage is read in turn; anything else leads back.
+      if (b && b.id !== this.reading.b.id && this.readable(b)) this.read(b);
+      else if (!b || b.id !== this.reading.b.id) this.leaveReading();
       return;
     }
-    if (b) return this.select(b);
+    if (this.tool === "demolish") {
+      if (b) this.demolish(b);
+      else {
+        this.setDoomed(null);
+        this.announce("Tippe auf ein Gebäude, das weg soll.");
+      }
+      return;
+    }
+    if (b) return this.react(b);
     if (this.tool === "axe") {
       const result = g.toggleMark(tile.x, tile.y);
       if (result === "marked") this.announce("Baum markiert.");
       else if (result === "unmarked") this.announce("Markierung entfernt.");
       return;
     }
-    if (this.selected) this.select(null);
-    else if (this.tool === "none" && g.isTree(tile.x, tile.y))
+    if (this.tool === "none" && g.isTree(tile.x, tile.y))
       this.announce("Nimm die Axt oder die Säge, um Bäume zu markieren.");
   }
 
-  // --- Building info --------------------------------------------------------------
+  // --- Buildings react directly ---------------------------------------------------
 
-  select(b: Building | null) {
-    this.selected = b;
-    this.o.renderer.setSelected(b);
-    this.info.hidden = !b;
-    if (b) this.fillInfo(b, false);
+  private readable(b: Building): boolean {
+    return (
+      b.state === "done" &&
+      (!!kinds[b.kind].fit || b.kind === "theater" || b.kind === "spielhaus")
+    );
   }
 
-  /** Called when a building changes; keeps the open info current. */
+  /** A tap on a building: read it, or show how it is doing. */
+  private react(b: Building) {
+    if (this.readable(b)) return this.read(b);
+    const text = this.stateText(b);
+    this.o.world.toast(b, `${this.label(b.kind, b.game)}: ${text}`);
+    this.announce(`${this.label(b.kind, b.game)}: ${text}`);
+  }
+
+  /** Called when something on a building changes; nothing to refresh here. */
   building(b: Building, removed: boolean) {
-    if (this.selected?.id === b.id) {
-      if (removed) this.select(null);
-      else this.fillInfo(b, true);
-    }
+    if (removed && this.doomed?.id === b.id) this.setDoomed(null);
+    if (removed && this.reading?.b.id === b.id) this.leaveReading();
     if (!this.buildMenu.hidden) this.updateBuildMenu();
   }
 
   private stateText(b: Building): string {
     const info = kinds[b.kind];
-    if (b.state === "drowned")
-      return "Überflutet. Liegt auf dem Grund des Sihlsees.";
+    if (b.state === "drowned") return "überflutet.";
     if (b.state === "site") {
       const percent = Math.round(this.o.game.progress(b) * 100);
-      return percent === 0
-        ? "Baustelle. Die Waldleute kommen."
-        : `Im Bau: ${percent} %.`;
+      return percent === 0 ? "Baustelle." : `im Bau, ${percent} %.`;
     }
-    if (info.text)
-      return "Der Text steht im Wald über dem Gebäude. Zoom näher, um ihn zu lesen.";
     const texts: Partial<Record<Kind, string>> = {
-      huette: "Hier wohnt ein Waldmensch.",
-      schafweide: `Die Schafe geben Pergament (höchstens ${balance.maxParchment}).`,
-      druckerei: `Druckt aus Pergament Drucke (höchstens ${balance.maxPrints}).`,
-      kloster: "Das Kloster Einsiedeln, vereinfacht. Der Stolz der Waldstatt.",
-      damm: "Der Damm staut die Sihl zum Sihlsee.",
-      theater: "Auf der Bühne spielst du die Spiele an, deren Spielhaus steht.",
-      spielhaus: this.o.games.find((g) => g.id === b.game)?.tagline ?? "",
+      huette: "hier wohnt ein Waldmensch.",
+      schafweide: `Pergament ${this.o.game.state.parchment} von ${balance.maxParchment}.`,
+      druckerei: `Drucke ${this.o.game.state.prints} von ${balance.maxPrints}.`,
+      kloster: "der Stolz der Waldstatt.",
+      damm: "staut die Sihl zum Sihlsee.",
     };
     return texts[b.kind] ?? info.about;
   }
 
-  private fillInfo(b: Building, refresh: boolean) {
-    const title = need(this.info, "[data-info-title]");
-    const state = need(this.info, "[data-info-state]");
-    const actions = need(this.info, "[data-info-actions]");
-    title.textContent = this.label(b.kind, b.game);
-    state.textContent = this.stateText(b);
-    const signature = `${b.id}:${b.state}`;
-    if (refresh && actions.dataset.signature === signature) return;
-    actions.dataset.signature = signature;
-    actions.replaceChildren();
-    const info = kinds[b.kind];
-    if (b.state === "done") {
-      if (b.kind === "spielhaus") {
-        const game = this.o.games.find((g) => g.id === b.game);
-        if (game) {
-          actions.append(
-            el(
-              "a",
-              { className: "wg-button wg-primary", href: game.playUrl },
-              `${game.title} spielen`,
-            ),
-            el(
-              "a",
-              { className: "wg-button", href: game.sourceUrl },
-              "Quellcode",
-            ),
-          );
-        }
-      }
-      if (info.text || b.kind === "theater") {
-        const button = el(
-          "button",
-          { type: "button", className: "wg-button wg-primary" },
-          b.kind === "theater" ? "Zur Bühne" : "Lesen",
-        );
-        button.addEventListener("click", () => this.focusOn(b));
-        actions.append(button);
-      }
-    }
-  }
-
-  /** Brings a building's text or stage into view, close enough to read. */
-  private focusOn(b: Building) {
-    const r = this.o.renderer;
-    r.camera.zoom = r.clampZoom(Math.max(r.camera.zoom, 1.3));
-    r.centerOn(b.x + b.w / 2, b.y + b.h / 2);
-    // A standing text or the stage rises above the building: show its middle.
-    r.pan(0, this.o.world.focusOffset(b.id) * r.camera.zoom);
-    this.o.moved();
-    this.select(null);
-  }
-
-  private askDemolish(b: Building) {
-    if (!this.o.game.canDemolish(b))
+  /** The Abreissen tool: the first tap marks a building, the second tears it down. */
+  private demolish(b: Building) {
+    if (!this.o.game.canDemolish(b)) {
+      this.setDoomed(null);
       return this.announce(
         b.state === "drowned"
           ? "Das liegt unter Wasser."
           : "Der Damm bleibt stehen.",
       );
-    const refund = Math.floor(kinds[b.kind].cost.wood * balance.refund);
-    void this.confirm({
-      title: `${this.label(b.kind, b.game)} abreissen?`,
-      text: `Du bekommst ${refund} Holz zurück.`,
-      yes: "Abreissen",
-    }).then((yes) => {
-      if (!yes) return;
-      this.o.game.demolish(b);
-      this.announce(`${this.label(b.kind, b.game)} abgerissen.`);
-    });
+    }
+    const name = this.label(b.kind, b.game);
+    if (this.doomed?.id !== b.id) {
+      const refund = Math.floor(kinds[b.kind].cost.wood * balance.refund);
+      this.setDoomed(b);
+      const text = `Nochmals tippen: ${name} abreissen (${refund} Holz zurück).`;
+      this.o.world.toast(b, text);
+      return this.announce(text);
+    }
+    this.setDoomed(null);
+    this.o.game.demolish(b);
+    this.announce(`${name} abgerissen.`);
+  }
+
+  private setDoomed(b: Building | null) {
+    this.doomed = b;
+    this.o.renderer.setSelected(b, 0xd8432f);
+  }
+
+  // --- Reading and playing on the map --------------------------------------------
+
+  /** Turns the view top-down onto a text, a plate or the stage. */
+  private read(b: Building) {
+    const r = this.o.renderer;
+    const area = this.o.world.area(b.id) ?? { x: b.x, y: b.y, w: b.w, h: b.h };
+    const box = this.mapHost().getBoundingClientRect();
+    // Clear of the back button above and the toolbox below.
+    const usable = { w: box.width * 0.92, h: (box.height - 200) * 0.95 };
+    const fit = (usable.w / (area.w * PLAN)) * 1;
+    let zoom = Math.min(readingZoom, fit);
+    // Centred between the back button and the toolbox.
+    const shift = (box.height / 2 - (70 + usable.h / 2)) / PLAN;
+    let y = area.y + area.h / 2;
+    if (b.kind === "theater" || b.kind === "spielhaus") {
+      // The stage and plates fit as a whole.
+      zoom = Math.min(2, fit, usable.h / (area.h * PLAN));
+    } else if (area.h * PLAN * zoom > usable.h) {
+      // A long text starts at its top; the rest is a pan away.
+      y = area.y + (usable.h / 2 - 24) / (PLAN * zoom);
+    }
+    y += shift / zoom;
+    this.reading = {
+      b,
+      back: this.reading?.back ?? { ...r.camera },
+      zoom,
+    };
+    r.flyTo({ x: area.x + area.w / 2, y, zoom, plan: 1 });
+    this.backBar.hidden = false;
+    this.o.moved();
+    const what =
+      b.kind === "theater"
+        ? "Die Bühne. Die Tasten aus der Steuerung spielen an."
+        : `${this.label(b.kind, b.game)}.`;
+    this.announce(`${what} Escape oder «Zurück zur Karte» kehrt zurück.`);
+    if (b.kind === "theater")
+      window.setTimeout(() => this.o.world.play(b.id), 750);
+  }
+
+  /**
+   * Turns the view back to the map: to where it was, or, after zooming out
+   * of the text, around the text at the zoom the map had.
+   */
+  private leaveReading(zoomedOut = false) {
+    if (!this.reading) return;
+    const back = this.reading.back;
+    this.reading = null;
+    this.backBar.hidden = true;
+    const r = this.o.renderer;
+    this.o.renderer.flyTo(
+      zoomedOut
+        ? { x: r.camera.x, y: r.camera.y, zoom: back.zoom, plan: 0 }
+        : { ...back, plan: 0 },
+    );
+    this.o.moved();
+    this.mapHost().focus({ preventScroll: true });
+  }
+
+  /** Opens a building from outside the map, e.g. after a click on its plate. */
+  focus(b: Building) {
+    if (this.reading?.b.id === b.id) return;
+    this.read(b);
   }
 
   // --- Confirmations ------------------------------------------------------------------
@@ -631,15 +665,11 @@ export class Ui {
   private confirm(o: {
     title: string;
     text: string;
-    list?: string[];
     yes: string;
   }): Promise<boolean> {
     const d = this.confirmDialog;
     need(d, "[data-confirm-title]").textContent = o.title;
     need(d, "[data-confirm-text]").textContent = o.text;
-    const list = need(d, "[data-confirm-list]");
-    list.replaceChildren(...(o.list ?? []).map((item) => el("li", {}, item)));
-    list.hidden = !o.list?.length;
     need(d, "[data-confirm-yes]").textContent = o.yes;
     d.returnValue = "";
     d.showModal();

@@ -5,7 +5,7 @@
  * look borrows the genre's isometric view, not any game's pictures: nothing is
  * traced or copied.
  */
-import type { Kind } from "./config";
+import { STAGE, type Kind } from "./config";
 import { TH, TW } from "./iso";
 import { hash } from "./world";
 
@@ -17,7 +17,7 @@ type Point = [number, number, number];
 
 export interface Picture {
   canvas: HTMLCanvasElement;
-  /** Where the anchor (a footprint's top corner) lies, in world units. */
+  /** Where the anchor (the footprint's centre on the ground) lies, in world units. */
   ax: number;
   ay: number;
 }
@@ -580,12 +580,12 @@ const heights: Record<Kind, number> = {
   huette: 70,
   schafweide: 50,
   druckerei: 96,
-  ortstafel: 52,
+  ortstafel: 40,
   chronik: 30,
   spielidee: 30,
-  anleitung: 56,
+  anleitung: 40,
   spielhaus: 110,
-  theater: 90,
+  theater: 130,
   kloster: 190,
   damm: 50,
 };
@@ -598,7 +598,8 @@ function painter(kind: Kind, w: number, d: number) {
   const { element, ctx } = canvas(W, H);
   const ox = (d * TW) / 2 + pad;
   const oy = up + pad;
-  return { element, P: new Painter(ctx, ox, oy), ax: ox, ay: oy };
+  const centre = { x: ox + ((w - d) * TW) / 4, y: oy + ((w + d) * TH) / 4 };
+  return { element, P: new Painter(ctx, ox, oy), ax: centre.x, ay: centre.y };
 }
 
 const plaster = {
@@ -829,84 +830,56 @@ function schafweide(P: Painter, w: number, d: number) {
   for (let v = 0.1; v <= d; v += 0.5) post(w - 0.1, v);
 }
 
-function ortstafel(P: Painter) {
-  P.shadow(0.4, 0.4, 0.6, 0.6, 0.6);
-  P.box(0.45, 0.45, 0.55, 0.55, 0, 40, logs);
-  P.poly(
-    [
-      [0.05, 0.55, 26],
-      [0.95, 0.55, 26],
-      [0.95, 0.55, 44],
-      [0.05, 0.55, 44],
-    ],
-    "#c89a5a",
-    "#5a3a20",
-    1.4,
-  );
-  P.line([0.15, 0.55, 39], [0.8, 0.55, 39], "#4a3626", 1.2);
-  P.line([0.15, 0.55, 34], [0.7, 0.55, 34], "#4a3626", 1);
-  P.line([0.15, 0.55, 30], [0.75, 0.55, 30], "#4a3626", 1);
+/** A low wooden frame round a board lying on the ground; its text is HTML. */
+function board(P: Painter, w: number, d: number, roof: boolean) {
+  P.shadow(0.05, 0.05, w - 0.05, d - 0.05, 0.25);
+  const frame = {
+    top: "#a87a4c",
+    left: "#8a5a32",
+    right: "#6b4423",
+    line: "#4a3320",
+  };
+  P.box(0, 0, w, 0.15, 0, 4, frame);
+  P.box(0, 0.15, 0.15, d - 0.15, 0, 4, frame);
+  P.box(w - 0.15, 0.15, w, d - 0.15, 0, 4, frame);
+  P.box(0, d - 0.15, w, d, 0, 4, frame);
+  if (!roof) return;
+  // Two posts and a small roof at the back, like a notice board.
+  P.box(0.2, 0.05, 0.35, 0.2, 0, 30, logs);
+  P.box(w - 0.35, 0.05, w - 0.2, 0.2, 0, 30, logs);
+  P.gable(0.05, -0.1, w - 0.05, 0.3, 30, 8, "u", tiles, 0.05);
 }
 
-function anleitung(P: Painter) {
-  P.shadow(0.2, 0.3, 1.8, 0.7, 0.6);
-  P.box(0.2, 0.45, 0.3, 0.55, 0, 34, logs);
-  P.box(1.7, 0.45, 1.8, 0.55, 0, 34, logs);
-  P.poly(
-    [
-      [0.1, 0.55, 12],
-      [1.9, 0.55, 12],
-      [1.9, 0.55, 34],
-      [0.1, 0.55, 34],
-    ],
-    "#9a6a3c",
-    "#4a3320",
-    1.2,
-  );
-  for (let i = 0; i < 3; i++) {
-    const u = 0.2 + i * 0.58;
-    P.poly(
-      [
-        [u, 0.56, 15],
-        [u + 0.45, 0.56, 15],
-        [u + 0.45, 0.56, 31],
-        [u, 0.56, 31],
-      ],
-      "#f7f2e4",
-      "#b9ae94",
-    );
-    P.line([u + 0.07, 0.56, 28], [u + 0.35, 0.56, 28], "#2a2420", 1.2);
-    for (let z = 25; z > 17; z -= 2.5)
-      P.line([u + 0.07, 0.56, z], [u + 0.38, 0.56, z], "#8a8072", 0.7);
-  }
-  P.gable(0.05, 0.3, 1.95, 0.8, 34, 8, "u", tiles, 0.05);
+function anleitung(P: Painter, w: number, d: number) {
+  board(P, w, d, true);
 }
 
 function theater(P: Painter, w: number, d: number) {
+  const front = STAGE.depth;
   P.poly(
     [
-      [0, 0, 0],
-      [w, 0, 0],
+      [0, front, 0],
+      [w, front, 0],
       [w, d, 0],
       [0, d, 0],
     ],
     "#b49a6a",
   );
   const rnd = random(4);
-  for (let i = 0; i < 140; i++) {
-    const [x, y] = P.p(rnd() * w, rnd() * d);
+  for (let i = 0; i < 160; i++) {
+    const [x, y] = P.p(rnd() * w, front + rnd() * (d - front));
     P.ctx.fillStyle = "rgba(90, 70, 40, 0.25)";
     P.ctx.fillRect(x, y, 1.6, 1);
   }
-  // Benches in half rings facing the stage at the back.
+  // Benches in curved rows facing the stage.
   const cu = w / 2;
-  const cv = 1.2;
-  for (let r = 4; r >= 1; r--) {
-    const radius = 0.6 + r * 0.62;
+  for (let r = 3; r >= 1; r--) {
+    const v = front + r * 0.85;
     const pts: [number, number][] = [];
     for (let a = 0; a <= 16; a++) {
-      const t = Math.PI * (a / 16);
-      pts.push([cu - Math.cos(t) * radius * 1.25, cv + Math.sin(t) * radius]);
+      const t = a / 16;
+      const u = 0.6 + t * (w - 1.2);
+      pts.push([u, v + Math.pow((u - cu) / (w / 2), 2) * -0.7]);
     }
     for (let k = 0; k < pts.length - 1; k++) {
       const [u0, v0] = pts[k];
@@ -915,8 +888,8 @@ function theater(P: Painter, w: number, d: number) {
         [
           [u0, v0, 4],
           [u1, v1, 4],
-          [u1, v1 + 0.2, 4],
-          [u0, v0 + 0.2, 4],
+          [u1, v1 + 0.25, 4],
+          [u0, v0 + 0.25, 4],
         ],
         "#a8743f",
         "#6b4423",
@@ -924,25 +897,24 @@ function theater(P: Painter, w: number, d: number) {
       );
       P.poly(
         [
-          [u0, v0 + 0.2, 0],
-          [u1, v1 + 0.2, 0],
-          [u1, v1 + 0.2, 4],
-          [u0, v0 + 0.2, 4],
+          [u0, v0 + 0.25, 0],
+          [u1, v1 + 0.25, 0],
+          [u1, v1 + 0.25, 4],
+          [u0, v0 + 0.25, 4],
         ],
         "#7a5230",
       );
     }
   }
-  // The stage, its back wall and the curtain.
-  P.box(0.4, 0.15, w - 0.4, 1.25, 0, 10, {
+  // The stage's edge; the stage floor shows the preview (HTML).
+  P.box(0.2, front - 0.25, w - 0.2, front, 0, 6, {
     top: "#b98a52",
     left: "#8a5a32",
     right: "#6b4423",
     line: "#4a3320",
   });
-  for (let u = 0.6; u < w - 0.4; u += 0.35)
-    P.line([u, 0.15, 10], [u, 1.25, 10], "#94683c", 0.8);
-  P.box(0.3, 0.05, w - 0.3, 0.25, 0, 64, {
+  // The back wall with its curtain, and two towers at the sides.
+  P.box(0.1, 0, w - 0.1, 0.3, 0, 96, {
     top: "#5a3a20",
     left: "#6b4423",
     right: "#4a3018",
@@ -950,26 +922,26 @@ function theater(P: Painter, w: number, d: number) {
   });
   P.poly(
     [
-      [0.5, 0.26, 12],
-      [w - 0.5, 0.26, 12],
-      [w - 0.5, 0.26, 58],
-      [0.5, 0.26, 58],
+      [0.5, 0.31, 6],
+      [w - 0.5, 0.31, 6],
+      [w - 0.5, 0.31, 86],
+      [0.5, 0.31, 86],
     ],
     "#9b2c35",
   );
-  for (let u = 0.6; u < w - 0.5; u += 0.18)
-    P.line([u, 0.26, 13], [u, 0.26, 57], "rgba(60, 10, 15, 0.45)", 1.2);
+  for (let u = 0.6; u < w - 0.5; u += 0.22)
+    P.line([u, 0.31, 7], [u, 0.31, 85], "rgba(60, 10, 15, 0.45)", 1.4);
   P.poly(
     [
-      [0.4, 0.26, 56],
-      [w - 0.4, 0.26, 56],
-      [w - 0.4, 0.26, 62],
-      [0.4, 0.26, 62],
+      [0.4, 0.31, 84],
+      [w - 0.4, 0.31, 84],
+      [w - 0.4, 0.31, 92],
+      [0.4, 0.31, 92],
     ],
     "#d8b45a",
   );
-  for (const u of [0.3, w - 0.55])
-    P.box(u, 0.15, u + 0.25, 0.4, 0, 70, {
+  for (const u of [0.1, w - 0.6])
+    P.box(u, 0, u + 0.5, front, 0, 104, {
       top: "#8a5a32",
       left: "#7a4a28",
       right: "#5a3418",
@@ -1075,45 +1047,20 @@ function damm(P: Painter, w: number, d: number) {
   P.line([0, 0.23, 36], [w, 0.23, 36], "#6d6b64", 1);
 }
 
-/** A scroll lying on the ground; its readable text stands above it in HTML. */
+/** A scroll's two rollers; the parchment between them is HTML. */
 function scroll(P: Painter, w: number, d: number) {
-  P.shadow(0.2, 0.2, w - 0.2, d - 0.2, 0.4);
-  P.poly(
-    [
-      [0.4, 0.5, 1],
-      [w - 0.4, 0.5, 1],
-      [w - 0.4, d - 0.5, 1],
-      [0.4, d - 0.5, 1],
-    ],
-    "#efe0b9",
-    "#b59c6a",
-    1,
-  );
-  const rnd = random(w * 31 + d);
-  for (let v = 0.9; v < d - 0.8; v += 0.32) {
-    let u = 0.7;
-    while (u < w - 0.8) {
-      const len = 0.2 + rnd() * 0.6;
-      P.line(
-        [u, v, 1],
-        [Math.min(w - 0.7, u + len), v, 1],
-        "rgba(90, 67, 48, 0.55)",
-        0.9,
-      );
-      u += len + 0.12;
-    }
-  }
-  for (const v of [0.5, d - 0.5]) {
-    P.box(0.15, v - 0.22, w - 0.15, v + 0.22, 0, 9, {
+  P.shadow(0.2, 0.2, w - 0.2, d - 0.2, 0.3);
+  for (const v of [0.25, d - 0.25]) {
+    P.box(0.3, v - 0.22, w - 0.3, v + 0.22, 0, 9, {
       top: "#f5e9c8",
       left: "#e2cc98",
       right: "#c4a97a",
       line: "#9a7f52",
     });
-    P.box(0, v - 0.18, 0.15, v + 0.18, 0, 8, logs);
-    P.box(w - 0.15, v - 0.18, w, v + 0.18, 0, 8, logs);
+    P.box(0, v - 0.18, 0.3, v + 0.18, 0, 8, logs);
+    P.box(w - 0.3, v - 0.18, w, v + 0.18, 0, 8, logs);
   }
-  P.box(w / 2 - 0.15, d - 0.75, w / 2 + 0.15, d - 0.25, 9, 11, {
+  P.box(w / 2 - 0.15, d - 0.5, w / 2 + 0.15, d - 0.05, 9, 11, {
     top: "#b8323a",
     left: "#a02a32",
     right: "#7c1f26",
@@ -1133,7 +1080,15 @@ export function buildingPicture(
       hut(P);
       break;
     case "spielhaus":
-      spielhaus(P, game);
+      // The house stands centred at the back; its plate lies in front.
+      spielhaus(
+        new Painter(
+          P.ctx,
+          P.ox + ((w - 3) / 2) * (TW / 2),
+          P.oy + ((w - 3) / 2) * (TH / 2),
+        ),
+        game,
+      );
       break;
     case "druckerei":
       druckerei(P);
@@ -1142,10 +1097,10 @@ export function buildingPicture(
       schafweide(P, w, d);
       break;
     case "ortstafel":
-      ortstafel(P);
+      board(P, w, d, false);
       break;
     case "anleitung":
-      anleitung(P);
+      anleitung(P, w, d);
       break;
     case "theater":
       theater(P, w, d);

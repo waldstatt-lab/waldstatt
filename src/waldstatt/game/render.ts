@@ -1,9 +1,16 @@
 /**
- * Draws the game with PixiJS in an isometric view: the textured ground in
- * chunks of 16 × 16 tiles, the rivers as smooth blue strokes, the Sihlsee
- * once it is dammed, and trees, buildings and Waldleute sorted back to front.
- * Chunks are made as they come into view and destroyed far off screen. The
- * camera position is in tiles; zoom is screen pixels per world unit.
+ * Draws the game with PixiJS. Two layers share one camera:
+ *
+ * - the ground, drawn in tile units under the view's projection (iso.ts):
+ *   textured tiles in chunks of 16 × 16, rivers, lakes, the Sihlsee once it
+ *   is dammed, and the overlays for placing, sawing and the cursor;
+ * - upright things, painted for the isometric view and positioned through
+ *   the same projection: trees, buildings, ribbons and Waldleute, sorted back
+ *   to front.
+ *
+ * The view is usually isometric. To read a text or play on the stage it turns
+ * into a top-down plan with north up; upright things fade meanwhile. The
+ * camera position is in tiles; zoom scales world units to screen pixels.
  */
 import {
   AlphaFilter,
@@ -11,6 +18,7 @@ import {
   Container,
   FillPattern,
   Graphics,
+  Matrix,
   Rectangle,
   Sprite,
   Texture,
@@ -27,7 +35,8 @@ import {
   workerAtlas,
   workerFrame,
 } from "./art";
-import { diamond, fromIso, iso, TH, TW } from "./iso";
+import { kinds } from "./config";
+import { apply, invert, iso, projection, TH, type Linear } from "./iso";
 import type { Game, Placement } from "./sim";
 import { key } from "./sim";
 import type { Building, Camera } from "./state";
@@ -48,17 +57,43 @@ const maxZoom = 2.5;
 const maxVisibleTiles = 16000;
 /** How far trees and roofs reach above their tile, in world units. */
 const reach = 200;
-/** World units across a river per tile of its width. */
-const across = 28.6;
+/** Seconds the view takes to turn. */
+const turnSeconds = 0.7;
 
-/** A ring of tile points as world points on the ground. */
-function ringToIso(ring: number[]): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < ring.length; i += 2) {
-    const p = iso(ring[i], ring[i + 1]);
-    out.push(p.x, p.y);
-  }
-  return out;
+type GroundKind = "meadow" | "floor" | "bank";
+
+/** Something upright at a place on the map. */
+interface Upright {
+  object: Container;
+  x: number;
+  y: number;
+  /** Raised above the ground, in world units. */
+  lift: number;
+  /** Added to the sort order, to keep ribbons above their tree. */
+  depth: number;
+  /** Where it sorts, if not at (x, y): a building by its front tile. */
+  sort?: { x: number; y: number };
+}
+
+interface ChunkView {
+  cx: number;
+  cy: number;
+  ground: Graphics;
+  trees: Map<string, Upright>;
+  marks: Map<string, Upright>;
+  dirty: boolean;
+}
+
+interface BuildingView {
+  upright: Upright;
+  signature: string;
+  bar?: Graphics;
+}
+
+interface Art {
+  texture: Texture;
+  ax: number;
+  ay: number;
 }
 
 function insideRing(x: number, y: number, ring: number[]): boolean {
@@ -86,74 +121,67 @@ function drawLakeShape(g: Graphics, lake: Lake, water: number) {
   );
   const shores = lake.rings.filter((ring) => !islands.includes(ring));
   for (const ring of shores)
-    g.poly(ringToIso(ring)).stroke({
-      width: 14,
-      color: 0x8c7a52,
-      join: "round",
-    });
-  for (const ring of shores) g.poly(ringToIso(ring)).fill(water);
+    g.poly(ring).stroke({ width: 0.45, color: 0x8c7a52, join: "round" });
+  for (const ring of shores) g.poly(ring).fill(water);
   for (const ring of shores)
-    g.poly(ringToIso(ring)).stroke({
-      width: 3,
+    g.poly(ring).stroke({
+      width: 0.1,
       color: 0x2a6fb8,
       alpha: 0.8,
       join: "round",
     });
-  for (const ring of islands) g.poly(ringToIso(ring)).fill(0x3d5a30);
+  for (const ring of islands) g.poly(ring).fill(0x3d5a30);
 }
 
-type GroundKind = "meadow" | "floor" | "bank";
-
-interface ChunkView {
-  cx: number;
-  cy: number;
-  ground: Graphics;
-  trees: Map<string, Sprite>;
-  marks: Map<string, Sprite>;
-  dirty: boolean;
-}
-
-interface BuildingView {
-  container: Container;
-  signature: string;
-  bar?: Graphics;
-}
-
-interface Art {
-  texture: Texture;
-  ax: number;
-  ay: number;
-}
+const ease = (t: number) => t * t * (3 - 2 * t);
 
 export class Renderer {
-  private world = new Container({ isRenderGroup: true });
+  private ground = new Container({ isRenderGroup: true });
   private groundLayer = new Container();
   private riverLayer = new Graphics();
   private lakeLayer = new Graphics();
   private lake = new Graphics();
-  private objects = new Container({ sortableChildren: true });
-  private markLayer = new Container();
-  private workerLayer = new Container({ sortableChildren: true });
-  private overlay = new Container();
+  private marksOnGround = new Container();
   private previewLayer = new Container();
   private lakePreview = new Graphics();
   private ghost = new Graphics();
-  private ghostSprite = new Sprite();
   private saw = new Graphics();
   private cursor = new Graphics();
   private selection = new Graphics();
+
+  private upright = new Container({ isRenderGroup: true });
+  private objects = new Container({ sortableChildren: true });
+  private markLayer = new Container();
+  private workerLayer = new Container({ sortableChildren: true });
+  private ghostSprite = new Sprite();
+  private ghostAt: Upright = {
+    object: this.ghostSprite,
+    x: 0,
+    y: 0,
+    lift: 0,
+    depth: 0,
+  };
 
   private chunks = new Map<string, ChunkView>();
   private buildings = new Map<number, BuildingView>();
   private workerSprites = new Map<number, Sprite>();
   private trees: Texture[];
-  private ribbon: Art;
+  private ribbonArt: Art;
   private workerTextures: Texture[];
   private art = new Map<string, Art>();
   private patterns: Record<GroundKind, FillPattern>;
   private time = 0;
   private lastCamera = "";
   private missing = true;
+
+  /** The view: 0 isometric, 1 top-down plan. */
+  private plan = 0;
+  private L: Linear = projection(0);
+  private flight: {
+    from: { x: number; y: number; zoom: number; plan: number };
+    to: { x: number; y: number; zoom: number; plan: number };
+    t: number;
+  } | null = null;
 
   constructor(
     private app: Application,
@@ -179,7 +207,7 @@ export class Renderer {
       5,
     );
     const mark = ribbon();
-    this.ribbon = {
+    this.ribbonArt = {
       texture: Texture.from(mark.canvas),
       ax: mark.ax,
       ay: mark.ay,
@@ -187,7 +215,10 @@ export class Renderer {
     const pattern = (kind: GroundKind) => {
       const texture = Texture.from(groundTexture(kind));
       texture.source.addressMode = "repeat";
-      return new FillPattern(texture, "repeat");
+      const fill = new FillPattern(texture, "repeat");
+      // 256 texture pixels span four tiles.
+      fill.setTransform(new Matrix().scale(1 / 64, 1 / 64));
+      return fill;
     };
     this.patterns = {
       meadow: pattern("meadow"),
@@ -196,31 +227,32 @@ export class Renderer {
     };
 
     app.stage.eventMode = "none";
-    app.stage.addChild(this.world);
     this.previewLayer.addChild(this.lakePreview);
     this.previewLayer.filters = [new AlphaFilter({ alpha: 0.55 })];
     this.previewLayer.visible = false;
-    this.overlay.addChild(
-      this.previewLayer,
-      this.ghost,
-      this.ghostSprite,
-      this.saw,
-      this.selection,
-      this.cursor,
-    );
-    this.world.addChild(
+    this.ground.addChild(
       this.groundLayer,
       this.riverLayer,
       this.lakeLayer,
       this.lake,
+      this.marksOnGround,
+      this.previewLayer,
+      this.ghost,
+      this.saw,
+      this.selection,
+      this.cursor,
+    );
+    this.ghostSprite.alpha = 0.7;
+    this.ghostSprite.visible = false;
+    this.upright.addChild(
       this.objects,
       this.markLayer,
       this.workerLayer,
-      this.overlay,
+      this.ghostSprite,
     );
-    this.ghostSprite.alpha = 0.7;
+    app.stage.addChild(this.ground, this.upright);
     for (const ring of waters.basin.rings)
-      this.lakePreview.poly(ringToIso(ring)).fill(0x2f8de0);
+      this.lakePreview.poly(ring).fill(0x2f8de0);
     this.drawWaters();
     this.drawLake();
     for (const b of game.state.buildings) this.building(b);
@@ -230,14 +262,22 @@ export class Renderer {
     return this.game.state.camera;
   }
 
+  /** Whether the camera is still flying or the view turning. */
+  get flying(): boolean {
+    return this.flight !== null;
+  }
+
+  /** Whether the view is (turning towards) the top-down plan. */
+  get inPlan(): boolean {
+    return (this.flight?.to.plan ?? this.plan) > 0.5;
+  }
+
   // --- Camera ------------------------------------------------------------
 
   minZoom(): number {
     const { width, height } = this.app.screen;
-    return Math.max(
-      0.3,
-      Math.sqrt((width * height) / (((TW * TH) / 2) * maxVisibleTiles)),
-    );
+    const det = Math.abs(this.L.a * this.L.d - this.L.b * this.L.c);
+    return Math.max(0.3, Math.sqrt((width * height) / (det * maxVisibleTiles)));
   }
 
   clampZoom(zoom: number): number {
@@ -252,28 +292,29 @@ export class Renderer {
     );
   }
 
-  /** The world's offset and scale on screen, for the HTML layer. */
-  transform(): { x: number; y: number; zoom: number } {
-    return {
-      x: this.world.position.x,
-      y: this.world.position.y,
-      zoom: this.world.scale.x,
-    };
+  private offset() {
+    const { width, height } = this.app.screen;
+    const z = this.camera.zoom;
+    const c = apply(this.L, this.camera.x, this.camera.y);
+    return { x: width / 2 - c.x * z, y: height / 2 - c.y * z, z };
+  }
+
+  /** The camera, for the HTML layer: offset, zoom and projection. */
+  transform(): { x: number; y: number; zoom: number; L: Linear } {
+    const o = this.offset();
+    return { x: o.x, y: o.y, zoom: o.z, L: this.L };
   }
 
   screenToTile(sx: number, sy: number): { x: number; y: number } {
-    const { width, height } = this.app.screen;
-    const z = this.camera.zoom;
-    const c = iso(this.camera.x, this.camera.y);
-    return fromIso(c.x + (sx - width / 2) / z, c.y + (sy - height / 2) / z);
+    const o = this.offset();
+    return invert(this.L, (sx - o.x) / o.z, (sy - o.y) / o.z);
   }
 
   pan(dx: number, dy: number) {
     const z = this.camera.zoom;
-    const c = iso(this.camera.x, this.camera.y);
-    const t = fromIso(c.x - dx / z, c.y - dy / z);
-    this.camera.x = t.x;
-    this.camera.y = t.y;
+    const d = invert(this.L, dx / z, dy / z);
+    this.camera.x -= d.x;
+    this.camera.y -= d.y;
   }
 
   zoomAt(factor: number, sx: number, sy: number) {
@@ -289,33 +330,77 @@ export class Renderer {
     this.camera.y = y;
   }
 
-  private applyCamera() {
-    const { width, height } = this.app.screen;
-    if (!this.camera.zoom) this.camera.zoom = this.defaultZoom();
-    this.camera.zoom = this.clampZoom(this.camera.zoom);
-    const z = this.camera.zoom;
-    const c = iso(this.camera.x, this.camera.y);
-    this.world.scale.set(z);
-    this.world.position.set(
-      Math.round(width / 2 - c.x * z),
-      Math.round(height / 2 - c.y * z),
-    );
+  /**
+   * Moves the camera, and turns the view to the plan (plan = 1) or back to
+   * the isometric view (plan = 0), smoothly unless motion is reduced.
+   */
+  flyTo(to: { x: number; y: number; zoom: number; plan: number }) {
+    const from = { ...this.camera, plan: this.plan };
+    if (this.still()) {
+      this.camera.x = to.x;
+      this.camera.y = to.y;
+      this.camera.zoom = to.zoom;
+      this.setPlan(to.plan);
+      return;
+    }
+    this.flight = { from, to, t: 0 };
   }
 
-  /** The screen in world units, with a margin. */
-  private screenRect(margin: number) {
+  private setPlan(plan: number) {
+    this.plan = plan;
+    this.L = projection(ease(plan));
+    this.relayout();
+    const fade = 1 - 0.7 * ease(plan);
+    this.objects.alpha = fade;
+    this.markLayer.alpha = fade;
+    this.workerLayer.alpha = fade;
+    this.lastCamera = "";
+  }
+
+  private applyCamera() {
+    if (!this.camera.zoom) this.camera.zoom = this.defaultZoom();
+    if (!this.flight) this.camera.zoom = this.clampZoom(this.camera.zoom);
+    const o = this.offset();
+    const L = this.L;
+    this.ground.setFromMatrix(
+      new Matrix(L.a * o.z, L.b * o.z, L.c * o.z, L.d * o.z, o.x, o.y),
+    );
+    this.upright.position.set(o.x, o.y);
+    this.upright.scale.set(o.z);
+  }
+
+  /** The tiles whose things may be on screen. */
+  private visibleTiles(margin: number) {
     const { width, height } = this.app.screen;
     const z = this.camera.zoom;
-    const c = iso(this.camera.x, this.camera.y);
-    const hw = width / 2 / z + margin;
-    const hh = height / 2 / z + margin;
-    return { x0: c.x - hw, x1: c.x + hw, y0: c.y - hh, y1: c.y + hh + reach };
+    const corners = [
+      [-margin, -margin - reach * z],
+      [width + margin, -margin - reach * z],
+      [-margin, height + margin],
+      [width + margin, height + margin],
+    ].map(([sx, sy]) => this.screenToTile(sx, sy));
+    return {
+      x0: Math.min(...corners.map((c) => c.x)),
+      x1: Math.max(...corners.map((c) => c.x)),
+      y0: Math.min(...corners.map((c) => c.y)),
+      y1: Math.max(...corners.map((c) => c.y)),
+    };
   }
 
   // --- Frame ---------------------------------------------------------------
 
   frame(dt: number) {
     this.time += dt;
+    if (this.flight) {
+      const f = this.flight;
+      f.t = Math.min(1, f.t + dt / turnSeconds);
+      const k = ease(f.t);
+      this.camera.x = f.from.x + (f.to.x - f.from.x) * k;
+      this.camera.y = f.from.y + (f.to.y - f.from.y) * k;
+      this.camera.zoom = f.from.zoom * (f.to.zoom / f.from.zoom) ** k;
+      this.setPlan(f.from.plan + (f.to.plan - f.from.plan) * f.t);
+      if (f.t >= 1) this.flight = null;
+    }
     this.applyCamera();
     const { width, height } = this.app.screen;
     const camera = `${this.camera.x.toFixed(2)}:${this.camera.y.toFixed(2)}:${this.camera.zoom.toFixed(3)}:${width}x${height}`;
@@ -336,42 +421,23 @@ export class Renderer {
     }
   }
 
-  private chunkBounds(cx: number, cy: number) {
-    const x0 = cx * RCHUNK;
-    const y0 = cy * RCHUNK;
-    const x1 = x0 + RCHUNK;
-    const y1 = y0 + RCHUNK;
-    return {
-      x0: iso(x0, y1).x,
-      x1: iso(x1, y0).x,
-      y0: iso(x0, y0).y - reach,
-      y1: iso(x1, y1).y,
-    };
-  }
-
   private updateChunks() {
-    const view = this.screenRect(TW);
-    const keep = this.screenRect(TW * 12);
-    const corners = [
-      fromIso(view.x0, view.y0 - reach),
-      fromIso(view.x1, view.y0 - reach),
-      fromIso(view.x0, view.y1),
-      fromIso(view.x1, view.y1),
-    ];
-    const xs = corners.map((c) => c.x);
-    const ys = corners.map((c) => c.y);
-    const cx0 = Math.floor(Math.min(...xs) / RCHUNK);
-    const cx1 = Math.floor(Math.max(...xs) / RCHUNK);
-    const cy0 = Math.floor(Math.min(...ys) / RCHUNK);
-    const cy1 = Math.floor(Math.max(...ys) / RCHUNK);
+    const view = this.visibleTiles(64);
+    const keep = this.visibleTiles(1200);
     const wanted: [number, number, number][] = [];
     const mid = { x: this.camera.x / RCHUNK, y: this.camera.y / RCHUNK };
-    for (let cy = cy0; cy <= cy1; cy++) {
-      for (let cx = cx0; cx <= cx1; cx++) {
+    for (
+      let cy = Math.floor(view.y0 / RCHUNK);
+      cy <= Math.floor(view.y1 / RCHUNK);
+      cy++
+    ) {
+      for (
+        let cx = Math.floor(view.x0 / RCHUNK);
+        cx <= Math.floor(view.x1 / RCHUNK);
+        cx++
+      ) {
         if (this.chunks.has(key(cx, cy))) continue;
-        const b = this.chunkBounds(cx, cy);
-        if (b.x1 < view.x0 || b.x0 > view.x1) continue;
-        if (b.y1 < view.y0 || b.y0 > view.y1) continue;
+        if (!this.chunkOnScreen(cx, cy, 64)) continue;
         wanted.push([cx, cy, Math.hypot(cx + 0.5 - mid.x, cy + 0.5 - mid.y)]);
       }
     }
@@ -380,11 +446,37 @@ export class Renderer {
     for (const [cx, cy] of wanted.slice(0, 4)) this.createChunk(cx, cy);
     this.missing = wanted.length > 4;
     for (const chunk of this.chunks.values()) {
-      const b = this.chunkBounds(chunk.cx, chunk.cy);
       const far =
-        b.x1 < keep.x0 || b.x0 > keep.x1 || b.y1 < keep.y0 || b.y0 > keep.y1;
+        (chunk.cx + 1) * RCHUNK < keep.x0 ||
+        chunk.cx * RCHUNK > keep.x1 ||
+        (chunk.cy + 1) * RCHUNK < keep.y0 ||
+        chunk.cy * RCHUNK > keep.y1;
       if (far) this.destroyChunk(chunk);
     }
+  }
+
+  /** Whether a chunk's ground or its trees may show on screen. */
+  private chunkOnScreen(cx: number, cy: number, margin: number): boolean {
+    const o = this.offset();
+    const { width, height } = this.app.screen;
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const [x, y] of [
+      [cx, cy],
+      [cx + 1, cy],
+      [cx, cy + 1],
+      [cx + 1, cy + 1],
+    ]) {
+      const p = apply(this.L, x * RCHUNK, y * RCHUNK);
+      xs.push(o.x + p.x * o.z);
+      ys.push(o.y + p.y * o.z);
+    }
+    return (
+      Math.max(...xs) > -margin &&
+      Math.min(...xs) < width + margin &&
+      Math.max(...ys) > -margin &&
+      Math.min(...ys) - reach * o.z < height + margin
+    );
   }
 
   private createChunk(cx: number, cy: number) {
@@ -409,13 +501,33 @@ export class Renderer {
 
   private destroyChunk(chunk: ChunkView) {
     chunk.ground.destroy();
-    for (const sprite of chunk.trees.values()) sprite.destroy();
-    for (const sprite of chunk.marks.values()) sprite.destroy();
+    for (const u of chunk.trees.values()) u.object.destroy();
+    for (const u of chunk.marks.values()) u.object.destroy();
     this.chunks.delete(key(chunk.cx, chunk.cy));
   }
 
   private chunkAt(x: number, y: number) {
     return this.chunks.get(key(Math.floor(x / RCHUNK), Math.floor(y / RCHUNK)));
+  }
+
+  // --- Upright things --------------------------------------------------------
+
+  /** Places an upright thing through the current projection. */
+  private put(u: Upright) {
+    const p = apply(this.L, u.x, u.y);
+    u.object.position.set(p.x, p.y - u.lift);
+    const s = u.sort ? apply(this.L, u.sort.x, u.sort.y) : p;
+    u.object.zIndex = s.y + u.depth;
+  }
+
+  /** Repositions everything upright after the view turned. */
+  private relayout() {
+    for (const chunk of this.chunks.values()) {
+      for (const u of chunk.trees.values()) this.put(u);
+      for (const u of chunk.marks.values()) this.put(u);
+    }
+    for (const view of this.buildings.values()) this.put(view.upright);
+    this.put(this.ghostAt);
   }
 
   /** A grey tint from the gentle hills, multiplied into the ground. */
@@ -440,7 +552,7 @@ export class Renderer {
           const nearStart = Math.hypot(x - start.x, y - start.y) < 4;
           kind = nearStart ? "meadow" : "floor";
         }
-        g.poly(diamond(x, y)).fill({
+        g.rect(x, y, 1, 1).fill({
           fill: this.patterns[kind],
           color: this.tint(x, y),
         });
@@ -449,51 +561,44 @@ export class Renderer {
     }
     for (const [x, y] of stumps) {
       if (hash(x, y, 80) < 0.3) continue;
-      const c = iso(
-        x + 0.3 + hash(x, y, 81) * 0.4,
-        y + 0.3 + hash(x, y, 82) * 0.4,
-      );
-      g.ellipse(c.x + 3, c.y + 1, 8, 3).fill({ color: 0x1e2a14, alpha: 0.35 });
-      g.rect(c.x - 5, c.y - 5, 10, 5).fill(0x6b4a2b);
-      g.ellipse(c.x, c.y, 5, 2.4).fill(0x5a3c22);
-      g.ellipse(c.x, c.y - 5, 5, 2.4).fill(0xc9a46c);
+      const cx = x + 0.3 + hash(x, y, 81) * 0.4;
+      const cy = y + 0.3 + hash(x, y, 82) * 0.4;
+      g.circle(cx + 0.04, cy + 0.04, 0.12).fill({
+        color: 0x1e2a14,
+        alpha: 0.35,
+      });
+      g.circle(cx, cy, 0.1).fill(0x5a3c22);
+      g.circle(cx, cy, 0.075).fill(0xc9a46c);
+      g.circle(cx, cy, 0.035).stroke({ width: 0.012, color: 0x8a6a42 });
     }
   }
 
   /** Rivers, brooks and the natural lakes, drawn once from the data. */
   private drawWaters() {
     for (const line of lines) {
-      const points: { x: number; y: number }[] = [];
-      for (let i = 0; i < line.points.length; i += 2)
-        points.push(iso(line.points[i], line.points[i + 1]));
-      this.strokeRiver(
-        this.riverLayer,
-        points,
-        line.wide ? halfWidth.river : halfWidth.brook,
-      );
+      const hw = (line.wide ? halfWidth.river : halfWidth.brook) * 1.4;
+      const layers: [number, number, number][] = [
+        [hw * 2 + 0.5, 0x8c7a52, 1],
+        [hw * 2 + 0.14, 0x2a6fb8, 1],
+        [hw * 2 - 0.1, 0x3a8ee0, 1],
+        [hw * 0.8, 0x4fa3ec, 1],
+        [0.05, 0xa8dcff, 0.6],
+      ];
+      for (const [width, color, alpha] of layers) {
+        this.riverLayer.moveTo(line.points[0], line.points[1]);
+        for (let i = 2; i < line.points.length; i += 2)
+          this.riverLayer.lineTo(line.points[i], line.points[i + 1]);
+        this.riverLayer.stroke({
+          width,
+          color,
+          alpha,
+          cap: "round",
+          join: "round",
+        });
+      }
     }
     for (const lake of waters.lakes)
       drawLakeShape(this.lakeLayer, lake, 0x3586d4);
-  }
-
-  private strokeRiver(
-    g: Graphics,
-    points: { x: number; y: number }[],
-    hw: number,
-  ) {
-    const width = hw * 2 * across * 1.4;
-    const layers: [number, number, number][] = [
-      [width + 14, 0x8c7a52, 1],
-      [width + 4, 0x2a6fb8, 1],
-      [width - 3, 0x3a8ee0, 1],
-      [width * 0.4, 0x4fa3ec, 1],
-      [1.5, 0xa8dcff, 0.6],
-    ];
-    for (const [w, color, alpha] of layers) {
-      g.moveTo(points[0].x, points[0].y);
-      for (const p of points.slice(1)) g.lineTo(p.x, p.y);
-      g.stroke({ width: w, color, alpha, cap: "round", join: "round" });
-    }
   }
 
   /** The Sihlsee, once the dam stands: water over the basin. */
@@ -507,26 +612,37 @@ export class Renderer {
     const sprite = new Sprite(this.trees[treeVariant(x, y)]);
     const jx = (hash(x, y, 8) - 0.5) * 0.3;
     const jy = (hash(x, y, 9) - 0.5) * 0.3;
-    const p = iso(x + 0.5 + jx, y + 0.5 + jy);
     const size = (0.68 + hash(x, y, 12) * 0.24) / RES;
     sprite.anchor.set(treeFrame.ax / treeFrame.w, treeFrame.ay / treeFrame.h);
     sprite.scale.set(hash(x, y, 13) < 0.5 ? -size : size, size);
-    sprite.position.set(p.x, p.y);
-    sprite.zIndex = x + y + 1 + jx + jy;
+    const u: Upright = {
+      object: sprite,
+      x: x + 0.5 + jx,
+      y: y + 0.5 + jy,
+      lift: 0,
+      depth: 0,
+    };
+    this.put(u);
     this.objects.addChild(sprite);
-    chunk.trees.set(key(x, y), sprite);
+    chunk.trees.set(key(x, y), u);
   }
 
   private addMark(chunk: ChunkView, x: number, y: number) {
-    const p = iso(x + 0.5, y + 0.5, 34);
-    const sprite = new Sprite(this.ribbon.texture);
+    const sprite = new Sprite(this.ribbonArt.texture);
     sprite.anchor.set(0.5);
     sprite.scale.set(1 / RES);
-    sprite.position.set(p.x, p.y);
+    const u: Upright = {
+      object: sprite,
+      x: x + 0.5,
+      y: y + 0.5,
+      lift: 30,
+      depth: 0,
+    };
+    this.put(u);
     this.markLayer.addChild(sprite);
-    chunk.marks.set(key(x, y), sprite);
-    const tree = chunk.trees.get(key(x, y));
-    if (tree) tree.tint = 0xffc4b0;
+    chunk.marks.set(key(x, y), u);
+    const tree = chunk.trees.get(key(x, y))?.object;
+    if (tree instanceof Sprite) tree.tint = 0xffc4b0;
   }
 
   /** A tree was felled, marked or unmarked. */
@@ -536,17 +652,17 @@ export class Renderer {
     const k = key(x, y);
     const tree = chunk.trees.get(k);
     if (tree && !this.game.isTree(x, y)) {
-      tree.destroy();
+      tree.object.destroy();
       chunk.trees.delete(k);
       chunk.dirty = true;
     }
     const mark = chunk.marks.get(k);
     const marked = this.game.isMarked(x, y);
     if (mark && !marked) {
-      mark.destroy();
+      mark.object.destroy();
       chunk.marks.delete(k);
-      const sprite = chunk.trees.get(k);
-      if (sprite) sprite.tint = 0xffffff;
+      const sprite = chunk.trees.get(k)?.object;
+      if (sprite instanceof Sprite) sprite.tint = 0xffffff;
     } else if (!mark && marked) {
       this.addMark(chunk, x, y);
     }
@@ -555,12 +671,13 @@ export class Renderer {
   /** Redraws what the flood changed. */
   flooded() {
     this.drawLake();
-    for (const chunk of this.chunks.values())
+    for (const chunk of this.chunks.values()) {
       for (const k of [...chunk.trees.keys()]) {
         const [x, y] = k.split(",").map(Number);
         this.tree(x, y);
       }
-    for (const chunk of this.chunks.values()) chunk.dirty = true;
+      chunk.dirty = true;
+    }
     this.rebuildAll();
   }
 
@@ -581,7 +698,7 @@ export class Renderer {
     return art;
   }
 
-  private place(sprite: Sprite, art: Art) {
+  private dress(sprite: Sprite, art: Art) {
     sprite.texture = art.texture;
     sprite.scale.set(1 / RES);
     sprite.anchor.set(
@@ -596,20 +713,26 @@ export class Renderer {
     const signature = `${b.state}:${b.w}x${b.h}`;
     if (existing && !removed && existing.signature === signature) return;
     if (existing) {
-      existing.container.destroy({ children: true });
+      existing.upright.object.destroy({ children: true });
       this.buildings.delete(b.id);
     }
     this.repaintFootprint(b);
     if (removed) return;
 
     const container = new Container();
-    const corner = iso(b.x, b.y);
-    container.position.set(corner.x, corner.y);
-    container.zIndex = b.x + b.w - 1 + (b.y + b.h - 1) + 1.5;
     const sprite = new Sprite();
-    this.place(sprite, this.picture(b));
+    this.dress(sprite, this.picture(b));
     container.addChild(sprite);
-    const view: BuildingView = { container, signature };
+    // Sorted by its front tile, so trees further south still overlap it.
+    const upright: Upright = {
+      object: container,
+      x: b.x + b.w / 2,
+      y: b.y + b.h / 2,
+      lift: 0,
+      depth: 0.1,
+      sort: { x: b.x + b.w - 0.5, y: b.y + b.h - 0.5 },
+    };
+    const view: BuildingView = { upright, signature };
     if (b.state === "drowned") {
       container.alpha = 0.32;
       sprite.tint = 0x7fb0e0;
@@ -620,27 +743,36 @@ export class Renderer {
       container.addChild(view.bar);
       this.drawBar(view.bar, b);
     }
+    this.put(upright);
     this.objects.addChild(container);
     this.buildings.set(b.id, view);
   }
 
+  /** Scaffolding round a site, drawn for the isometric view. */
   private scaffold(b: Building): Graphics {
     const g = new Graphics();
     const height = 34;
-    for (const [u, v] of [
+    const at = (u: number, v: number, z = 0) =>
+      iso(u - b.w / 2, v - b.h / 2, z);
+    const corners = [
       [0.1, 0.1],
       [b.w - 0.1, 0.1],
       [b.w - 0.1, b.h - 0.1],
       [0.1, b.h - 0.1],
-    ]) {
-      const a = iso(u, v);
-      const t = iso(u, v, height);
+    ];
+    for (const [u, v] of corners) {
+      const a = at(u, v);
+      const t = at(u, v, height);
       g.moveTo(a.x, a.y).lineTo(t.x, t.y);
     }
-    const ring = diamond(0.1, 0.1, b.w - 0.2, b.h - 0.2);
-    g.poly(ring.map((value, i) => (i % 2 ? value - height : value)));
+    g.poly(
+      corners.flatMap(([u, v]) => {
+        const p = at(u, v, height);
+        return [p.x, p.y];
+      }),
+    );
     g.stroke({ width: 2, color: 0x8a5a32 });
-    const pile = iso(b.w * 0.3, b.h * 0.7);
+    const pile = at(b.w * 0.3, b.h * 0.7);
     g.rect(pile.x - 10, pile.y - 6, 20, 6).fill(0xa8743f);
     g.rect(pile.x - 8, pile.y - 10, 16, 4).fill(0xb98a52);
     return g;
@@ -656,26 +788,20 @@ export class Renderer {
   }
 
   private drawBar(bar: Graphics, b: Building) {
-    const centre = iso(b.w / 2, b.h / 2, 60);
     const width = 48;
     const done = this.game.progress(b);
+    const y = -70;
     bar.clear();
-    bar.roundRect(centre.x - width / 2, centre.y, width, 7, 3).fill(0x2a1f14);
+    bar.roundRect(-width / 2, y, width, 7, 3).fill(0x2a1f14);
     bar
-      .roundRect(
-        centre.x - width / 2 + 1.5,
-        centre.y + 1.5,
-        (width - 3) * done,
-        4,
-        2,
-      )
+      .roundRect(-width / 2 + 1.5, y + 1.5, (width - 3) * done, 4, 2)
       .fill(0xe8c050);
   }
 
   /** Rebuilds every building picture, e.g. after the flood. */
   rebuildAll() {
     for (const view of this.buildings.values())
-      view.container.destroy({ children: true });
+      view.upright.object.destroy({ children: true });
     this.buildings.clear();
     for (const b of this.game.state.buildings) this.building(b);
   }
@@ -704,9 +830,9 @@ export class Renderer {
         frame = 3 + (Math.floor(this.time * 4 + w.id) % 2);
       sprite.texture = this.workerTextures[frame];
       sprite.scale.set(w.facing / RES, 1 / RES);
-      const p = iso(w.x, w.y);
+      const p = apply(this.L, w.x, w.y);
       sprite.position.set(p.x, p.y);
-      sprite.zIndex = w.x + w.y;
+      sprite.zIndex = p.y;
     }
     for (const [id, sprite] of this.workerSprites) {
       if (!seen.has(id)) {
@@ -727,15 +853,20 @@ export class Renderer {
       const y = spot.y + Math.floor(i / spot.w);
       const color =
         tile === "blocked" ? 0xd8432f : tile === "tree" ? 0xe86a2f : 0x7ccf6a;
-      this.ghost.poly(diamond(x, y)).fill({ color, alpha: 0.4 });
+      this.ghost
+        .rect(x + 0.04, y + 0.04, 0.92, 0.92)
+        .fill({ color, alpha: 0.4 });
     });
     this.ghost
-      .poly(diamond(spot.x, spot.y, spot.w, spot.h))
-      .stroke({ width: 2, color: spot.ok ? 0xfff4c8 : 0xd8432f });
-    this.place(this.ghostSprite, this.picture({ ...b, w: spot.w, h: spot.h }));
-    const corner = iso(spot.x, spot.y);
-    this.ghostSprite.position.set(corner.x, corner.y);
-    this.ghostSprite.visible = spot.ok;
+      .rect(spot.x, spot.y, spot.w, spot.h)
+      .stroke({ width: 0.06, color: spot.ok ? 0xfff4c8 : 0xd8432f });
+    if (!spot.ok || kinds[b.kind].fit) return;
+    this.dress(this.ghostSprite, this.picture({ ...b, w: spot.w, h: spot.h }));
+    this.ghostAt.x = spot.x + spot.w / 2;
+    this.ghostAt.y = spot.y + spot.h / 2;
+    this.put(this.ghostAt);
+    this.ghostSprite.zIndex = 0;
+    this.ghostSprite.visible = true;
   }
 
   setLakePreview(on: boolean) {
@@ -749,25 +880,25 @@ export class Renderer {
     const y = Math.min(area.y0, area.y1);
     const w = Math.abs(area.x1 - area.x0) + 1;
     const h = Math.abs(area.y1 - area.y0) + 1;
-    this.saw.poly(diamond(x, y, w, h)).fill({ color: 0xd8432f, alpha: 0.2 });
-    this.saw.poly(diamond(x, y, w, h)).stroke({ width: 2, color: 0xd8432f });
+    this.saw.rect(x, y, w, h).fill({ color: 0xd8432f, alpha: 0.2 });
+    this.saw.rect(x, y, w, h).stroke({ width: 0.06, color: 0xd8432f });
   }
 
   setCursor(tile: { x: number; y: number } | null) {
     this.cursor.clear();
     if (!tile) return;
     this.cursor
-      .poly(diamond(tile.x, tile.y))
-      .stroke({ width: 4, color: 0x1a120c })
-      .poly(diamond(tile.x, tile.y))
-      .stroke({ width: 2, color: 0xfff4c8 });
+      .rect(tile.x, tile.y, 1, 1)
+      .stroke({ width: 0.12, color: 0x1a120c })
+      .rect(tile.x, tile.y, 1, 1)
+      .stroke({ width: 0.06, color: 0xfff4c8 });
   }
 
-  setSelected(b: Building | null) {
+  /** Highlights a building, e.g. the one about to be torn down. */
+  setSelected(b: Building | null, color = 0xfff4c8) {
     this.selection.clear();
     if (!b) return;
-    this.selection
-      .poly(diamond(b.x, b.y, b.w, b.h))
-      .stroke({ width: 2.5, color: 0xfff4c8 });
+    this.selection.rect(b.x, b.y, b.w, b.h).fill({ color, alpha: 0.25 });
+    this.selection.rect(b.x, b.y, b.w, b.h).stroke({ width: 0.08, color });
   }
 }

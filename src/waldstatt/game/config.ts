@@ -59,7 +59,7 @@ export interface KindInfo {
   name: string;
   group: Group;
   cost: Cost;
-  /** Footprint in tiles; a scroll's height follows its text. */
+  /** Footprint in tiles; for texts lying on the ground, h follows the text. */
   w: number;
   h: number;
   /** Seconds of work for one Waldmensch. */
@@ -68,7 +68,9 @@ export interface KindInfo {
   limit: "one" | "game" | "many";
   /** The text a visitor can read once it is built. */
   text?: "ortstafel" | "chronik" | "idea" | "controls";
-  /** A scroll: its text lies on it, so it is as long as the text needs. */
+  /** The text lies on the footprint, which is as long as the text needs. */
+  fit?: boolean;
+  /** Drawn as a parchment scroll rather than a board. */
   scroll?: boolean;
   /** One short line for the build menu. */
   about: string;
@@ -115,11 +117,12 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Ortstafel",
     group: "Wissen",
     cost: cost(3),
-    w: 1,
-    h: 1,
+    w: 5,
+    h: 0,
     work: 3,
     limit: "one",
     text: "ortstafel",
+    fit: true,
     about: "Woher der Name kommt.",
   },
   chronik: {
@@ -131,6 +134,7 @@ export const kinds: Record<Kind, KindInfo> = {
     work: 8,
     limit: "one",
     text: "chronik",
+    fit: true,
     scroll: true,
     about: "Eine Schriftrolle: wer wir sind und wie wir arbeiten.",
   },
@@ -143,6 +147,7 @@ export const kinds: Record<Kind, KindInfo> = {
     work: 8,
     limit: "game",
     text: "idea",
+    fit: true,
     scroll: true,
     about: "Eine Schriftrolle: die Idee des Spiels und was dich erwartet.",
   },
@@ -150,19 +155,20 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Anleitung",
     group: "Wissen",
     cost: cost(4, 0, 2),
-    w: 2,
-    h: 1,
+    w: 6,
+    h: 0,
     work: 5,
     limit: "game",
     text: "controls",
+    fit: true,
     about: "Ein gedruckter Anschlag mit der Steuerung.",
   },
   spielhaus: {
     name: "Spielhaus",
     group: "Spiele",
     cost: cost(12),
-    w: 3,
-    h: 3,
+    w: 4,
+    h: 4,
     work: 10,
     limit: "game",
     about: "Hier wohnt das Spiel: spielen und Quellcode.",
@@ -171,11 +177,12 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Theater",
     group: "Spiele",
     cost: cost(40),
-    w: 5,
-    h: 4,
+    w: 9,
+    h: 12,
     work: 24,
     limit: "one",
-    about: "Vorstellungen der Spiele, deren Spielhaus steht.",
+    about:
+      "Eine Bühne, auf der du die Spiele anspielst, deren Spielhaus steht.",
   },
   kloster: {
     name: "Kloster Einsiedeln",
@@ -206,6 +213,13 @@ export const groups: Group[] = [
   "Spiele",
   "Prestige",
 ];
+
+/** Text pixels per tile for texts lying on the ground, and their margin in tiles. */
+export const TEXT_SCALE = 32;
+export const TEXT_MARGIN = 0.3;
+
+/** The theatre's stage: the back part of its footprint, in tiles. */
+export const STAGE = { inset: 0.5, depth: 9 };
 
 /** The heading of the controls section in the games' Markdown. */
 export const controlsHeading = "Steuerung";

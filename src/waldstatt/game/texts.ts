@@ -1,11 +1,9 @@
 /**
  * The site's texts, which Astro renders at build time into inert `<template>`
  * elements (Game.astro): the Ortstafel, the Chronik and each game's Markdown.
- * A text is split into sections at its `<h2>` headings; a scroll is as long
- * as its text needs to lie on it. Nodes are cloned from the templates, never built from strings.
+ * A text is split into sections at its `<h2>` headings. Nodes are cloned from the templates, never built from strings.
  */
 import { controlsHeading, type KindInfo } from "./config";
-import { TH, TW } from "./iso";
 
 export interface Section {
   heading: string;
@@ -75,30 +73,6 @@ export function sectionsFor(info: KindInfo, game?: string): Section[] {
   }
   cache.set(key, sections);
   return sections;
-}
-
-/**
- * How a scroll's text lies on the map (the .wg-sheet-flat rules in
- * styles.css): its share of the footprint's width, and the size of a
- * character, a line, a heading and the padding, in world units.
- */
-const sheet = { fill: 0.78, char: 6.2, line: 17, heading: 26, padding: 56 };
-
-/** The width of a scroll's text over a footprint of w × h tiles. */
-export function sheetWidth(w: number, h: number): number {
-  return (((w + h) * TW) / 2) * sheet.fill;
-}
-
-/** A scroll's length in tiles: long enough for its text to fit on it. */
-export function scrollHeight(sections: Section[], w: number): number {
-  for (let h = 4; h < 160; h++) {
-    const perLine = (sheetWidth(w, h) - 32) / sheet.char;
-    let height = sheet.padding;
-    for (const section of sections)
-      height += sheet.heading + Math.ceil(section.chars / perLine) * sheet.line;
-    if (height <= (((w + h) * TH) / 2) * 0.95) return h;
-  }
-  return 160;
 }
 
 export function readGames(): GameInfo[] {

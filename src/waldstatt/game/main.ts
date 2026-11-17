@@ -11,12 +11,12 @@ import { kinds, type Kind } from "./config";
 import { attachInput } from "./input";
 import { carGame } from "./previewCar";
 import { motoGame } from "./previewMoto";
-import { WorldLayer } from "./overlay";
+import { textLength, WorldLayer } from "./overlay";
 import { mountPreview } from "./preview";
 import { Renderer } from "./render";
 import { Game, type Events } from "./sim";
 import { clearSaved, load, save } from "./state";
-import { readGames, scrollHeight, sectionsFor } from "./texts";
+import { readGames } from "./texts";
 import { Ui } from "./ui";
 
 const root = document.querySelector<HTMLElement>("[data-wg]");
@@ -102,7 +102,11 @@ async function start(root: HTMLElement) {
     dirty: scheduleSave,
   };
   const scrollFor = (kind: Kind, game?: string) =>
-    scrollHeight(sectionsFor(kinds[kind], game), kinds[kind].w);
+    textLength(
+      root,
+      kind,
+      games.find((g) => g.id === game),
+    );
   const game = new Game(
     state,
     games.map((g) => g.id),
@@ -144,6 +148,7 @@ async function start(root: HTMLElement) {
         : id === "car-drive"
           ? mountPreview(section, carGame)
           : false,
+    (b) => ui?.focus(b),
   );
   ui = new Ui({
     root,
@@ -181,7 +186,7 @@ async function start(root: HTMLElement) {
     renderer?.frame(dt);
     if (renderer && world)
       world.frame(renderer.transform(), app.screen.width, app.screen.height);
-    ui?.frame(dt);
+    ui?.frame();
   });
 
   document.addEventListener("visibilitychange", () => {

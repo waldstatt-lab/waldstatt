@@ -120,24 +120,11 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
     </div>
   </div>
 
-  <section
-    class="wg-panel wg-info"
-    data-info
-    hidden
-    aria-labelledby="wg-info-title"
-  >
-    <h2 id="wg-info-title" data-info-title></h2>
-    <p data-info-state></p>
-    <div class="wg-actions" data-info-actions></div>
-    <button
-      type="button"
-      class="wg-close"
-      data-info-close
-      aria-label="Gebäude-Info schliessen"
-    >
-      ×
+  <div class="wg-back" data-back hidden>
+    <button type="button" class="wg-button wg-primary">
+      Zurück zur Karte
     </button>
-  </section>
+  </div>
 
   <div
     class="wg-panel wg-menu wg-build"
@@ -261,7 +248,6 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
     <form method="dialog">
       <h2 id="wg-confirm-title" data-confirm-title></h2>
       <p data-confirm-text></p>
-      <ul data-confirm-list hidden></ul>
       <div class="wg-actions">
         <button
           class="wg-button wg-primary"
