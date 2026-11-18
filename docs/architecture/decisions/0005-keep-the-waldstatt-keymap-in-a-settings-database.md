@@ -49,7 +49,10 @@ Alternatives considered for where it lives:
   moved from s to g); b, m, / and : as before.
   _Later:_ the axe and the saw became one tool, «Holzhacken» (action `fell`,
   key a), and «Reparieren» (action `repair`, key r) was added; a saved
-  keymap without `fell` takes the keys it had for `axe`.
+  keymap without `fell` takes the keys it had for `axe`. A third scope,
+  `card`, holds `cardRepair` (r), which repairs the building whose card is
+  open, and `crewMore` (+ and ↑) and `crewLess` (- and ↓), which change the
+  crew while a producing building's card is open.
 - The text mode on a text read top-down, started with Enter on it and left
   with Escape
   ([`textCursor.ts`](../../../src/waldstatt/game/textCursor.ts)),

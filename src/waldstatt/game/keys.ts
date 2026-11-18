@@ -7,6 +7,8 @@
  * scope, where letters count without regard to Shift, which pans with the
  * movement keys. The text mode is a scope of its own, where Shift counts, as
  * in vim's «G» and «V»; its keys go before the others while it is on.
+ * A building's card is a scope of its own too, whose keys repair the
+ * building or change its crew and go before the map's while it is open.
  * Escape, Tab, the digits (counts before a movement) and keys with Ctrl, Alt
  * or Cmd cannot be bound. The keymap is kept in the
  * IndexedDB database `waldstatt-games-settings`, apart from the forest, so
@@ -44,10 +46,13 @@ export type Action =
   | "textVisual"
   | "textVisualLine"
   | "textOther"
-  | "textCopy";
+  | "textCopy"
+  | "crewMore"
+  | "crewLess"
+  | "cardRepair";
 
-/** The map's and the global actions, or the text mode's. */
-export type Scope = "map" | "text";
+/** The map's and the global actions, the text mode's, or a building card's. */
+export type Scope = "map" | "text" | "card";
 
 export type Keymap = Record<Action, string[]>;
 
@@ -105,6 +110,15 @@ export const groups: {
       ["textCopy", "Auswahl kopieren"],
     ],
   },
+  {
+    name: "Auf der Karte eines Gebäudes",
+    scope: "card",
+    actions: [
+      ["cardRepair", "Reparieren"],
+      ["crewMore", "Ein Waldmensch mehr in der Werkstatt"],
+      ["crewLess", "Ein Waldmensch weniger in der Werkstatt"],
+    ],
+  },
 ];
 
 const scopes = new Map(
@@ -158,6 +172,9 @@ export const defaults: Keymap = {
   textVisualLine: ["V"],
   textOther: ["o"],
   textCopy: ["y"],
+  crewMore: ["+", "ArrowUp"],
+  crewLess: ["-", "ArrowDown"],
+  cardRepair: ["r"],
 };
 
 const limits = { keys: 8, length: 24 };
@@ -167,7 +184,7 @@ const limits = { keys: 8, length: 24 };
  * the text mode as typed.
  */
 export const normal = (key: string, scope: Scope = "map") =>
-  key.length === 1 && scope === "map" ? key.toLowerCase() : key;
+  key.length === 1 && scope !== "text" ? key.toLowerCase() : key;
 
 /** Keys that only announce a modifier or a composition, never bound. */
 const silent = new Set([
@@ -244,6 +261,7 @@ export const keySpoken = (key: string) =>
 let current: Keymap = copy(defaults);
 let byKey = index(current, "map");
 let byTextKey = index(current, "text");
+let byCardKey = index(current, "card");
 const listeners = new Set<() => void>();
 
 function copy(map: Keymap): Keymap {
@@ -258,13 +276,18 @@ function index(map: Keymap, scope: Scope): Map<string, Action> {
   return keys;
 }
 
-const lookup = (scope: Scope) => (scope === "map" ? byKey : byTextKey);
+const lookup = (scope: Scope) =>
+  scope === "map" ? byKey : scope === "text" ? byTextKey : byCardKey;
 
 /** The map's or global action of a pressed key, if any. */
 export const actionFor = (key: string) => byKey.get(normal(key));
 
 /** The text mode's action of a pressed key, if any. */
 export const textActionFor = (key: string) => byTextKey.get(key);
+
+/** The building card's action of a pressed key, if any. */
+export const cardActionFor = (key: string) =>
+  byCardKey.get(normal(key, "card"));
 
 /** The keys of an action. */
 export const keysOf = (action: Action): readonly string[] => current[action];
@@ -282,6 +305,7 @@ function use(map: Keymap, store: boolean) {
   current = map;
   byKey = index(map, "map");
   byTextKey = index(map, "text");
+  byCardKey = index(map, "card");
   for (const listener of listeners) listener();
   if (store) void write(map).catch(() => undefined);
 }
@@ -325,7 +349,11 @@ export function reset() {
 export function check(raw: unknown): Keymap | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const record = raw as Record<string, unknown>;
-  const taken = { map: new Set<string>(), text: new Set<string>() };
+  const taken = {
+    map: new Set<string>(),
+    text: new Set<string>(),
+    card: new Set<string>(),
+  };
   const map = {} as Keymap;
   const missing: Action[] = [];
   for (const action of actionList) {

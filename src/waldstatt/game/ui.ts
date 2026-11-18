@@ -32,6 +32,7 @@ import {
 import type { MapHandlers, Tile } from "./input";
 import {
   actionFor,
+  cardActionFor,
   firstKey,
   keyLabel,
   keysOf,
@@ -226,6 +227,8 @@ export class Ui {
   private live: HTMLElement;
   private confirmDialog: HTMLDialogElement;
   /** The finder: «/» for the texts found, «:» for commands. */
+  /** The building chosen when the finder opened, for its commands. */
+  private chosen: Building | undefined;
   private finder: {
     element: HTMLElement;
     input: HTMLInputElement;
@@ -411,6 +414,11 @@ export class Ui {
     );
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", name);
+    // The card keeps its keys from the map, so its own keys are taken here.
+    card.addEventListener("keydown", (event) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (this.cardKey(event, true)) event.preventDefault();
+    });
     const repair = el("button", {
       type: "button",
       className: "wg-button wg-primary",
@@ -439,11 +447,7 @@ export class Ui {
       clear,
     };
     if (b.state === "done" && crewKinds.includes(b.kind)) {
-      const step = (by: number) => {
-        g.setCrew(b, (b.crew ?? 0) + by);
-        this.updateCard();
-        this.announce(this.crewText(b));
-      };
+      const step = (by: number) => this.stepCrew(by);
       const minus = el(
         "button",
         { type: "button", className: "wg-button" },
@@ -484,6 +488,32 @@ export class Ui {
     this.card = null;
     this.o.world.closeCard();
     if (focusMap) this.mapHost().focus({ preventScroll: true });
+  }
+
+  /**
+   * A key on an open card: its building's repair, or one Waldmensch more or
+   * fewer in a producing building. Returns whether the card took the key.
+   */
+  private cardKey(event: KeyboardEvent, down: boolean): boolean {
+    const card = this.card;
+    const action = card && cardActionFor(event.key);
+    if (!card || !action) return false;
+    if (action !== "cardRepair" && !card.crew) return false;
+    if (!down) return true;
+    if (action === "cardRepair") {
+      this.repair(card.b);
+      this.updateCard();
+    } else this.stepCrew(action === "crewMore" ? 1 : -1);
+    return true;
+  }
+
+  /** Puts one Waldmensch more or fewer into the building of the open card. */
+  private stepCrew(by: number) {
+    const b = this.card?.b;
+    if (!b || !this.card?.crew) return;
+    this.o.game.setCrew(b, (b.crew ?? 0) + by);
+    this.updateCard();
+    this.announce(this.crewText(b));
   }
 
   /** How many Waldleute work in a building, of how many it asks for. */
@@ -731,6 +761,7 @@ export class Ui {
       `${said("apply")} wendet das Werkzeug an oder tippt an, was unter der Auswahl liegt; ${said("visual")} beginnt ein Rechteck für Holzhacken mit der Säge oder Pflaster, ${said("other")} springt zu seiner anderen Ecke.`,
       `${said("fell")}, ${said("pave")}, ${said("repair")} und ${said("demolish")} wählen Holzhacken, Pflastern, Reparieren und Abreissen, ${said("build")} öffnet Bauen, ${said("menu")} das Menü, ${said("texts")} springt zum Start oder zu gefundenen Schriften, ${said("commands")} öffnet Befehle.`,
       `Liest du eine Schrift von oben, macht ${said("apply")} auf ihr die Auswahl zum Textcursor, bis Escape: ${said("textLeft")}, ${said("textRight")}, ${said("textUp")} und ${said("textDown")} bewegen ihn um Zeichen und Zeilen, ${said("wordNext")}, ${said("wordBack")} und ${said("wordEnd")} um Wörter, zweimal ${said("textStart")} zum Anfang, ${said("textEnd")} zur letzten Zeile, Ziffern davor so oft; ${said("textVisual")} wählt Zeichen aus, ${said("textVisualLine")} Zeilen, ${said("textOther")} springt zum anderen Ende, ${said("textCopy")} kopiert.`,
+      `Auf der Karte eines Gebäudes repariert ${said("cardRepair")} es; auf der Karte einer Werkstatt geben ${said("crewMore")} einen Waldmenschen mehr hinein und ${said("crewLess")} einen weniger.`,
       "Escape bricht ab. Im Menü unter «Tasten» lassen sich die Tasten ändern.",
     ].join(" ");
     const keys = (a: Action) => keysOf(a).map(keyLabel).join(" ");
@@ -776,6 +807,16 @@ export class Ui {
         .map((a) => (a === "textStart" ? letterKey(a).repeat(2) : letterKey(a)))
         .filter(Boolean)
         .join(" ")}`,
+      `auf der Karte eines Gebäudes: ${(
+        [
+          ["cardRepair", "reparieren"],
+          ["crewMore", "mehr"],
+          ["crewLess", "weniger Waldleute"],
+        ] as const
+      )
+        .filter(([a]) => keysOf(a).length)
+        .map(([a, n]) => `${keys(a)} ${n}`)
+        .join(", ")}`,
     ]
       .join(" · ")
       .replace(/^/, "Tasten: ");
@@ -792,6 +833,11 @@ export class Ui {
       const target = event.target as HTMLElement;
       if (target.closest("input, textarea, select, dialog[open], a")) return;
       if (!this.finder.element.hidden || this.reading?.stage) return;
+      // With focus on the card's buttons, its keys still work.
+      if (this.cardKey(event, true)) {
+        event.preventDefault();
+        return;
+      }
       const button = (name: string) =>
         need<HTMLButtonElement>(this.toolbox, `[data-open=${name}]`);
       // Escape on a menu opened by key returns where the key was pressed.
@@ -858,6 +904,11 @@ export class Ui {
   /** Opens the finder: «/» for the texts found, «:» for commands. */
   private openFinder(mode: "/" | ":") {
     this.closeMenus();
+    // The building chosen: the one whose card is open, or under the cursor.
+    const cursor = this.keyCursor;
+    this.chosen =
+      this.card?.b ??
+      (cursor ? this.o.game.buildingAt(cursor.x, cursor.y) : undefined);
     this.closeCard();
     const f = this.finder;
     f.prefix.textContent = mode;
@@ -993,6 +1044,21 @@ export class Ui {
    */
   private repairItems(): FinderItem[] {
     const g = this.o.game;
+    const chosen = this.chosen;
+    const one: FinderItem[] = chosen
+      ? [
+          {
+            label: "reparieren:ausgewähltes-gebäude",
+            hint: `${this.label(chosen.kind, chosen.game)}: ${
+              g.unrepairable(chosen) ??
+              (this.costText(g.repairCost(chosen)) || "reparieren")
+            }`,
+            run: () => {
+              if (g.state.buildings.includes(chosen)) this.repair(chosen);
+            },
+          },
+        ]
+      : [];
     const worn = g.state.buildings.filter(
       (b) => b.state === "done" && !g.unrepairable(b),
     );
@@ -1001,7 +1067,8 @@ export class Ui {
       hint: this.repairHint(list),
       run: () => this.repairAll(list),
     });
-    const items = [
+    const items: FinderItem[] = [
+      ...one,
       item(
         "reparieren:baufällig",
         worn.filter((b) => wearLevel(b) >= 2),
@@ -1483,6 +1550,8 @@ export class Ui {
       },
       release: () => this.o.stage()?.stage.release(),
       key: (event, down) => {
+        // On a building's card, keys repair it or change its crew.
+        if (this.cardKey(event, down)) return true;
         if (this.textMode) {
           if (!down) return false;
           if (this.textMode.cursor.key(event)) return true;

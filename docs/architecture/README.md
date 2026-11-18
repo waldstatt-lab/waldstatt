@@ -473,7 +473,12 @@ are CSS highlights on both inks; a browser without them shows the document
 selection. The text mode's keys are a scope of their own in the keymap, where
 Shift counts, and go before the others while it is on: b moves back a word
 instead of opening Bauen. Map movement keys rest; zooming, the tools, the
-menus and the finders still work. With a mouse there is no text mode. The keymap is kept in the database
+menus and the finders still work. With a mouse there is no text mode. A
+building's card, opened with Enter on it or a tap, is a third scope: while it
+is open, r orders its repair instead of choosing the tool, and on a producing
+building + or ↑ put one Waldmensch more into its crew and − or ↓ one fewer,
+instead of zooming or moving the cursor; the keys work with focus on the map
+or on the card's buttons. The keymap is kept in the database
 `waldstatt-games-settings`, which resets and loading leave alone. A menu
 closed with Escape returns focus to where it was opened from: its button when
 clicked, the map when its key or the finder opened it. «/» opens a finder over the
@@ -484,7 +489,9 @@ saw), `build:…` for the buildings the menu shows,
 `lichtung`, `bauen`, `menü`, `wälder`, `tasten` and `neu-beginnen`, `wald:…` for
 the saved forests (see below), and `reparieren:…`, which choose finished
 buildings by condition: `baufällig`, `abgenutzt`, `alle`, `unter-5` to
-`unter-50` in points, or any number typed, such as «rep 30». Each hints how
+`unter-50` in points, or any number typed, such as «rep 30», and
+`ausgewähltes-gebäude`, the building whose card was open when the finder
+opened, or else the one under the keyboard cursor. Each hints how
 many buildings and what it costs, and orders as many as the stock pays for,
 the most worn first. `wegräumen:ruinen` clears away every ruin within reach of
 a Recyclinghof. Both match fuzzily, ignoring

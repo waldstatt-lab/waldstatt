@@ -207,7 +207,7 @@ export class KeysDialog {
     this.stopWaiting();
     const yes = await this.o.confirm({
       title: "Standardtasten?",
-      text: "Alle Tasten werden wieder wie am Anfang: Pfeile, h j k l und s e i u bewegen, g wählt die Säge. Deine Änderungen gehen verloren.",
+      text: "Alle Tasten werden wieder wie am Anfang: Pfeile, h j k l und s e i u bewegen, a wählt Holzhacken, r Reparieren. Deine Änderungen gehen verloren.",
       yes: "Standard",
     });
     if (!yes) return;
