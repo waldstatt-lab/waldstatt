@@ -61,9 +61,9 @@ export const balance = {
   /** A life ends of age somewhere between these years. */
   lifeYears: [60, 80] as const,
   /** Seconds between meals; after them, a Waldmensch is hungry. */
-  mealSeconds: 90,
+  mealSeconds: 30,
   /** Seconds a hungry Waldmensch survives without a meal. */
-  starveSeconds: 300,
+  starveSeconds: 180,
   /** Seconds, on average, between a woman's children while food is plenty. */
   birthSeconds: 70,
   /** The shortest time between two children of one woman. */
@@ -72,12 +72,15 @@ export const balance = {
   birthBeer: 0.6,
   /** Children come only while the food in stock is at least this many meals per Waldmensch. */
   birthFood: 1,
-  /** No more Waldleute than this, for the sake of slow devices. */
-  maxPeople: 300,
+  /**
+   * No more Waldleute than this, for the sake of slow devices: at 1000, the
+   * rules take about 1.3 ms a frame in a desktop browser.
+   */
+  maxPeople: 1000,
   /** The fire in the first clearing gives shelter to two. */
   fireBeds: 2,
   /** What lies by the fire at the start. */
-  startFood: 16,
+  startFood: 24,
   /** While overcrowded, the years pass this much faster. */
   crowdedAgeing: 1.5,
 
@@ -88,6 +91,12 @@ export const balance = {
   moodDrift: 20,
   /** Work speed at 0 and at 100 percent motivation. */
   moodSpeed: [0.5, 1.5] as const,
+  /**
+   * Children with motivation: below the base they fall off with this power
+   * of motivation over the base (2: half the base, a quarter of the
+   * children); above it they rise to this many times at 100 percent.
+   */
+  moodBirths: { power: 2, max: 1.5 },
   /** What raises or lowers motivation while it lasts, in percent. */
   mood: {
     kirche: 8,
@@ -369,7 +378,7 @@ export const kinds: Record<Kind, KindInfo> = {
     w: 3,
     h: 3,
     work: 14,
-    limit: "one",
+    limit: "many",
   },
   spielhaus: {
     name: "Spielhaus",

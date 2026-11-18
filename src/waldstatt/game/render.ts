@@ -33,6 +33,7 @@ import {
   groundTexture,
   hill,
   itemPicture,
+  loafPicture,
   palisadePicture,
   ravenAtlas,
   ravenFrame,
@@ -82,6 +83,25 @@ import {
   treeVariant,
   type LoadedPage,
 } from "./world";
+
+/** The Brot auswerfen while the bread flies: the crowd, the throwers, the loaves. */
+interface Feast {
+  crowd: {
+    sprite: Sprite;
+    x: number;
+    y: number;
+    phase: number;
+    jump: number;
+  }[];
+  throwers: { sprite: Sprite; x: number; y: number; throwing: number }[];
+  loaves: {
+    sprite: Sprite;
+    from: { x: number; y: number };
+    to: number;
+    t: number;
+  }[];
+  thrown: number;
+}
 
 /** Tiles per side of a render chunk. */
 const RCHUNK = 16;
@@ -271,6 +291,10 @@ export class Renderer {
   private trees: Texture[];
   private ribbonArt: Art;
   private workerTextures: Record<"f" | "m", Texture[]>;
+  /** Waldleute without the axe, for the Brot auswerfen. */
+  private bareTextures: Record<"f" | "m", Texture[]>;
+  private loafTexture: Texture;
+  private feasts = new Map<number, Feast>();
   private art = new Map<string, Art>();
   private patterns: Record<GroundKind, FillPattern>;
   private time = 0;
@@ -328,6 +352,21 @@ export class Renderer {
           ),
         }),
     );
+    this.bareTextures = {
+      m: frames(
+        Texture.from(workerAtlas(false, true)),
+        workerFrame.w,
+        workerFrame.h,
+        5,
+      ),
+      f: frames(
+        Texture.from(workerAtlas(true, true)),
+        workerFrame.w,
+        workerFrame.h,
+        5,
+      ),
+    };
+    this.loafTexture = Texture.from(loafPicture().canvas);
     this.planWorkerTextures = {
       m: Texture.from(planWorker()),
       f: Texture.from(planWorker(true)),
@@ -618,6 +657,7 @@ export class Renderer {
     if (this.planLayer.visible)
       for (const chunk of this.chunks.values()) this.ensurePlanTrees(chunk);
     this.updateWorkers();
+    this.updateFeasts(dt);
     this.updateShips();
     this.updateRavens();
     this.updateMotes();
@@ -1538,6 +1578,173 @@ export class Renderer {
         this.planWorkers.delete(id);
       }
     }
+  }
+
+  /**
+   * The Brot auswerfen while it throws: a crowd in front of the stage, as
+   * large as the settlement allows, cheering; two Waldleute on the stage
+   * throwing; and each loaf thrown flying in an arc to somebody in the crowd,
+   * who jumps to catch it. With reduced motion the crowd stands still and no
+   * bread flies.
+   */
+  private updateFeasts(dt: number) {
+    const still = this.still();
+    const active = new Set<number>();
+    for (const b of this.game.state.buildings) {
+      const thrown = b.thrown ?? 0;
+      if (b.kind !== "brot" || b.state !== "done" || !thrown) continue;
+      active.add(b.id);
+      let feast = this.feasts.get(b.id);
+      if (!feast) {
+        feast = this.makeFeast(b);
+        this.feasts.set(b.id, feast);
+      }
+      // Each loaf thrown since the last frame flies off.
+      for (let k = feast.thrown; k < thrown; k++) {
+        if (still || feast.loaves.length > 8 || !feast.crowd.length) continue;
+        const thrower = feast.throwers[k % feast.throwers.length];
+        thrower.throwing = 0.35;
+        const sprite = new Sprite(this.loafTexture);
+        sprite.anchor.set(0.5);
+        sprite.scale.set(1 / RES);
+        this.workerLayer.addChild(sprite);
+        feast.loaves.push({
+          sprite,
+          from: { x: thrower.x, y: thrower.y },
+          to: Math.floor(Math.random() * feast.crowd.length),
+          t: 0,
+        });
+      }
+      feast.thrown = thrown;
+      this.drawFeast(feast, dt, still);
+    }
+    for (const [id, feast] of this.feasts) {
+      if (active.has(id)) continue;
+      for (const c of feast.crowd) c.sprite.destroy();
+      for (const t of feast.throwers) t.sprite.destroy();
+      for (const l of feast.loaves) l.sprite.destroy();
+      this.feasts.delete(id);
+    }
+  }
+
+  private makeFeast(b: Building): Feast {
+    const people = this.game.workers.length;
+    const want = Math.max(5, Math.min(16, people));
+    const crowd: Feast["crowd"] = [];
+    // Standing in front of the stage, where the steps are, a few rows deep.
+    for (let i = 0; i < want * 4 && crowd.length < want; i++) {
+      const x = b.x - 0.6 + hash(b.id, i, 70) * (b.w + 1.2);
+      const y = b.y + b.h + 0.4 + hash(b.id, i, 71) * 2.6;
+      const tx = Math.floor(x);
+      const ty = Math.floor(y);
+      if (this.game.isTree(tx, ty) || this.game.isWater(tx, ty)) continue;
+      if (this.game.buildingAt(tx, ty)) continue;
+      const near = crowd.some((c) => Math.hypot(c.x - x, c.y - y) < 0.45);
+      if (near) continue;
+      crowd.push({
+        sprite: this.figure(i),
+        x,
+        y,
+        phase: hash(b.id, i, 72) * 6,
+        jump: 0,
+      });
+    }
+    const throwers = [
+      { x: b.x + 0.9, y: b.y + 0.9 },
+      { x: b.x + b.w - 0.9, y: b.y + 1.0 },
+    ].map((at, i) => ({ ...at, sprite: this.figure(i + 1), throwing: 0 }));
+    return { crowd, throwers, loaves: [], thrown: 0 };
+  }
+
+  /** A Waldmensch without the axe, woman or man by turns. */
+  private figure(i: number): Sprite {
+    const textures = this.bareTextures[i % 2 ? "f" : "m"];
+    const sprite = new Sprite(textures[0]);
+    sprite.anchor.set(
+      workerFrame.ax / workerFrame.w,
+      workerFrame.ay / workerFrame.h,
+    );
+    this.workerLayer.addChild(sprite);
+    return sprite;
+  }
+
+  private drawFeast(feast: Feast, dt: number, still: boolean) {
+    const lower = 1 - ease(this.plan);
+    const stage = { x: 0, y: 0 };
+    for (const t of feast.throwers) {
+      stage.x += t.x / feast.throwers.length;
+      stage.y += t.y / feast.throwers.length;
+    }
+    const place = (
+      sprite: Sprite,
+      x: number,
+      y: number,
+      lift: number,
+      facing: number,
+      frame: number,
+      textures: Texture[],
+    ) => {
+      sprite.texture = textures[frame];
+      sprite.scale.set(facing / RES, 1 / RES);
+      const p = apply(this.L, x, y);
+      sprite.position.set(p.x, p.y - lift * lower);
+      sprite.zIndex = p.y;
+    };
+    const facing = (x: number, y: number, tx: number, ty: number) =>
+      tx - x - (ty - y) >= 0 ? 1 : -1;
+    feast.crowd.forEach((c, i) => {
+      const textures = this.bareTextures[i % 2 ? "f" : "m"];
+      c.jump = Math.max(0, c.jump - dt * 2.5);
+      // Cheering: arms up now and then.
+      const cheer = !still && Math.sin(this.time * 3 + c.phase) > 0.55;
+      const hop = Math.sin(c.jump * Math.PI) * 10;
+      place(
+        c.sprite,
+        c.x,
+        c.y,
+        hop,
+        facing(c.x, c.y, stage.x, stage.y),
+        cheer || c.jump > 0 ? 3 : 0,
+        textures,
+      );
+    });
+    feast.throwers.forEach((t, i) => {
+      t.throwing = Math.max(0, t.throwing - dt);
+      const front = feast.crowd[0] ?? { x: t.x, y: t.y + 2 };
+      place(
+        t.sprite,
+        t.x,
+        t.y,
+        12,
+        facing(t.x, t.y, front.x, front.y),
+        t.throwing > 0.15 ? 3 : t.throwing > 0 ? 4 : 0,
+        this.bareTextures[(i + 1) % 2 ? "f" : "m"],
+      );
+    });
+    for (const loaf of feast.loaves) {
+      loaf.t += dt / 0.9;
+      const to = feast.crowd[loaf.to];
+      if (!to) {
+        loaf.t = 1;
+        continue;
+      }
+      const k = Math.min(1, loaf.t);
+      const a = apply(this.L, loaf.from.x, loaf.from.y);
+      const b = apply(this.L, to.x, to.y);
+      // From the thrower's raised hand, up in an arc, into the catcher's hands.
+      const z = (38 * (1 - k) + 26 * k + Math.sin(k * Math.PI) * 45) * lower;
+      loaf.sprite.position.set(
+        a.x + (b.x - a.x) * k,
+        a.y + (b.y - a.y) * k - z,
+      );
+      loaf.sprite.rotation = k * 9;
+      loaf.sprite.zIndex = Math.max(a.y, b.y) + 40;
+      if (loaf.t >= 1) {
+        to.jump = 1;
+        loaf.sprite.destroy();
+      }
+    }
+    feast.loaves = feast.loaves.filter((l) => l.t < 1);
   }
 
   /** Ships under way: their pictures follow them and turn with their course. */

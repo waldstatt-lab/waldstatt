@@ -18,6 +18,18 @@ export class Mood {
     return lo + ((hi - lo) * this.g.state.mood) / 100;
   }
 
+  /**
+   * How often children come now: 1 at the base motivation, falling steeply
+   * below it to none at 0 percent, rising gently above it.
+   */
+  fertility(): number {
+    const mood = this.g.state.mood;
+    const base = balance.moodBase;
+    const { power, max } = balance.moodBirths;
+    if (mood <= base) return (mood / base) ** power;
+    return 1 + ((max - 1) * (mood - base)) / (100 - base);
+  }
+
   /** Pushes motivation for a while; the same event again starts it anew. */
   event(name: MoodEventName) {
     const [amount, seconds] = balance.moodEvents[name];

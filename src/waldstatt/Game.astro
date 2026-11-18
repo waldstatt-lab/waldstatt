@@ -20,6 +20,7 @@ const resources: { key: string; name: string; icon: IconName }[] = [
   ...goods.map((g) => ({ key: g.key, name: g.name, icon: g.key as IconName })),
   { key: "people", name: "Waldleute / Betten", icon: "workers" },
   { key: "mood", name: "Stimmung", icon: "mood" },
+  { key: "deaths", name: "Verstorbene", icon: "tomb" },
 ];
 
 const games = await getGames();

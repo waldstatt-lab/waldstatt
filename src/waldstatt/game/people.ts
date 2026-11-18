@@ -153,6 +153,8 @@ export class People {
     const fathers = people.some((w) => w.sex === "m" && fertile(w));
     const plenty = food >= Math.max(4, people.length * balance.birthFood);
     const beer = g.state.stock.beer >= 1;
+    // Gloomy Waldleute have far fewer children.
+    const fertility = g.mood.fertility();
     const dead: [Worker, "age" | "hunger"][] = [];
     const born: Worker[] = [];
     for (const w of people) {
@@ -170,7 +172,8 @@ export class People {
         people.length + born.length < balance.maxPeople &&
         w.age - w.lastChild >= balance.birthPause / balance.yearSeconds &&
         Math.random() <
-          dt / (balance.birthSeconds * (beer ? balance.birthBeer : 1))
+          (dt * fertility) /
+            (balance.birthSeconds * (beer ? balance.birthBeer : 1))
       ) {
         w.lastChild = w.age;
         if (beer) g.state.stock.beer--;
@@ -216,6 +219,7 @@ export class People {
   private die(w: Worker, cause: "age" | "hunger") {
     const g = this.g;
     g.removePerson(w);
+    g.state.deaths[cause]++;
     const yard = this.graveyard(w.x, w.y);
     if (yard) {
       yard.graves = (yard.graves ?? 0) + 1;

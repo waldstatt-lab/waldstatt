@@ -164,17 +164,19 @@ pale frame until they are paved.
 **The Waldleute live** (`people.ts`). Each is a person with a position, an
 age, a sex, hunger and work; children (under 14) do not work, and a year
 passes in 30 seconds of play. The game starts with a woman and a man by a fire
-in the first clearing, with some meat. Waldleute eat a meal every 90 seconds:
+in the first clearing, with some meat. Waldleute eat a meal every 30 seconds:
 within 1 km of a Viehhof or a Bäckerei, or of the fire until the first of
 them stands, food reaches them where they are; farther out, a hungry
-Waldmensch leaves their work and walks back. Five minutes hungry, or old enough
+Waldmensch leaves their work and walks back. Three minutes hungry, or old enough
 (60 to 80 years), they die. A woman and a man of the right age have children
 now and then while food is plenty, sooner with beer in stock, born by the
-nearest house. Huts give four beds, the Steinhaus twelve, the fire two; more
+nearest house. Motivation sets how often: below 50 % with its square (a quarter
+as many at 25 %, none at 0 %), above it up to one and a half times at 100 %. Huts give four beds, the Steinhaus twelve, the fire two; more
 Waldleute than beds lowers motivation and makes the years pass faster. Who dies
 within 1 km of a church or the Kloster whose graveyard has room is buried
 there; elsewhere a tombstone stays, and motivation drops for a while. A
-settlement can die out; nothing brings new Waldleute but children. Children are
+settlement can die out; nothing brings new Waldleute but children, and no
+more are born beyond 1,000, where the rules take about 1.3 ms a frame. Children are
 drawn smaller, the old greyer and the hungry paler.
 
 **Motivation** («Stimmung», `mood.ts`) sets how fast everybody fells, builds,
@@ -188,7 +190,10 @@ decay, lose their effect below half (the raven leaves), and fall into ruins,
 which a tap repairs for half the costs. A Spielhaus and the theatre drink beer;
 without it they are shut, and their play link and stage do not open. The
 Brot auswerfen waits for 100 loaves, then throws them one by one to the
-hungriest nearby and takes itself down.
+hungriest nearby and takes itself down. While it throws, a crowd as large as
+the settlement (5 to 16) stands cheering in front of the stage, two Waldleute
+on it throw, and each loaf flies in an arc to somebody who jumps to catch it;
+the crowd is drawn only, it takes nobody from work (`render.ts`).
 
 **The forest grows back** (`growth.ts`): felled ground beside forest grows
 seedlings, drawn small and light, which become trees after four minutes. They
@@ -222,8 +227,10 @@ and announcements tell only what happened. Only «Neu beginnen» in the menu ask
 for confirmation.
 
 **Resources.** On wide screens a bar along the top shows the goods the
-settlement has had, the Waldleute and beds, and motivation; on phones the same
-list is in the menu, and only the toolbox stays at the bottom.
+settlement has had, the Waldleute and beds, motivation, and, from the first
+death on, how many Waldleute died (its tooltip splits them into age and
+hunger); on phones the same list is in the menu, with the split written out,
+and only the toolbox stays at the bottom. The deaths are counted in the save.
 
 **Content on the map.** The texts are not built; they lie hidden under the
 forest and are explored by felling it. The Ortstafel (the name) and the

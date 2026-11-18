@@ -75,6 +75,8 @@ these differences, recorded in the
   (`ise-logo.png`); the forge's pennant takes its magenta and grey.
 - Tearing the dam down needs the usual second tap and asks nothing more.
 - The fire lies on dry ground in the first clearing, which the Alp crosses.
+- The hard cap is 1,000 Waldleute, not 300: measured in a desktop browser, the
+  rules take about 1.3 ms a frame at 1,000, and drawing them costs little more.
 
 ## Decisions taken while shaping
 

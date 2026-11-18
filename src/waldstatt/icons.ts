@@ -203,6 +203,16 @@ export const icons: Record<string, string[]> = {
     "..WWDDWW....",
     "..WWDDWW....",
   ],
+  tomb: [
+    "....NNNN....",
+    "...NAAAAN...",
+    "..NAAAAAMN..",
+    "..NAAAAAMN..",
+    "..NAAAAAMN..",
+    "..NAAAAAMN..",
+    ".llNNNNNNMl.",
+    "lllllllllll.",
+  ],
   mood: [
     "...uuuuuu...",
     "..uuuuuuuu..",

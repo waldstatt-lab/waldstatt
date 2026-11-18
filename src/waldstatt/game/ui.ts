@@ -402,15 +402,29 @@ export class Ui {
     const values: Record<string, string> = {
       people: `${g.workers.length} / ${g.people.beds()}`,
       mood: `${Math.round(s.mood)} %`,
+      deaths: String(s.deaths.age + s.deaths.hunger),
     };
     for (const key of goodKeys) values[key] = String(s.stock[key]);
     const shown = (key: string) =>
-      key === "people" || key === "mood" || s.seen.has(key as Good);
+      key === "people" ||
+      key === "mood" ||
+      (key === "deaths" && s.deaths.age + s.deaths.hunger > 0) ||
+      s.seen.has(key as Good);
+    // How they died, for the tooltip and screen readers.
+    const deaths = `Verstorbene: ${s.deaths.age} an Alter, ${s.deaths.hunger} verhungert`;
     for (const element of this.o.root.querySelectorAll<HTMLElement>(
       "[data-resource]",
     )) {
       const key = element.dataset.resource ?? "";
       element.hidden = !shown(key);
+      if (key === "deaths" && element.title !== deaths) {
+        element.title = deaths;
+        const name = element.querySelector<HTMLElement>(
+          ".sr-only, .wg-supply-name",
+        );
+        if (name)
+          name.textContent = ` ${deaths.replace("Verstorbene: ", "Verstorbene (")})`;
+      }
       const value = element.querySelector<HTMLElement>("[data-value]");
       if (value && value.textContent !== values[key])
         value.textContent = values[key] ?? "";

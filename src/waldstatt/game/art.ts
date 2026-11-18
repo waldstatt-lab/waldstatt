@@ -427,8 +427,10 @@ export const workerFrame = { w: 30, h: 44, ax: 15, ay: 41 };
 /**
  * A Waldmensch facing right: stand, two walking frames, two chopping frames.
  * A Waldfrau wears a long dress and a kerchief instead of tunic and hat.
+ * `bare`, without the axe: the arm hangs, is raised, or swings forward to
+ * throw, for the crowd and the throwers at the Brot auswerfen.
  */
-export function workerAtlas(woman = false): HTMLCanvasElement {
+export function workerAtlas(woman = false, bare = false): HTMLCanvasElement {
   const { element, ctx } = canvas(workerFrame.w * 5, workerFrame.h);
   for (let f = 0; f < 5; f++) {
     const o = f * workerFrame.w;
@@ -488,6 +490,26 @@ export function workerAtlas(woman = false): HTMLCanvasElement {
       ctx.moveTo(x - 4, y - 33);
       ctx.quadraticCurveTo(x, y - 41, x + 4, y - 33);
       ctx.fill();
+    }
+    if (bare) {
+      // The arm: hanging, raised high, or thrown forward.
+      const hand: [number, number] =
+        f === 3
+          ? [x + 5, y - 38]
+          : f === 4
+            ? [x + 10, y - 26]
+            : [x + 5, y - 14];
+      ctx.strokeStyle = woman ? "#2c4a6e" : "#7d2f1e";
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.moveTo(x + 3.5, y - 23);
+      ctx.lineTo(...hand);
+      ctx.stroke();
+      ctx.fillStyle = "#e0b48a";
+      ctx.beginPath();
+      ctx.arc(hand[0], hand[1], 1.8, 0, Math.PI * 2);
+      ctx.fill();
+      continue;
     }
     // The axe: on the shoulder, raised, or swung.
     ctx.save();
@@ -2726,6 +2748,15 @@ function brot(P: Painter, w: number, d: number) {
   }
   for (const [u, v] of posts.slice(2))
     P.box(u - 0.05, v - 0.05, u + 0.05, v + 0.05, 12, 50, logs);
+}
+
+/** A loaf of bread, small enough to fly. */
+export function loafPicture(): Picture {
+  const { element, ctx } = canvas(12, 8);
+  ellipse(ctx, 6, 4.5, 5, 3, "#9a5a26");
+  ellipse(ctx, 6, 4, 4.6, 2.6, "#c47a3a");
+  ellipse(ctx, 5, 3.2, 2.2, 1, "#e8a860");
+  return { canvas: element, ax: 6, ay: 4 };
 }
 
 /** A tombstone outside a graveyard. */

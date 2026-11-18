@@ -9,6 +9,7 @@
  * only this database and the Waldstatt's old `localStorage` keys.
  */
 import {
+  balance,
   CHUNK,
   emptyStock,
   goodKeys,
@@ -23,7 +24,12 @@ export const keyPrefix = "waldstatt-games/";
 const dbName = "waldstatt-games";
 const version = 3;
 /** Limits for what a save may hold. */
-const limits = { buildings: 3000, people: 400, tombs: 3000, list: 40000 };
+const limits = {
+  buildings: 3000,
+  people: balance.maxPeople + 100,
+  tombs: 3000,
+  list: 40000,
+};
 
 export interface Building {
   id: number;
@@ -125,6 +131,8 @@ export interface Saved {
   moods: MoodEvent[];
   /** Tombstones outside graveyards. */
   tombs: { x: number; y: number }[];
+  /** Waldleute who died, of age and of hunger. */
+  deaths: { age: number; hunger: number };
   /** Chunks changed since the last save; not saved itself. */
   dirtyChunks: Set<string>;
 }
@@ -155,6 +163,7 @@ export function freshState(): Saved {
     mood: 50,
     moods: [],
     tombs: [],
+    deaths: { age: 0, hunger: 0 },
     dirtyChunks: new Set(),
   };
 }
@@ -406,6 +415,9 @@ function parse(data: unknown, rawPeople: unknown, gameIds: Set<string>): Saved {
     if (!isInt(x) || !isInt(y)) throw new Error("tomb");
     state.tombs.push({ x, y });
   }
+  const deaths = d.deaths as Record<string, unknown> | undefined;
+  if (deaths && isInt(deaths.age, 0, 1e7) && isInt(deaths.hunger, 0, 1e7))
+    state.deaths = { age: deaths.age, hunger: deaths.hunger };
   return state;
 }
 
@@ -459,6 +471,7 @@ export async function save(state: Saved): Promise<boolean> {
       mood: state.mood,
       moods: state.moods.map((m) => ({ ...m })),
       tombs: state.tombs.flatMap((t) => [t.x, t.y]),
+      deaths: { ...state.deaths },
     };
     // Only what a person is; what they are doing is found anew.
     const people = state.people.map((p) => ({
