@@ -1,11 +1,12 @@
 /**
  * Motivation, «Stimmung»: one value for the whole settlement that sets how
  * fast everybody fells, builds and works. It drifts towards a level set by
- * what stands and how the Waldleute live, and events push it up or down for
- * a while.
+ * what stands, how worn it is and how the Waldleute live, and events push it
+ * up or down for a while.
  */
 import { balance } from "./config";
 import type { Game } from "./sim";
+import { share, wears } from "./wear";
 
 export type MoodEventName = keyof typeof balance.moodEvents;
 
@@ -58,6 +59,21 @@ export class Mood {
     for (const b of g.state.buildings)
       if (b.kind === "spielhaus" && b.state === "done")
         level += b.beer ? m.beer : m.dry;
+    // Ruins weigh on everybody, up to a limit, until they are rebuilt or
+    // cleared away; the average condition of the rest lowers motivation
+    // when poor and raises it when good.
+    const ruins = g.state.buildings.filter((b) => b.state === "ruin").length;
+    level += Math.max(m.ruinsMost, ruins * m.ruin);
+    const standing = g.state.buildings.filter(wears);
+    if (standing.length) {
+      const average =
+        standing.reduce((sum, b) => sum + share(b), 0) / standing.length;
+      const { poor, good } = m.condition;
+      if (average < poor.below)
+        level += (poor.most * (poor.below - average)) / poor.below;
+      else if (average > good.above)
+        level += (good.most * (average - good.above)) / (1 - good.above);
+    }
     const people = g.workers.length;
     if (people) {
       const beds = g.people.beds();

@@ -20,9 +20,12 @@ export const balance = {
   walkSpeed: 4,
   /** Waldleute that can work on one building site at once. */
   workersPerSite: 3,
-  /** Share of the costs returned when a building is torn down. */
+  /**
+   * Share of the costs returned when a sound building is torn down within
+   * reach of a Recyclinghof, less as it wears; without one, nothing.
+   */
   refund: 0.5,
-  /** Share of the costs a ruin's repair takes. */
+  /** Share of the costs a ruin's rebuilding takes, and a full repair. */
   repair: 0.5,
   /** Trees the saw marks at most in one stroke. */
   sawMaxTiles: 600,
@@ -113,6 +116,18 @@ export const balance = {
     crowded: -25,
     /** At most, when everybody is hungry. */
     hungry: -15,
+    /** Per ruin standing, and at most for all of them. */
+    ruin: -4,
+    ruinsMost: -20,
+    /**
+     * By the average condition of the other finished buildings: below
+     * `poor.below` lower, up to `poor.most` at none; above `good.above`
+     * higher, up to `good.most` when all are sound.
+     */
+    condition: {
+      poor: { below: 0.5, most: -15 },
+      good: { above: 0.8, most: 6 },
+    },
   },
   /** Events that raise or lower motivation for a while: percent and seconds. */
   moodEvents: {
@@ -121,14 +136,31 @@ export const balance = {
     brot: [25, 240] as const,
   },
 
+  // --- Wear, repair and clearing up ---------------------------------------------
+  /**
+   * A building's most condition, in years it lasts: this for its material
+   * and a footprint of 2 × 2, more for larger ones (with the square root of
+   * its tiles). Fields and pens wear fastest, stone slowest.
+   */
+  durability: { farm: 6, wood: 20, mixed: 32, stone: 50 },
+  /** Seconds of play per point of condition a finished building loses: a year. */
+  wearSeconds: 40,
+  /** Seconds of work a full repair takes, as a share of building it. */
+  repairWork: 1,
+  /** Seconds of work clearing a ruin away takes, as a share of building it. */
+  clearWork: 4,
+  /**
+   * Reach of a Recyclinghof, in tiles (10 km): within it, ruins can be
+   * cleared away, and what is torn down gives part of its costs back.
+   */
+  recycleReach: 200,
+
   // --- Upkeep, beer and Brot auswerfen ------------------------------------------
   /** Seconds between two rounds of upkeep for the Klause, churches and the Kloster. */
   upkeepSeconds: 60,
-  /** Condition lost in a round without what is needed. */
+  /** Share of its condition a building loses in a round without what is needed. */
   decay: 0.05,
-  /** Condition regained in a round with it. */
-  mend: 0.1,
-  /** Below this condition, a building no longer has its effect. */
+  /** Below this share of its condition, such a building no longer has its effect. */
   working: 0.5,
   /** Seconds one Spielhaus or the theatre drinks one beer. */
   beerSeconds: 90,
@@ -238,7 +270,8 @@ export type Kind =
   | "damm"
   | "bruecke"
   | "hafen"
-  | "schiff";
+  | "schiff"
+  | "recyclinghof";
 
 export type Group =
   "Wohnen" | "Nahrung" | "Handwerk" | "Wege" | "Spiele" | "Glaube" | "Prestige";
@@ -263,10 +296,15 @@ export interface Appears {
   any?: Kind[];
 }
 
+/** What a building is made of, which sets how long it lasts. */
+export type Material = keyof typeof balance.durability;
+
 export interface KindInfo {
   name: string;
   group: Group;
   cost: Cost;
+  /** What it is made of; without, it does not wear (the Brot auswerfen). */
+  material?: Material;
   /** Footprint in tiles; a bridge is as long as the river is wide. */
   w: number;
   h: number;
@@ -288,6 +326,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Hütte",
     group: "Wohnen",
     cost: { wood: 8 },
+    material: "wood",
     w: 2,
     h: 2,
     work: 6,
@@ -298,6 +337,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Steinhaus",
     group: "Wohnen",
     cost: { wood: 20, stones: 30 },
+    material: "stone",
     w: 3,
     h: 3,
     work: 24,
@@ -309,6 +349,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Viehhof",
     group: "Nahrung",
     cost: { wood: 16 },
+    material: "farm",
     w: 5,
     h: 4,
     work: 10,
@@ -319,6 +360,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Getreidehof",
     group: "Nahrung",
     cost: { wood: 14 },
+    material: "farm",
     w: 5,
     h: 4,
     work: 10,
@@ -328,6 +370,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Mühle",
     group: "Nahrung",
     cost: { wood: 20, stones: 6 },
+    material: "mixed",
     w: 3,
     h: 3,
     work: 14,
@@ -338,6 +381,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Bäckerei",
     group: "Nahrung",
     cost: { wood: 16, stones: 8 },
+    material: "mixed",
     w: 3,
     h: 3,
     work: 14,
@@ -349,6 +393,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Brauerei",
     group: "Nahrung",
     cost: { wood: 20, stones: 6 },
+    material: "mixed",
     w: 3,
     h: 3,
     work: 14,
@@ -359,6 +404,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Schafweide",
     group: "Handwerk",
     cost: { wood: 12 },
+    material: "farm",
     w: 4,
     h: 3,
     work: 6,
@@ -368,6 +414,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Steinbruch",
     group: "Handwerk",
     cost: { wood: 20 },
+    material: "mixed",
     w: 4,
     h: 3,
     work: 12,
@@ -377,6 +424,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Druckerei",
     group: "Handwerk",
     cost: { wood: 20, parchment: 4, stones: 10 },
+    material: "mixed",
     w: 3,
     h: 3,
     work: 14,
@@ -386,6 +434,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Spielhaus",
     group: "Spiele",
     cost: { wood: 24, parchment: 4 },
+    material: "wood",
     w: 5,
     h: 4,
     work: 16,
@@ -396,6 +445,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Bibliothek",
     group: "Spiele",
     cost: { wood: 20, stones: 12, books: 4 },
+    material: "stone",
     w: 4,
     h: 3,
     work: 16,
@@ -405,6 +455,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Theater",
     group: "Spiele",
     cost: { wood: 40, stones: 16, books: 4 },
+    material: "wood",
     w: 12,
     h: 13,
     work: 24,
@@ -415,6 +466,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Meinrads Klause",
     group: "Glaube",
     cost: { wood: 20 },
+    material: "wood",
     w: 3,
     h: 3,
     work: 14,
@@ -425,6 +477,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Kirche",
     group: "Glaube",
     cost: { wood: 40, stones: 40, books: 4 },
+    material: "stone",
     w: 4,
     h: 6,
     work: 40,
@@ -436,6 +489,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Friedhof",
     group: "Glaube",
     cost: { wood: 10, stones: 6 },
+    material: "stone",
     w: 3,
     h: 3,
     work: 8,
@@ -446,6 +500,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Kloster Einsiedeln",
     group: "Glaube",
     cost: { wood: 80, stones: 120, books: 10 },
+    material: "stone",
     w: 9,
     h: 7,
     work: 90,
@@ -457,6 +512,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "ISE AG",
     group: "Prestige",
     cost: { wood: 20, stones: 30, books: 6 },
+    material: "stone",
     w: 3,
     h: 3,
     work: 30,
@@ -477,6 +533,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Damm",
     group: "Prestige",
     cost: { wood: 30, stones: 80 },
+    material: "stone",
     w: 7,
     h: 2,
     work: 40,
@@ -486,6 +543,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Brücke",
     group: "Wege",
     cost: { wood: 6 },
+    material: "wood",
     w: 1,
     h: 1,
     work: 5,
@@ -495,6 +553,7 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Hafen",
     group: "Wege",
     cost: { wood: 12, stones: 6 },
+    material: "mixed",
     w: 3,
     h: 2,
     work: 10,
@@ -504,12 +563,37 @@ export const kinds: Record<Kind, KindInfo> = {
     name: "Schiff",
     group: "Wege",
     cost: { wood: 12 },
+    material: "wood",
     w: 2,
     h: 1,
     work: 8,
     limit: "many",
   },
+  recyclinghof: {
+    name: "Recyclinghof",
+    group: "Handwerk",
+    cost: { wood: 30, stones: 20 },
+    material: "mixed",
+    w: 4,
+    h: 3,
+    work: 20,
+    limit: "many",
+    appears: { all: ["steinbruch"] },
+  },
 };
+
+/**
+ * A building's most condition, in years of play it lasts from new: by its
+ * material and the size of its footprint. 0 for what does not wear.
+ */
+export function durability(kind: Kind, w: number, h: number): number {
+  const material = kinds[kind].material;
+  if (!material) return 0;
+  return Math.max(
+    1,
+    Math.round((balance.durability[material] * Math.sqrt(w * h)) / 2),
+  );
+}
 
 /** What a producing building makes from what, per round of `seconds` of one Waldmensch's work. */
 export interface Recipe {

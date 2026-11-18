@@ -45,3 +45,4 @@ What this pitch explicitly does not include.
 | [Ein Aufbauspiel im Wald](pitch--aufbauspiel-im-wald.md) | implemented |
 | [Leben in der Waldstatt – food, people, faith and a forest that grows back](pitch--leben-in-der-waldstatt.md) | implemented |
 | [Wälder speichern, laden und als Datei mitnehmen](pitch--waelder-speichern.md) | implemented |
+| [Verfall und Reparatur – buildings wear, fall into ruins and are repaired](pitch--verfall-und-reparatur.md) | implemented |

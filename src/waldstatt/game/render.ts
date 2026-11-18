@@ -44,10 +44,11 @@ import {
   tombPicture,
   treeAtlas,
   treeFrame,
+  weathered,
   workerAtlas,
   workerFrame,
 } from "./art";
-import { balance, stoneKinds, STAGE } from "./config";
+import { balance, kinds, stoneKinds, STAGE } from "./config";
 import { fire } from "./people";
 import {
   PLAN_RES,
@@ -59,17 +60,20 @@ import {
   planTreeSize,
   planTomb,
   planWorker,
+  weatheredPlan,
 } from "./plan";
 import { apply, invert, iso, projection, TH, type Linear } from "./iso";
 import {
   isFound,
   key,
+  needsHands,
   type Game,
   type HiddenText,
   type Placement,
 } from "./sim";
 import { ISO_RES, STAGE_RES, type Stage } from "./stage";
 import type { Building, Camera } from "./state";
+import { wearLevel, type WearLevel } from "./wear";
 import { PAGE, type Lake } from "./waters";
 import {
   halfWidth,
@@ -1344,14 +1348,19 @@ export class Renderer {
     return b.kind === "bruecke" ? this.game.bridgeAxis(b) : "x";
   }
 
+  /**
+   * A building's picture, as worn as it is (`level`, wear.ts); a ghost
+   * being placed is new.
+   */
   private picture(
     b: Pick<Building, "kind" | "w" | "h" | "game" | "graves">,
     axis: "x" | "y",
+    level: WearLevel = 0,
   ): Art {
-    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}:${b.graves ?? 0}`;
+    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}:${b.graves ?? 0}:${level}`;
     let art = this.art.get(name);
     if (!art) {
-      const picture = buildingPicture(
+      let picture = buildingPicture(
         b.kind,
         b.w,
         b.h,
@@ -1360,6 +1369,7 @@ export class Renderer {
         this.titleOf(b.game),
         b.graves ?? 0,
       );
+      if (level) picture = weathered(picture, b.kind, b.w, b.h, level);
       art = {
         texture: Texture.from(picture.canvas),
         ax: picture.ax,
@@ -1378,12 +1388,14 @@ export class Renderer {
   private planTexture(
     b: Pick<Building, "kind" | "w" | "h" | "game" | "graves">,
     axis: "x" | "y",
+    level: WearLevel = 0,
   ): Texture {
-    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}:${b.graves ?? 0}`;
+    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}:${b.graves ?? 0}:${level}`;
     let texture = this.planArt.get(name);
     if (!texture) {
+      const top = planPicture(b.kind, b.w, b.h, b.game, axis, b.graves ?? 0);
       texture = Texture.from(
-        planPicture(b.kind, b.w, b.h, b.game, axis, b.graves ?? 0),
+        level ? weatheredPlan(top, b.kind, b.w, b.h, level) : top,
       );
       this.planArt.set(name, texture);
     }
@@ -1402,7 +1414,9 @@ export class Renderer {
   /** Adds, updates or removes a building's picture. */
   building(b: Building, removed = false) {
     const existing = this.buildings.get(b.id);
-    const signature = `${b.state}:${b.w}x${b.h}:${b.graves ?? 0}:${Math.floor((b.sunk ?? 0) * 20)}:${b.beer ? 1 : 0}:${Math.round((b.condition ?? 1) * 10)}`;
+    const level = wearLevel(b);
+    const working = (b.condition ?? 1) >= balance.working;
+    const signature = `${b.state}:${b.w}x${b.h}:${b.graves ?? 0}:${Math.floor((b.sunk ?? 0) * 20)}:${b.beer ? 1 : 0}:${level}:${working}:${b.repair ? 1 : 0}:${b.clearing ? 1 : 0}`;
     if (existing && !removed && existing.signature === signature) return;
     if (existing) {
       if (this.stageSlot?.b.id === b.id) {
@@ -1423,7 +1437,12 @@ export class Renderer {
     const sprite = new Sprite();
     if (b.kind === "theater" && b.state === "done") {
       // Back and front apart, with the stage's preview between them.
-      const parts = theaterParts(b.w, b.h);
+      let parts = theaterParts(b.w, b.h);
+      if (level === 1 || level === 2)
+        parts = {
+          back: weathered(parts.back, b.kind, b.w, b.h, level),
+          front: weathered(parts.front, b.kind, b.w, b.h, level),
+        };
       const front = new Sprite();
       for (const [target, part] of [
         [sprite, parts.back],
@@ -1440,7 +1459,9 @@ export class Renderer {
       this.fillSlot();
     }
     const art =
-      b.kind === "theater" && b.state === "done" ? null : this.picture(b, axis);
+      b.kind === "theater" && b.state === "done"
+        ? null
+        : this.picture(b, axis, level);
     if (art) {
       this.dress(sprite, art);
       container.addChild(sprite);
@@ -1467,7 +1488,7 @@ export class Renderer {
     }
     const plan = new Container();
     plan.position.set(b.x, b.y);
-    const top = new Sprite(this.planTexture(b, axis));
+    const top = new Sprite(this.planTexture(b, axis, level));
     top.scale.set(1 / PLAN_RES);
     plan.addChild(top);
     this.planBuildings.addChild(plan);
@@ -1503,10 +1524,7 @@ export class Renderer {
         flat.tint = 0x7fb0e0;
         flat.alpha = 0.35 * (1 - (b.sunk ?? 0) * 0.5);
       }
-    } else if (b.state === "ruin") {
-      sprite.tint = 0x8a8478;
-      top.tint = 0x8a8478;
-    } else if (b.state === "done" && (b.condition ?? 1) < balance.working) {
+    } else if (b.state === "done" && !working && kinds[b.kind].upkeep) {
       sprite.tint = 0xb8b0a0;
       top.tint = 0xb8b0a0;
     } else if (b.state === "site") {
@@ -1519,6 +1537,17 @@ export class Renderer {
           .stroke({ width: 0.1, color: 0x8a5a32 }),
       );
       container.addChild(this.scaffold(b));
+      view.bar = new Graphics();
+      container.addChild(view.bar);
+      this.drawBar(view.bar, b);
+    } else if (needsHands(b)) {
+      // A repair under way is scaffolded; a ruin being cleared shows its bar.
+      if (b.repair) container.addChild(this.scaffold(b));
+      plan.addChild(
+        new Graphics()
+          .rect(0.1, 0.1, b.w - 0.2, b.h - 0.2)
+          .stroke({ width: 0.1, color: b.repair ? 0x8a5a32 : 0xc8643a }),
+      );
       view.bar = new Graphics();
       container.addChild(view.bar);
       this.drawBar(view.bar, b);
@@ -1576,7 +1605,7 @@ export class Renderer {
     bar.roundRect(-width / 2, y, width, 7, 3).fill(0x2a1f14);
     bar
       .roundRect(-width / 2 + 1.5, y + 1.5, (width - 3) * done, 4, 2)
-      .fill(0xe8c050);
+      .fill(b.state === "ruin" ? 0xc8643a : 0xe8c050);
   }
 
   /** Rebuilds every building picture, e.g. after the flood. */

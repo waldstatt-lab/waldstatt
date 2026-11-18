@@ -639,7 +639,134 @@ export function planPicture(
       }
       break;
     }
+    case "recyclinghof": {
+      rect(ctx, 0.1, 0.1, w - 0.2, h - 0.2, "#bcb29a", "#8f8572");
+      roof(ctx, 0.25, 0.25, 1.35, 1.35, "y", tiles[0], tiles[1], tiles[2]);
+      for (const y of [0.25, 1.15, 2.05])
+        rect(ctx, 1.9, y, w - 2.1, 0.1, "#cfc7b4", "#6f6656");
+      for (let k = 0; k < 4; k++)
+        rect(ctx, 2.1, 0.45 + k * 0.12, w - 2.5, 0.1, "#a87a4c", "#4a3320");
+      for (let k = 0; k < 9; k++)
+        rect(
+          ctx,
+          2.15 + (k % 3) * 0.45,
+          1.35 + Math.floor(k / 3) * 0.2,
+          0.36,
+          0.18,
+          "#ddd8cc",
+          "#6f6a60",
+        );
+      for (const [x, y] of [
+        [2.4, 2.4],
+        [2.9, 2.5],
+      ]) {
+        ctx.fillStyle = "#7a4a26";
+        ctx.beginPath();
+        ctx.arc(x, y, 0.16, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      rect(ctx, 0.45, 2.55, 0.9, 0.08, "#3f7a3a", "#1f3a1c");
+      break;
+    }
   }
+  return element;
+}
+
+/**
+ * A worn building from above, as weathered() in art.ts paints it from the
+ * side: stains and moss, then cracks and holes, and in ruins its roof gone
+ * in places and rubble over it.
+ */
+export function weatheredPlan(
+  source: HTMLCanvasElement,
+  kind: Kind,
+  w: number,
+  h: number,
+  level: 1 | 2 | 3,
+): HTMLCanvasElement {
+  const { element, ctx } = canvas(w, h);
+  ctx.drawImage(source, 0, 0, w, h);
+  let seed = (w * 73 + h * 151 + level * 977) >>> 0;
+  for (const c of kind) seed = Math.imul(seed ^ c.charCodeAt(0), 0x9e3779b1);
+  const rnd = random(seed);
+  ctx.globalCompositeOperation = "source-atop";
+  for (let i = 0; i < Math.round(w * h * 4 * level); i++) {
+    ctx.fillStyle =
+      rnd() < 0.55 ? "rgba(75, 105, 45, 0.3)" : "rgba(55, 40, 25, 0.25)";
+    ctx.beginPath();
+    ctx.ellipse(
+      rnd() * w,
+      rnd() * h,
+      0.05 + rnd() * 0.15,
+      0.04 + rnd() * 0.1,
+      rnd() * Math.PI,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
+  if (level >= 2) {
+    ctx.strokeStyle = "rgba(30, 20, 12, 0.7)";
+    ctx.lineWidth = 0.025;
+    for (let i = 0; i < (w + h) * 3; i++) {
+      let x = rnd() * w;
+      let y = rnd() * h;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let k = 0; k < 4; k++) {
+        x += (rnd() - 0.5) * 0.2;
+        y += (rnd() - 0.5) * 0.2;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(25, 18, 12, 0.8)";
+    for (let i = 0; i < (w + h) * 2; i++)
+      ctx.fillRect(
+        rnd() * w,
+        rnd() * h,
+        0.06 + rnd() * 0.1,
+        0.05 + rnd() * 0.08,
+      );
+    ctx.fillStyle = "rgba(45, 35, 25, 0.14)";
+    ctx.fillRect(0, 0, w, h);
+  }
+  if (level === 3) {
+    ctx.fillStyle = "rgba(115, 105, 90, 0.4)";
+    ctx.fillRect(0, 0, w, h);
+    // The roof falls in: the ground shows through in places.
+    ctx.globalCompositeOperation = "destination-out";
+    for (let i = 0; i < Math.round(w * h * 1.5); i++) {
+      ctx.beginPath();
+      ctx.ellipse(
+        0.3 + rnd() * (w - 0.6),
+        0.3 + rnd() * (h - 0.6),
+        0.15 + rnd() * 0.3,
+        0.1 + rnd() * 0.25,
+        rnd() * Math.PI,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    const rubble = ["#9a6a3c", "#6e4a28", "#c2b8a1", "#958b76", "#5a4630"];
+    for (let i = 0; i < Math.round(w * h * 10); i++) {
+      const x = 0.15 + rnd() * (w - 0.3);
+      const y = 0.15 + rnd() * (h - 0.3);
+      const size = 0.06 + rnd() * 0.12;
+      rect(ctx, x + 0.03, y + 0.03, size, size * 0.8, "rgba(10, 25, 12, 0.3)");
+      rect(
+        ctx,
+        x,
+        y,
+        size,
+        size * 0.8,
+        rubble[Math.floor(rnd() * rubble.length)],
+      );
+    }
+  }
+  ctx.globalCompositeOperation = "source-over";
   return element;
 }
 

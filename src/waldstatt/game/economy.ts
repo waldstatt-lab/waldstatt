@@ -259,7 +259,10 @@ export class Economy {
     this.clocks.set(b.id, clock);
   }
 
-  /** The Klause, churches and the Kloster take food and books, or decay. */
+  /**
+   * The Klause, churches and the Kloster take food and books; without them
+   * they decay on top of their wear (wear.ts), which only a repair mends.
+   */
   private upkeep() {
     const g = this.g;
     const foodMade = g.done("viehhof") || g.done("baeckerei");
@@ -269,31 +272,12 @@ export class Economy {
       if (!need || b.state !== "done") continue;
       const food = foodMade ? need.food : 0;
       const books = booksMade ? need.books : 0;
-      const before = b.condition ?? 1;
       let supplied = this.food() >= food && g.state.stock.books >= books;
       if (supplied) {
         for (let i = 0; i < food; i++) supplied = this.meal() && supplied;
         g.state.stock.books -= books;
       }
-      b.condition = Math.max(
-        0,
-        Math.min(1, before + (supplied ? balance.mend : -balance.decay)),
-      );
-      const crossed =
-        before >= balance.working !== b.condition >= balance.working;
-      if (b.condition <= 0) {
-        b.state = "ruin";
-        g.lost(b);
-        g.events.news(`${g.nameOf(b)} ist verfallen.`);
-      } else if (crossed) {
-        g.events.news(
-          b.condition >= balance.working
-            ? `${g.nameOf(b)} ist wieder in gutem Zustand.`
-            : `${g.nameOf(b)} verfällt.`,
-        );
-        g.syncRavens();
-      }
-      g.events.building(b);
+      if (!supplied) g.wear.damage(b, balance.decay);
     }
     g.events.supplies();
     g.events.dirty();

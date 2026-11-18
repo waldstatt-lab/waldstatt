@@ -5,10 +5,12 @@
  * lie on the ground to be picked up, and ravens show the way to the games'
  * scrolls. Waldleute walk only on open ground (nav.ts): they fell their way
  * into the forest from its edge, cross rivers on bridges and the dam, and
- * cross a lake by ship between its ports. Felled wood counts at once. The
- * goods, the people's lives, motivation, the forest growing back and the
- * flood are systems of their own (economy.ts, people.ts, mood.ts, growth.ts,
- * flood.ts), stepped here in turn. No rendering and no DOM here.
+ * cross a lake by ship between its ports. Felled wood counts at once. They
+ * repair what is paid for and clear ruins away like building sites. The
+ * goods, the people's lives, motivation, the forest growing back, the flood
+ * and wear are systems of their own (economy.ts, people.ts, mood.ts,
+ * growth.ts, flood.ts, wear.ts), stepped here in turn. No rendering and no
+ * DOM here.
  */
 import {
   balance,
@@ -41,6 +43,7 @@ import {
   type Point,
 } from "./nav";
 import type { Building, Person, Saved } from "./state";
+import { share, Wear, wears } from "./wear";
 import {
   damSite,
   hasBaseTree,
@@ -183,6 +186,12 @@ export interface Placement {
 
 export const key = (x: number, y: number) => `${x},${y}`;
 
+/** Whether Waldleute have work on a building: building, repairing or clearing it. */
+export const needsHands = (b: Building) =>
+  b.state === "site" ||
+  (b.state === "done" && !!b.repair) ||
+  (b.state === "ruin" && !!b.clearing);
+
 function chunkOf(x: number, y: number) {
   const cx = Math.floor(x / CHUNK);
   const cy = Math.floor(y / CHUNK);
@@ -240,6 +249,7 @@ export class Game {
   readonly mood: Mood;
   readonly growth: Growth;
   readonly flood: Flood;
+  readonly wear: Wear;
   /** Footprint tiles of every building, site and ruin, by tile id. */
   private occupancy = new Map<number, Building>();
   /** Tiles with a tombstone. */
@@ -303,6 +313,7 @@ export class Game {
     this.mood = new Mood(this);
     this.flood = new Flood(this);
     this.growth = new Growth(this);
+    this.wear = new Wear(this);
     this.people = new People(this);
     this.hideTexts(specs);
     this.economy.syncCrews();
@@ -1209,15 +1220,59 @@ export class Game {
     return b;
   }
 
-  /** What tearing a building down gives back: half its costs, rounded down. */
-  refund(b: Building): Cost {
-    if (b.state === "ruin") return {};
-    return this.share(kinds[b.kind].cost, balance.refund);
+  /**
+   * The finished Recyclinghof nearest a building within its reach, other
+   * than the building itself, if any.
+   */
+  recycler(
+    b: Pick<Building, "id" | "x" | "y" | "w" | "h">,
+  ): Building | undefined {
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    let best: Building | undefined;
+    let bestD: number = balance.recycleReach;
+    for (const r of this.state.buildings) {
+      if (r.kind !== "recyclinghof" || r.state !== "done" || r.id === b.id)
+        continue;
+      const d = Math.hypot(r.x + r.w / 2 - cx, r.y + r.h / 2 - cy);
+      if (d <= bestD) {
+        bestD = d;
+        best = r;
+      }
+    }
+    return best;
   }
 
-  /** What repairing a ruin takes. */
+  /**
+   * What tearing a building down gives back: a site nobody worked on yet
+   * its whole costs; otherwise, within reach of a Recyclinghof, half its
+   * costs as far as it is not worn, rounded down; else nothing. A ruin
+   * gives nothing.
+   */
+  refund(b: Building): Cost {
+    if (b.state === "ruin" || b.state === "drowned") return {};
+    if (b.state === "site" && b.work === 0) return { ...kinds[b.kind].cost };
+    if (!this.recycler(b)) return {};
+    return this.share(kinds[b.kind].cost, balance.refund * share(b));
+  }
+
+  /**
+   * What a repair takes: for a ruin, rebuilding it, part of its costs; for
+   * a worn building, that part as far as it is worn, rounded up.
+   */
   repairCost(b: Building): Cost {
-    return this.share(kinds[b.kind].cost, balance.repair);
+    if (b.state === "ruin")
+      return this.share(kinds[b.kind].cost, balance.repair);
+    const worn = Math.max(0, 1 - share(b));
+    const out: Cost = {};
+    if (worn <= 0) return out;
+    for (const key of goodKeys) {
+      const n = Math.ceil(
+        (kinds[b.kind].cost[key] ?? 0) * balance.repair * worn,
+      );
+      if (n > 0) out[key] = n;
+    }
+    return out;
   }
 
   private share(cost: Cost, k: number): Cost {
@@ -1229,31 +1284,76 @@ export class Game {
     return out;
   }
 
-  canDemolish(b: Building): boolean {
-    return b.state !== "drowned";
+  /** Seconds of one Waldmensch's work clearing a ruin away takes. */
+  clearSeconds(b: Pick<Building, "kind">): number {
+    return kinds[b.kind].work * balance.clearWork;
   }
 
-  /** Tears a building down and gives back part of its costs. */
-  demolish(b: Building) {
-    if (!this.canDemolish(b)) return;
+  /** Why a building cannot be repaired now, or undefined if it can. */
+  unrepairable(b: Building): string | undefined {
+    if (b.state === "drowned") return "Das liegt unter Wasser.";
+    if (b.state === "site") return "Das ist noch eine Baustelle.";
+    if (b.state === "ruin")
+      return b.clearing ? "Die Ruine wird weggeräumt." : undefined;
+    if (!wears(b) || share(b) >= 1) return "Das ist in gutem Zustand.";
+    if (b.repair) return "Wird schon repariert.";
+    return undefined;
+  }
+
+  /** Why a building cannot be torn down or cleared away now, or undefined. */
+  undemolishable(b: Building): string | undefined {
+    if (b.state === "drowned") return "Das liegt unter Wasser.";
+    if (b.clearing) return "Die Ruine wird schon weggeräumt.";
+    if (b.state === "ruin" && !this.recycler(b))
+      return "Eine Ruine wegräumen braucht einen Recyclinghof im Umkreis von 10 km.";
+    return undefined;
+  }
+
+  canDemolish(b: Building): boolean {
+    return !this.undemolishable(b);
+  }
+
+  /**
+   * Tears a building down, giving back what refund() says, or, for a ruin
+   * within reach of a Recyclinghof, sends Waldleute to clear it away, which
+   * takes long.
+   */
+  demolish(b: Building): "removed" | "clearing" | undefined {
+    if (!this.canDemolish(b)) return undefined;
+    if (b.state === "ruin") {
+      b.clearing = true;
+      b.work = 0;
+      this.chances++;
+      this.events.building(b);
+      this.events.dirty();
+      return "clearing";
+    }
     const refund = this.refund(b);
     const dam = b.kind === "damm" && b.state === "done";
     this.removeBuilding(b);
     for (const key of goodKeys)
       if (refund[key]) this.economy.gain(key, refund[key] ?? 0);
     if (dam) this.flood.breakDam();
+    return "removed";
   }
 
-  /** Repairs a ruin: it becomes a building site again. */
+  /**
+   * Repairs a building: a ruin becomes a building site again; a worn
+   * building is paid for and Waldleute come to mend it. Returns why not.
+   */
   repair(b: Building): string | undefined {
-    if (b.state !== "ruin") return undefined;
+    const why = this.unrepairable(b);
+    if (why) return why;
     const cost = this.repairCost(b);
     const missing = this.economy.missing(cost);
     if (missing) return `Für die Reparatur fehlen ${missing}.`;
     this.economy.pay(cost);
-    b.state = "site";
-    b.work = 0;
-    b.condition = 1;
+    if (b.state === "ruin") {
+      b.state = "site";
+      b.work = 0;
+      b.condition = 1;
+      b.clearing = undefined;
+    } else b.repair = true;
     this.chances++;
     this.events.building(b);
     this.events.dirty();
@@ -1302,7 +1402,10 @@ export class Game {
       for (let x = b.x; x < b.x + b.w; x++) this.occupancy.set(tileId(x, y), b);
   }
 
+  /** How far the work on a site, a repair or clearing a ruin has come, 0 to 1. */
   progress(b: Building): number {
+    if (b.state === "done") return share(b);
+    if (b.state === "ruin") return Math.min(1, b.work / this.clearSeconds(b));
     return Math.min(1, b.work / kinds[b.kind].work);
   }
 
@@ -1336,8 +1439,7 @@ export class Game {
       if (other.task?.type === "build")
         crew.set(other.task.id, (crew.get(other.task.id) ?? 0) + 1);
     const sites = this.state.buildings.some(
-      (b) =>
-        b.state === "site" && (crew.get(b.id) ?? 0) < balance.workersPerSite,
+      (b) => needsHands(b) && (crew.get(b.id) ?? 0) < balance.workersPerSite,
     );
     const trees = this.marked.size > this.claimed.size;
     const paves =
@@ -1366,7 +1468,7 @@ export class Game {
     // The tiles on and around the sites that still need hands.
     const siteNear = new Map<number, Building>();
     for (const b of this.state.buildings) {
-      if (b.state !== "site" || (crew.get(b.id) ?? 0) >= balance.workersPerSite)
+      if (!needsHands(b) || (crew.get(b.id) ?? 0) >= balance.workersPerSite)
         continue;
       for (let y = b.y - 1; y <= b.y + b.h; y++)
         for (let x = b.x - 1; x <= b.x + b.w; x++)
@@ -1461,16 +1563,20 @@ export class Game {
       const b = v.b;
       const nx = clamp(ex, b.x, b.x + b.w - 1);
       const ny = clamp(ey, b.y, b.y + b.h - 1);
-      const onWater =
-        b.kind === "bruecke" || b.kind === "schiff" || b.kind === "damm";
+      // A building to repair or a ruin to clear is worked on from beside it.
+      const beside =
+        b.state !== "site" ||
+        b.kind === "bruecke" ||
+        b.kind === "schiff" ||
+        b.kind === "damm";
       end =
-        !onWater && this.open(nx, ny)
+        !beside && this.open(nx, ny)
           ? // On cleared ground: somewhere on the site.
             {
               x: b.x + 0.3 + Math.random() * (b.w - 0.6),
               y: b.y + 0.3 + Math.random() * (b.h - 0.6),
             }
-          : // On the water: at the bank, facing the site.
+          : // Beside it, or on the water at the bank, facing it.
             { x: ex + 0.5 + (nx - ex) * 0.35, y: ey + 0.5 + (ny - ey) * 0.35 };
       w.task = { type: "build", id: b.id };
     }
@@ -1552,6 +1658,7 @@ export class Game {
     this.stepRavens(dt, instant);
     this.people.step(dt);
     this.economy.step(dt);
+    this.wear.step(dt);
     this.mood.step(dt);
     this.growth.step(dt);
     this.flood.step(dt);
@@ -1617,9 +1724,7 @@ export class Game {
     if (task.type === "workshop" && w.job !== task.id) return this.idle(w);
     const site =
       task.type === "build"
-        ? this.state.buildings.find(
-            (b) => b.id === task.id && b.state === "site",
-          )
+        ? this.state.buildings.find((b) => b.id === task.id && needsHands(b))
         : undefined;
     if (task.type === "build" && !site) return this.idle(w);
     // At a quay, the ships see to it (stepShips).
@@ -1686,9 +1791,21 @@ export class Game {
     }
     // In a producing building, the work goes on; the economy counts it.
     if (task.type === "workshop" || task.type === "eat") return;
-    if (site) {
-      site.work += dt * speed;
-      if (site.work >= kinds[site.kind].work) this.finish(site);
+    if (site) this.workOn(site, dt * speed);
+  }
+
+  /** Seconds of one Waldmensch's work on a site, a repair or a ruin. */
+  private workOn(b: Building, work: number) {
+    if (b.state === "site") {
+      b.work += work;
+      if (b.work >= kinds[b.kind].work) this.finish(b);
+    } else if (b.state === "done") {
+      this.wear.mend(b, work / (kinds[b.kind].work * balance.repairWork));
+    } else if (b.state === "ruin") {
+      b.work += work;
+      if (b.work < this.clearSeconds(b)) return;
+      this.removeBuilding(b);
+      this.events.news(`Die Ruine ${this.nameOf(b)} ist weggeräumt.`);
     }
   }
 
@@ -1891,7 +2008,8 @@ export class Game {
       b.crew ??= balance.maxCrew;
       this.economy.syncCrews();
     }
-    if (kinds[b.kind].upkeep) b.condition = 1;
+    b.condition = 1;
+    b.repair = undefined;
     if (ravenKinds.includes(b.kind)) this.syncRavens();
     if (b.kind === "schiff") this.syncShips();
     this.events.building(b);

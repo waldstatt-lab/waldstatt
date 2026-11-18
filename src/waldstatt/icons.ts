@@ -133,6 +133,16 @@ export const icons: Record<string, string[]> = {
     "rrrr.WW.rrrr",
     ".rr..WW..rr.",
   ],
+  repair: [
+    "..AAAA......",
+    ".AAMMAA.....",
+    "..AAAAW.....",
+    "......W.....",
+    ".......W..k.",
+    "........Wkk.",
+    ".........kk.",
+    "........k..k",
+  ],
   build: [
     ".....rr.....",
     "....rrrr....",

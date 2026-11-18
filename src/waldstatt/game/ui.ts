@@ -1,13 +1,15 @@
 /**
  * The HTML interface over the map: the resource bar (in the menu on phones),
- * the toolbox with the tools (axe, saw, paving, tearing down), the build menu
+ * the toolbox with the tools (Holzhacken, which takes the axe and, once found,
+ * the saw; paving; repairing; tearing down), the build menu
  * with a picture and the name of each building it shows, placing buildings,
  * the crews of producing buildings, and the announcements for screen
  * readers. Nothing explains the game: buildings show their state, and events
  * are announced. Things on the map react directly, without panels or
  * dialogs: a found text or the stage turns the view top-down onto it, a
- * Spielhaus with beer opens its game in a new tab, a ruin is repaired, other
- * buildings show a short status label, and tearing down takes a second tap.
+ * Spielhaus with beer opens its game in a new tab, other buildings open a
+ * small card with their state, condition, crew and repair, the Reparieren
+ * tool orders a repair with one tap, and tearing down takes a second tap.
  * Only «Neu beginnen» and the saved forests in the menu (savesDialog.ts) ask
  * first. Keys follow the keymap (keys.ts), and the help texts list its keys.
  * Nodes are created with the DOM API, never from HTML strings.
@@ -51,9 +53,11 @@ import {
 import { STAGE_RES, type Stage } from "./stage";
 import type { Building } from "./state";
 import type { GameInfo } from "./texts";
+import { most, points, share, wearLevel, wearNames } from "./wear";
 import { damSite, start } from "./world";
 
-type Tool = "none" | "axe" | "saw" | "pave" | "demolish";
+/** «fell» is Holzhacken: the axe, upgraded to the saw once it is found. */
+type Tool = "none" | "fell" | "pave" | "repair" | "demolish";
 type PlaceMode = "mouse" | "keys" | "touch";
 
 /** An entry of the finder: what it shows, a hint, and what it does. */
@@ -203,6 +207,7 @@ export class Ui {
   private card: {
     b: Building;
     state: HTMLElement;
+    condition: HTMLElement;
     note: HTMLElement;
     stock: HTMLElement;
     crew?: {
@@ -210,7 +215,8 @@ export class Ui {
       minus: HTMLButtonElement;
       plus: HTMLButtonElement;
     };
-    repair?: HTMLButtonElement;
+    repair: HTMLButtonElement;
+    clear: HTMLButtonElement;
   } | null = null;
   private live: HTMLElement;
   private confirmDialog: HTMLDialogElement;
@@ -221,6 +227,8 @@ export class Ui {
     list: HTMLElement;
     prefix: HTMLElement;
     items: FinderItem[];
+    /** Items made from what is typed, such as `reparieren:unter-30`. */
+    typed?: (query: string) => FinderItem[];
     shown: FinderItem[];
     selected: number;
   };
@@ -344,27 +352,41 @@ export class Ui {
     if (!this.buildMenu.hidden) this.updateBuildMenu();
   }
 
-  /** Shows the tools picked up so far, and paving once there are stones. */
+  /**
+   * Shows Holzhacken once the axe is picked up, with the saw once that is,
+   * and paving once there are stones.
+   */
   items() {
-    for (const tool of ["axe", "saw"] as const) {
-      const button = need(this.toolbox, `[data-tool=${tool}]`);
-      button.hidden = !this.o.game.state.tools[tool];
-    }
     const g = this.o.game;
+    const fell = need(this.toolbox, "[data-tool=fell]");
+    fell.hidden = !g.state.tools.axe;
+    fell.toggleAttribute("data-saw", g.state.tools.saw);
     need(this.toolbox, "[data-tool=pave]").hidden = !g.state.seen.has("stones");
+    this.repairTool();
     this.suppliesDirty = true;
+  }
+
+  /** Shows Reparieren once a building stands that wears. */
+  private repairTool() {
+    const button = need(this.toolbox, "[data-tool=repair]");
+    if (!button.hidden) return;
+    button.hidden = !this.o.game.state.buildings.some(
+      (b) => (b.state === "done" || b.state === "ruin") && most(b) > 0,
+    );
   }
 
   // --- The card over a building ------------------------------------------------
 
   /**
-   * Opens a card over a building: its name and state, its stock, and for a
-   * producing building − and + for its crew; for a ruin, its repair.
+   * Opens a card over a building: its name, state and condition, its stock,
+   * for a producing building − and + for its crew, its repair, and for a
+   * ruin its rebuilding and clearing away.
    */
   private openCard(b: Building) {
     const g = this.o.game;
     const name = this.label(b.kind, b.game);
     const state = el("p", { className: "wg-card-state" });
+    const condition = el("p", { className: "wg-card-condition" });
     const stock = el("p", { className: "wg-card-stock" });
     const note = el("p", { className: "wg-card-note" });
     const close = el(
@@ -380,10 +402,37 @@ export class Ui {
       el("p", { className: "wg-card-title" }, name),
       close,
       state,
+      condition,
     );
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", name);
-    const entry: NonNullable<Ui["card"]> = { b, state, note, stock };
+    const repair = el("button", {
+      type: "button",
+      className: "wg-button wg-primary",
+    });
+    repair.addEventListener("click", () => {
+      this.repair(b);
+      this.updateCard();
+    });
+    const clear = el(
+      "button",
+      { type: "button", className: "wg-button" },
+      "Wegräumen",
+    );
+    clear.addEventListener("click", () => {
+      if (g.demolish(b) === "clearing")
+        this.announce(`Die Waldleute räumen die Ruine ${name} weg.`);
+      this.updateCard();
+    });
+    const entry: NonNullable<Ui["card"]> = {
+      b,
+      state,
+      condition,
+      note,
+      stock,
+      repair,
+      clear,
+    };
     if (b.state === "done" && crewKinds.includes(b.kind)) {
       const step = (by: number) => {
         g.setCrew(b, (b.crew ?? 0) + by);
@@ -408,26 +457,18 @@ export class Ui {
       card.append(el("div", { className: "wg-card-crew" }, minus, count, plus));
       entry.crew = { count, minus, plus };
     }
-    if (b.state === "ruin") {
-      const repair = el(
-        "button",
-        { type: "button", className: "wg-button wg-primary" },
-        `Reparieren (${this.costText(g.repairCost(b))})`,
-      );
-      repair.addEventListener("click", () => {
-        const missing = g.repair(b);
-        this.announce(missing ?? `${name} wird repariert.`);
-        this.updateCard();
-      });
-      card.append(repair);
-      entry.repair = repair;
-    }
-    card.append(stock, note);
+    card.append(repair, clear, stock, note);
     this.card = entry;
     this.o.world.showCard(b, card);
     this.updateCard();
     this.announce(
-      [name, state.textContent, stock.textContent, note.textContent]
+      [
+        name,
+        state.textContent,
+        condition.textContent,
+        stock.textContent,
+        note.textContent,
+      ]
         .filter(Boolean)
         .join(" "),
     );
@@ -489,13 +530,27 @@ export class Ui {
       else if (lacking.length)
         note = `Es fehlt ${lacking.map((key) => goodName(key)).join(" und ")}.`;
     }
-    if (card.repair) {
-      card.repair.hidden = b.state !== "ruin";
-      if (b.state === "ruin")
-        note = g.economy.missing(g.repairCost(b))
-          ? `Für die Reparatur fehlen ${g.economy.missing(g.repairCost(b))}.`
-          : "";
-    }
+    // Its condition, its repair, and for a ruin its rebuilding or clearing.
+    const ruin = b.state === "ruin";
+    const repairable = !g.unrepairable(b);
+    const cost = this.costText(g.repairCost(b));
+    const action = ruin ? "Wieder aufbauen" : "Reparieren";
+    set(card.repair, repairable ? (cost ? `${action} (${cost})` : action) : "");
+    card.clear.hidden = !ruin || !!b.clearing;
+    card.clear.disabled = !g.canDemolish(b);
+    let condition = "";
+    if (b.state === "done" && most(b) > 0)
+      condition = `Zustand: ${points(b)} von ${most(b)}, ${wearNames[wearLevel(b)]}.`;
+    if (b.repair) note = `Wird repariert: ${Math.round(share(b) * 100)} %.`;
+    else if (b.clearing)
+      note = `Wird weggeräumt: ${Math.round(g.progress(b) * 100)} %.`;
+    else if (repairable && g.economy.missing(g.repairCost(b)))
+      note = `Für die Reparatur fehlen ${g.economy.missing(g.repairCost(b))}.`;
+    else if (ruin)
+      note =
+        g.undemolishable(b) ??
+        "Wegräumen gibt nichts zurück und ist viel Arbeit.";
+    set(card.condition, condition);
     const state = this.stateText(b);
     set(card.state, state.charAt(0).toUpperCase() + state.slice(1));
     set(card.stock, stock);
@@ -581,8 +636,7 @@ export class Ui {
   // --- Tools and menus ------------------------------------------------------
 
   setTool(tool: Tool) {
-    if ((tool === "axe" || tool === "saw") && !this.o.game.state.tools[tool])
-      return;
+    if (tool === "fell" && !this.o.game.state.tools.axe) return;
     if (this.placing) this.stopPlacing();
     this.tool = this.tool === tool ? "none" : tool;
     this.sawFrom = null;
@@ -598,9 +652,11 @@ export class Ui {
     this.mapHost().dataset.mode = this.tool;
     const names: Record<Tool, string> = {
       none: "Kein Werkzeug.",
-      axe: "Axt.",
-      saw: "Säge.",
+      fell: this.o.game.state.tools.saw
+        ? "Holzhacken mit der Säge."
+        : "Holzhacken mit der Axt.",
       pave: "Pflastern.",
+      repair: "Reparieren.",
       demolish: "Abreissen.",
     };
     this.announce(names[this.tool]);
@@ -665,8 +721,8 @@ export class Ui {
     need(this.o.root, "[data-map-help]").textContent = [
       `${said("left")}, ${said("right")}, ${said("up")} und ${said("down")} bewegen die Auswahl nach links, rechts, oben und unten; Ziffern davor bewegen so viele Felder weit, mit Umschalt verschieben sie die Karte.`,
       `${said("zoomIn")} und ${said("zoomOut")} zoomen.`,
-      `${said("apply")} wendet das Werkzeug an oder tippt an, was unter der Auswahl liegt; ${said("visual")} beginnt ein Rechteck für Säge oder Pflaster, ${said("other")} springt zu seiner anderen Ecke.`,
-      `${said("axe")}, ${said("saw")}, ${said("pave")} und ${said("demolish")} wählen Axt, Säge, Pflastern und Abreissen, ${said("build")} öffnet Bauen, ${said("menu")} das Menü, ${said("texts")} springt zum Start oder zu gefundenen Schriften, ${said("commands")} öffnet Befehle.`,
+      `${said("apply")} wendet das Werkzeug an oder tippt an, was unter der Auswahl liegt; ${said("visual")} beginnt ein Rechteck für Holzhacken mit der Säge oder Pflaster, ${said("other")} springt zu seiner anderen Ecke.`,
+      `${said("fell")}, ${said("pave")}, ${said("repair")} und ${said("demolish")} wählen Holzhacken, Pflastern, Reparieren und Abreissen, ${said("build")} öffnet Bauen, ${said("menu")} das Menü, ${said("texts")} springt zum Start oder zu gefundenen Schriften, ${said("commands")} öffnet Befehle.`,
       `Liest du eine Schrift von oben, macht ${said("apply")} auf ihr die Auswahl zum Textcursor, bis Escape: ${said("textLeft")}, ${said("textRight")}, ${said("textUp")} und ${said("textDown")} bewegen ihn um Zeichen und Zeilen, ${said("wordNext")}, ${said("wordBack")} und ${said("wordEnd")} um Wörter, zweimal ${said("textStart")} zum Anfang, ${said("textEnd")} zur letzten Zeile, Ziffern davor so oft; ${said("textVisual")} wählt Zeichen aus, ${said("textVisualLine")} Zeilen, ${said("textOther")} springt zum anderen Ende, ${said("textCopy")} kopiert.`,
       "Escape bricht ab. Im Menü unter «Tasten» lassen sich die Tasten ändern.",
     ].join(" ");
@@ -677,9 +733,9 @@ export class Ui {
     const short: [Action, string][] = [
       ["visual", "Auswahl"],
       ["other", "andere Ecke"],
-      ["axe", "Axt"],
-      ["saw", "Säge"],
+      ["fell", "Holzhacken"],
       ["pave", "Pflastern"],
+      ["repair", "Reparieren"],
       ["demolish", "Abreissen"],
       ["build", "Bauen"],
       ["menu", "Menü"],
@@ -737,9 +793,9 @@ export class Ui {
           ? target
           : this.mapHost();
       const actions: Partial<Record<Action, () => void>> = {
-        axe: () => this.setTool("axe"),
-        saw: () => this.setTool("saw"),
+        fell: () => this.setTool("fell"),
         pave: () => this.setTool("pave"),
+        repair: () => this.setTool("repair"),
         demolish: () => this.setTool("demolish"),
         build: () => this.toggleMenu(this.buildMenu, button("build"), back),
         menu: () => this.toggleMenu(this.mainMenu, button("menu"), back),
@@ -804,6 +860,7 @@ export class Ui {
       mode === "/" ? "Schrift suchen" : "Befehl suchen",
     );
     f.items = mode === "/" ? this.textItems() : this.commandItems();
+    f.typed = mode === ":" ? (query) => this.typedRepair(query) : undefined;
     f.element.hidden = false;
     this.filterFinder();
     f.input.focus();
@@ -837,9 +894,13 @@ export class Ui {
     const g = this.o.game;
     const items: FinderItem[] = [];
     const tools: [Tool, string, boolean][] = [
-      ["axe", "axt", g.state.tools.axe],
-      ["saw", "säge", g.state.tools.saw],
+      ["fell", "holzhacken", g.state.tools.axe],
       ["pave", "pflastern", g.state.seen.has("stones")],
+      [
+        "repair",
+        "reparieren",
+        !need(this.toolbox, "[data-tool=repair]").hidden,
+      ],
       ["demolish", "abreissen", true],
     ];
     for (const [tool, name, have] of tools)
@@ -870,6 +931,7 @@ export class Ui {
         },
       });
     }
+    items.push(...this.repairItems());
     items.push(
       {
         label: "lichtung",
@@ -916,15 +978,116 @@ export class Ui {
     return items;
   }
 
+  /**
+   * The repair commands: the finished buildings to repair, chosen by their
+   * condition (`reparieren:baufällig`, `reparieren:unter-10` and more), and
+   * the ruins to rebuild. Each orders as many repairs as the stock pays for,
+   * the most worn first.
+   */
+  private repairItems(): FinderItem[] {
+    const g = this.o.game;
+    const worn = g.state.buildings.filter(
+      (b) => b.state === "done" && !g.unrepairable(b),
+    );
+    const ruins = g.state.buildings.filter(
+      (b) => b.state === "ruin" && !g.unrepairable(b),
+    );
+    const item = (label: string, list: Building[]) => ({
+      label,
+      hint: this.repairHint(list),
+      run: () => this.repairAll(list),
+    });
+    const items = [
+      item(
+        "reparieren:baufällig",
+        worn.filter((b) => wearLevel(b) >= 2),
+      ),
+      item(
+        "reparieren:abgenutzt",
+        worn.filter((b) => wearLevel(b) >= 1),
+      ),
+      item("reparieren:alle", worn),
+    ];
+    for (const n of [5, 10, 20, 50])
+      items.push(
+        item(
+          `reparieren:unter-${n}`,
+          worn.filter((b) => points(b) < n),
+        ),
+      );
+    items.push(item("reparieren:ruinen", ruins));
+    return items;
+  }
+
+  /** `reparieren:unter-<n>` for any number typed, such as «rep 30». */
+  private typedRepair(query: string): FinderItem[] {
+    const m = /^r[a-zäöü]*[\s:-]*(?:unter[\s:-]*)?(\d{1,4})$/i.exec(
+      query.trim(),
+    );
+    if (!m) return [];
+    const n = Number(m[1]);
+    const g = this.o.game;
+    const list = g.state.buildings.filter(
+      (b) => b.state === "done" && !g.unrepairable(b) && points(b) < n,
+    );
+    return [
+      {
+        label: `reparieren:unter-${n}`,
+        hint: this.repairHint(list),
+        run: () => this.repairAll(list),
+      },
+    ];
+  }
+
+  /** How many buildings a repair command takes, and what it costs. */
+  private repairHint(list: Building[]): string {
+    if (!list.length) return "nichts zu reparieren";
+    const total: Cost = {};
+    for (const b of list)
+      for (const [key, n] of Object.entries(this.o.game.repairCost(b)) as [
+        Good,
+        number,
+      ][])
+        total[key] = (total[key] ?? 0) + n;
+    const count = list.length === 1 ? "1 Gebäude" : `${list.length} Gebäude`;
+    const cost = this.costText(total);
+    return cost ? `${count} · ${cost}` : count;
+  }
+
+  /** Orders the repair of every building in a list the stock pays for, the most worn first. */
+  private repairAll(list: Building[]) {
+    const g = this.o.game;
+    if (!list.length) return this.announce("Nichts zu reparieren.");
+    let ordered = 0;
+    let short = 0;
+    for (const b of [...list].sort((a, c) => points(a) - points(c))) {
+      if (!g.state.buildings.includes(b)) continue;
+      if (g.repair(b)) short++;
+      else ordered++;
+    }
+    const done =
+      ordered === 1
+        ? "Ein Gebäude wird repariert."
+        : `${ordered} Gebäude werden repariert.`;
+    this.announce(
+      short ? `${done} Für ${short} weitere fehlen die Güter.` : done,
+    );
+  }
+
   /** Keeps the items that match what is typed, best first. */
   private filterFinder() {
     const f = this.finder;
     const query = f.input.value;
-    f.shown = f.items
-      .map((item) => ({ item, score: fuzzy(query, item.label) }))
-      .filter((m) => m.score >= 0)
-      .sort((a, b) => b.score - a.score)
-      .map((m) => m.item);
+    const typed = f.typed?.(query) ?? [];
+    f.shown = [
+      ...typed,
+      ...f.items
+        .filter((item) => !typed.some((t) => t.label === item.label))
+        .map((item) => ({ item, score: fuzzy(query, item.label) }))
+        .filter((m) => m.score >= 0)
+        .sort((a, b) => b.score - a.score)
+        .map((m) => m.item),
+    ];
     f.selected = 0;
     f.list.replaceChildren(
       ...(f.shown.length
@@ -1312,8 +1475,10 @@ export class Ui {
         if (!on || this.placing || event.key === "Escape") return false;
         return on.stage.key(event, down);
       },
+      // With the saw, Holzhacken marks a dragged area; paving plans one.
       sawing: () =>
-        (this.tool === "saw" || this.tool === "pave") &&
+        ((this.tool === "fell" && this.o.game.state.tools.saw) ||
+          this.tool === "pave") &&
         !this.placing &&
         !this.reading,
       grab: (tile) => {
@@ -1357,7 +1522,13 @@ export class Ui {
         this.o.renderer.setSaw(
           done ? null : { x0: from.x, y0: from.y, x1: to.x, y1: to.y },
         );
-        if (done) this.sawArea(from, to);
+        if (!done) return;
+        // Holzhacken on one tile is a tap, as with the axe.
+        if (this.tool === "fell" && from.x === to.x && from.y === to.y) {
+          if (this.card) return this.closeCard();
+          return this.activateTile(to);
+        }
+        this.sawArea(from, to);
       },
       cursor: (tile) => {
         this.keyCursor = tile;
@@ -1374,10 +1545,10 @@ export class Ui {
       },
       visual: (tile) => {
         if (this.placing || this.reading) return;
-        if (this.tool !== "saw" && this.tool !== "pave") {
+        if (this.tool !== "pave") {
           if (!this.o.game.state.tools.saw)
             return this.announce("Ohne Säge gibt es keine Auswahl.");
-          this.setTool("saw");
+          if (this.tool !== "fell") this.setTool("fell");
         }
         this.sawFrom = tile;
         this.o.renderer.setSaw({
@@ -1414,7 +1585,12 @@ export class Ui {
           this.o.game.textAt(tile.x, tile.y)?.key === read.id
         )
           return this.startTextMode(read.id as string);
-        if ((this.tool === "saw" || this.tool === "pave") && !this.reading) {
+        // Paving, and Holzhacken with the saw, begin an area with the key
+        // and close it with the key again; an area begun with v closes too.
+        const areas =
+          this.tool === "pave" ||
+          (this.tool === "fell" && this.o.game.state.tools.saw);
+        if ((this.sawFrom || areas) && !this.reading) {
           if (!this.sawFrom) {
             this.sawFrom = tile;
             this.o.renderer.setSaw({
@@ -1430,6 +1606,9 @@ export class Ui {
             const from = this.sawFrom;
             this.sawFrom = null;
             this.o.renderer.setSaw(null);
+            // Holzhacken on one tile is a tap: it marks or unmarks one tree.
+            if (this.tool === "fell" && from.x === tile.x && from.y === tile.y)
+              return this.activateTile(tile);
             this.sawArea(from, tile);
           }
           return;
@@ -1471,7 +1650,8 @@ export class Ui {
     const g = this.o.game;
     const item = g.pickUp(tile.x, tile.y);
     if (item) {
-      this.setTool(item);
+      if (this.tool !== "fell") this.setTool("fell");
+      this.items();
       return this.announce(
         item === "axe" ? "Du hast die Axt." : "Du hast die Säge.",
       );
@@ -1488,6 +1668,11 @@ export class Ui {
       }
       return;
     }
+    if (this.tool === "repair") {
+      if (b) this.repair(b);
+      else this.announce("Tippe auf ein Gebäude, das repariert werden soll.");
+      return;
+    }
     if (b) return this.react(b);
     if (this.tool === "pave") {
       const result = g.togglePaving(tile.x, tile.y);
@@ -1496,14 +1681,14 @@ export class Ui {
       else this.announce("Gepflastert wird nur freier, trockener Boden.");
       return;
     }
-    // A found text: unless the axe marks one of its trees, read it.
+    // A found text: unless Holzhacken marks one of its trees, read it.
     if (
       text &&
       isFound(text) &&
-      !(this.tool === "axe" && g.isTree(tile.x, tile.y))
+      !(this.tool === "fell" && g.isTree(tile.x, tile.y))
     )
       return this.readText(text);
-    if (this.tool === "axe") {
+    if (this.tool === "fell") {
       const result = g.toggleMark(tile.x, tile.y);
       if (result === "marked") this.announce("Baum markiert.");
       else if (result === "unmarked") this.announce("Markierung entfernt.");
@@ -1547,6 +1732,7 @@ export class Ui {
     if (removed && this.doomed?.id === b.id) this.setDoomed(null);
     if (removed && this.reading?.id === b.id) this.leaveReading();
     if (removed && this.card?.b.id === b.id) this.closeCard();
+    if (!removed) this.repairTool();
     if (!this.buildMenu.hidden) this.updateBuildMenu();
   }
 
@@ -1554,6 +1740,8 @@ export class Ui {
     const g = this.o.game;
     const s = g.state;
     if (b.state === "drowned") return "überflutet.";
+    if (b.state === "ruin")
+      return "eine Ruine. Hier geht nichts mehr, und sie drückt auf die Stimmung.";
     if (b.state === "site") {
       const percent = Math.round(g.progress(b) * 100);
       return percent === 0 ? "Baustelle." : `im Bau, ${percent} %.`;
@@ -1590,6 +1778,8 @@ export class Ui {
         return this.portText(b);
       case "schiff":
         return "fährt die Waldleute zu den anderen Häfen am See.";
+      case "recyclinghof":
+        return "was im Umkreis von 10 km abgerissen wird, gibt hier einen Teil zurück.";
       default:
         // Producing buildings show their crew and stock instead.
         return "";
@@ -1607,23 +1797,51 @@ export class Ui {
 
   /** The Abreissen tool: the first tap marks a building, the second tears it down. */
   private demolish(b: Building) {
-    if (!this.o.game.canDemolish(b)) {
+    const why = this.o.game.undemolishable(b);
+    if (why) {
       this.setDoomed(null);
-      return this.announce("Das liegt unter Wasser.");
+      this.o.world.toast(b, why);
+      return this.announce(why);
     }
+    const g = this.o.game;
     const name = this.label(b.kind, b.game);
     if (this.doomed?.id !== b.id) {
-      const refund = this.costText(this.o.game.refund(b));
+      const refund = this.costText(g.refund(b));
       this.setDoomed(b);
-      const text = refund
-        ? `Nochmals tippen: ${name} abreissen (${refund} zurück).`
-        : `Nochmals tippen: ${name} abreissen.`;
+      const text =
+        b.state === "ruin"
+          ? `Nochmals tippen: Ruine ${name} wegräumen (viel Arbeit, nichts zurück).`
+          : refund
+            ? `Nochmals tippen: ${name} abreissen (${refund} zurück).`
+            : b.state === "site"
+              ? `Nochmals tippen: ${name} abreissen (nichts zurück).`
+              : `Nochmals tippen: ${name} abreissen (nichts zurück, kein Recyclinghof in der Nähe).`;
       this.o.world.toast(b, text);
       return this.announce(text);
     }
     this.setDoomed(null);
-    this.o.game.demolish(b);
-    this.announce(`${name} abgerissen.`);
+    const result = g.demolish(b);
+    this.announce(
+      result === "clearing"
+        ? `Die Waldleute räumen die Ruine ${name} weg.`
+        : `${name} abgerissen.`,
+    );
+  }
+
+  /** Orders a building's repair, or a ruin's rebuilding, and says so. */
+  private repair(b: Building) {
+    const g = this.o.game;
+    const name = this.label(b.kind, b.game);
+    const ruin = b.state === "ruin";
+    const cost = this.costText(g.repairCost(b));
+    const why = g.repair(b);
+    const text =
+      why ??
+      (ruin
+        ? `${name} wird wieder aufgebaut${cost ? ` (${cost})` : ""}.`
+        : `${name} wird repariert${cost ? ` (${cost})` : ""}.`);
+    this.o.world.toast(b, text);
+    this.announce(text);
   }
 
   private setDoomed(b: Building | null) {

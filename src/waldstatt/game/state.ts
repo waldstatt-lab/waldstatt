@@ -45,14 +45,21 @@ export interface Building {
   y: number;
   w: number;
   h: number;
-  /** "drowned": under the Sihlsee; "ruin": decayed or left by the water. */
+  /** "drowned": under the Sihlsee; "ruin": worn out, decayed or left by the water. */
   state: "site" | "done" | "drowned" | "ruin";
-  /** Seconds of work done. */
+  /** Seconds of work done; for a ruin being cleared away, of that work. */
   work: number;
   /** Waldleute it asks for, if it takes a crew. */
   crew?: number;
-  /** For the Klause, churches and the Kloster: 1 sound, 0 in ruins. */
+  /**
+   * The share of its most condition a finished building has left: 1 sound
+   * (or unset), 0 in ruins. Its most condition follows its kind and size.
+   */
   condition?: number;
+  /** A repair is paid for, and Waldleute come to do it. */
+  repair?: boolean;
+  /** A ruin the Waldleute clear away. */
+  clearing?: boolean;
   /** How far it has sunk into the Sihlsee, 0 to 1. */
   sunk?: number;
   /** Graves in a graveyard. */
@@ -434,6 +441,8 @@ function parse(data: unknown, rawPeople: unknown, gameIds: Set<string>): Saved {
       graves: isInt(b.graves, 0, 100) ? b.graves : undefined,
       thrown: isInt(b.thrown, 0, 1000) ? b.thrown : undefined,
       beer: b.beer === true ? true : undefined,
+      repair: b.repair === true && b.state === "done" ? true : undefined,
+      clearing: b.clearing === true && b.state === "ruin" ? true : undefined,
     });
   }
   if (!isInt(d.nextId, 1)) throw new Error("nextId");

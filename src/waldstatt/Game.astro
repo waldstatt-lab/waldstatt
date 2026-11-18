@@ -181,20 +181,12 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
       <button
         type="button"
         class="wg-tool"
-        data-tool="axe"
+        data-tool="fell"
         aria-pressed="false"
         hidden
       >
-        <Icon name="axe" /> Axt
-      </button>
-      <button
-        type="button"
-        class="wg-tool"
-        data-tool="saw"
-        aria-pressed="false"
-        hidden
-      >
-        <Icon name="saw" /> Säge
+        <Icon name="axe" class="wg-with-axe" />
+        <Icon name="saw" class="wg-with-saw" /> Holz&shy;hacken
       </button>
       <button
         type="button"
@@ -203,7 +195,16 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
         aria-pressed="false"
         hidden
       >
-        <Icon name="pave" /> Pflastern
+        <Icon name="pave" /> Pflas&shy;tern
+      </button>
+      <button
+        type="button"
+        class="wg-tool"
+        data-tool="repair"
+        aria-pressed="false"
+        hidden
+      >
+        <Icon name="repair" /> Repa&shy;rieren
       </button>
       <button
         type="button"
@@ -211,7 +212,7 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
         data-tool="demolish"
         aria-pressed="false"
       >
-        <Icon name="demolish" /> Abreissen
+        <Icon name="demolish" /> Ab&shy;reissen
       </button>
       <button
         type="button"

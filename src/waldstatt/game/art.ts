@@ -5,7 +5,7 @@
  * look borrows the genre's isometric view, not any game's pictures: nothing is
  * traced or copied.
  */
-import { iseColours, STAGE, type Kind } from "./config";
+import { iseColours, kinds, STAGE, type Kind, type Material } from "./config";
 import { TH, TW } from "./iso";
 import { hash } from "./world";
 
@@ -907,6 +907,7 @@ const heights: Record<Kind, number> = {
   friedhof: 50,
   ise: 90,
   brot: 70,
+  recyclinghof: 70,
 };
 
 function painter(kind: Kind, w: number, d: number) {
@@ -2938,8 +2939,250 @@ export function buildingPicture(
     case "brot":
       brot(P, w, d);
       break;
+    case "recyclinghof":
+      recyclinghof(P, w, d);
+      break;
   }
   return { canvas: element, ax, ay, flat: ground?.element };
+}
+
+/**
+ * A Recyclinghof: a gravelled yard with a shed, and bays behind low walls
+ * where boards, stones and old barrels lie sorted for building anew.
+ */
+function recyclinghof(P: Painter, w: number, d: number) {
+  P.poly(
+    [
+      [0.1, 0.1, 0],
+      [w - 0.1, 0.1, 0],
+      [w - 0.1, d - 0.1, 0],
+      [0.1, d - 0.1, 0],
+    ],
+    "#bcb29a",
+    "#8f8572",
+  );
+  const rnd = random(31);
+  for (let i = 0; i < 120; i++) {
+    const [x, y] = P.p(0.2 + rnd() * (w - 0.4), 0.2 + rnd() * (d - 0.4));
+    P.ctx.fillStyle =
+      rnd() < 0.5 ? "rgba(90, 80, 65, 0.4)" : "rgba(255, 250, 235, 0.45)";
+    P.ctx.fillRect(x, y, 1.4, 1);
+  }
+  // The shed, open to the yard.
+  P.shadow(0.25, 0.25, 1.6, 1.6, 1.0);
+  P.box(0.25, 0.25, 1.6, 1.6, 0, 24, logs);
+  for (let z = 4; z < 24; z += 4)
+    P.line([1.6, 0.25, z], [1.6, 1.6, z], "#4a3018", 0.8);
+  P.leftOpening(1.6, 0.45, 1.4, 0, 17, "#3a2614");
+  P.gable(0.25, 0.25, 1.6, 1.6, 24, 16, "v", tiles, 0.16);
+  // The bays, each behind a low wall: boards, stones, old barrels.
+  for (const v of [0.25, 1.15, 2.05])
+    P.box(1.9, v, w - 0.2, v + 0.1, 0, 8, stone);
+  for (let i = 0; i < 4; i++)
+    P.box(2.1, 0.45 + i * 0.03, w - 0.4, 0.95, i * 3, i * 3 + 3, {
+      ...logs,
+      top: i % 2 ? "#b98a52" : "#a87a4c",
+    });
+  for (let i = 0; i < 9; i++) {
+    const u = 2.15 + (i % 3) * 0.45;
+    const v = 1.35 + Math.floor(i / 3) * 0.2;
+    P.box(u, v, u + 0.36, v + 0.18, 0, 5 + (i % 2) * 3, block);
+  }
+  barrel(P, 2.4, 2.4);
+  barrel(P, 2.9, 2.5);
+  barrel(P, 2.65, 2.35, 11);
+  // A board by the gate, green as the yard's sign.
+  P.line([0.5, 2.6, 0], [0.5, 2.6, 22], "#3a2614", 1.4);
+  P.line([1.3, 2.6, 0], [1.3, 2.6, 22], "#3a2614", 1.4);
+  P.leftOpening(2.6, 0.45, 1.35, 14, 24, "#3f7a3a", "#1f3a1c");
+  for (const z of [17, 20.5])
+    P.line([0.6, 2.6, z], [1.2, 2.6, z], "#e8f0d8", 0.9);
+}
+
+const block = {
+  top: "#ddd8cc",
+  left: "#c4beb1",
+  right: "#9e988b",
+  line: "#6f6a60",
+};
+
+// --- Wear -------------------------------------------------------------------
+
+/** The colours a ruin of each material falls into. */
+const rubbleColours: Record<Material, (typeof stone)[]> = {
+  farm: [logs, { ...logs, top: "#c9a46c", left: "#b48c50" }],
+  wood: [logs, { ...logs, top: "#5a4630", left: "#4a3826", right: "#2e2218" }],
+  mixed: [logs, stone],
+  stone: [stone, block],
+};
+
+/**
+ * A worn building's picture: a copy of its picture with wear painted over
+ * where it has paint. Worn (1): stains, moss and streaks. Crumbling (2):
+ * cracks, holes and grime besides. In ruins (3): everything higher than a
+ * stub of wall is gone, rubble lies in and round its foot, and what stands is
+ * greyed. Fields and pens grow weeds and fall bare. The same for a building
+ * of a kind and size every time.
+ */
+export function weathered(
+  picture: Picture,
+  kind: Kind,
+  w: number,
+  d: number,
+  level: 1 | 2 | 3,
+): Picture {
+  let seed = (w * 73 + d * 151 + level * 977) >>> 0;
+  for (const c of kind) seed = Math.imul(seed ^ c.charCodeAt(0), 0x9e3779b1);
+  const pad = 10;
+  const up = heights[kind];
+  const ox = (d * TW) / 2 + pad;
+  const oy = up + pad;
+  const wear = (source: HTMLCanvasElement, flat: boolean) => {
+    const W = source.width / RES;
+    const H = source.height / RES;
+    const { element, ctx } = canvas(W, H);
+    ctx.drawImage(source, 0, 0, W, H);
+    const P = new Painter(ctx, ox, oy);
+    const rnd = random(seed + (flat ? 7 : 0));
+    // The footprint on the canvas: its back edge and its front edge.
+    const front = (x: number) =>
+      x < ox + ((w - d) * TW) / 2
+        ? oy + (d * TH) / 2 + ((x - (ox - (d * TW) / 2)) * TH) / TW
+        : oy + ((w + d) * TH) / 2 - ((x - (ox + ((w - d) * TW) / 2)) * TH) / TW;
+    const spot = () => P.p(rnd() * w, rnd() * d, rnd() * up * (flat ? 0 : 0.9));
+    ctx.globalCompositeOperation = "source-atop";
+    if (flat) {
+      // Weeds and bare patches in the fields and pens.
+      const n = Math.round(w * d * (level === 3 ? 26 : level * 8));
+      for (let i = 0; i < n; i++) {
+        const [x, y] = spot();
+        const r = 2 + rnd() * (level === 3 ? 9 : 5);
+        ellipse(
+          ctx,
+          x,
+          y,
+          r,
+          r * 0.5,
+          rnd() < 0.5 ? "rgba(110, 90, 50, 0.35)" : "rgba(70, 95, 40, 0.35)",
+        );
+      }
+      if (level === 3) {
+        ctx.fillStyle = "rgba(120, 110, 85, 0.4)";
+        ctx.fillRect(0, 0, W, H);
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return element;
+    }
+    if (level === 3) {
+      // Everything above a stub of wall falls in; the stub is ragged.
+      const stub = 16 + up * 0.08;
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(W, 0);
+      for (let x = W; x >= -4; x -= 3 + rnd() * 4) {
+        const jag = (rnd() - 0.5) * stub * 0.9;
+        ctx.lineTo(x, Math.min(H, front(x)) - stub + jag);
+      }
+      ctx.lineTo(0, 0);
+      ctx.fill();
+      // A bridge or dam breaks through in the middle; a ship sinks.
+      if (kind === "bruecke" || kind === "damm" || kind === "schiff") {
+        const [x, y] = P.p(w / 2, d / 2);
+        ctx.beginPath();
+        ctx.ellipse(x, y - 4, TW * 0.45, TH * 0.9, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalCompositeOperation = "source-atop";
+    }
+    // Stains running down the walls, moss on the roofs.
+    const stains = Math.round((w + d) * 6 * level);
+    for (let i = 0; i < stains; i++) {
+      const [x, y] = spot();
+      ctx.strokeStyle = "rgba(55, 40, 25, 0.22)";
+      ctx.lineWidth = 1 + rnd() * 2.5;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (rnd() - 0.5) * 2, y + 4 + rnd() * 12);
+      ctx.stroke();
+      const [mx, my] = spot();
+      ellipse(
+        ctx,
+        mx,
+        my,
+        2 + rnd() * 4,
+        1 + rnd() * 2,
+        rnd() < 0.6 ? "rgba(75, 105, 45, 0.32)" : "rgba(60, 45, 30, 0.25)",
+      );
+    }
+    if (level >= 2) {
+      // Cracks and holes, and grime over everything.
+      for (let i = 0; i < (w + d) * 3; i++) {
+        let [x, y] = spot();
+        ctx.strokeStyle = "rgba(30, 20, 12, 0.75)";
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        for (let k = 0; k < 4; k++) {
+          x += (rnd() - 0.5) * 6;
+          y += 1 + rnd() * 4;
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      for (let i = 0; i < (w + d) * (level === 3 ? 1 : 2); i++) {
+        const [x, y] = spot();
+        const r = 1.5 + rnd() * 3;
+        ctx.fillStyle = "rgba(25, 18, 12, 0.85)";
+        ctx.beginPath();
+        ctx.moveTo(x - r, y);
+        ctx.lineTo(x - r * 0.2, y - r * 0.8);
+        ctx.lineTo(x + r, y - r * 0.3);
+        ctx.lineTo(x + r * 0.4, y + r * 0.7);
+        ctx.fill();
+      }
+      ctx.fillStyle = "rgba(45, 35, 25, 0.14)";
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (level === 3) {
+      // What stands is grey; rubble lies in it and before it.
+      ctx.fillStyle = "rgba(115, 105, 90, 0.35)";
+      ctx.fillRect(0, 0, W, H);
+      const colours = rubbleColours[kinds[kind].material ?? "wood"];
+      // Fields and pens leave a heap where their house stood, not a field of it.
+      const part = kinds[kind].material === "farm" ? flatPart(kind, w) : null;
+      const [u0, v0] = part
+        ? [Math.max(0.2, part.u - 2), Math.max(0.2, part.v - 1.6)]
+        : [0.2, 0.2];
+      const [u1, v1] = part ? [part.u, part.v] : [w - 0.2, d - 0.2];
+      const pieces: [number, number][] = [];
+      for (let i = 0; i < Math.round((u1 - u0) * (v1 - v0) * 7); i++)
+        pieces.push([u0 + rnd() * (u1 - u0), v0 + rnd() * (v1 - v0)]);
+      pieces.sort((a, b) => a[0] + a[1] - b[0] - b[1]);
+      const outside = ([u, v]: [number, number]) => u > w - 0.5 || v > d - 0.5;
+      const piece = ([u, v]: [number, number]) => {
+        const size = 0.12 + rnd() * 0.2;
+        const c = colours[Math.floor(rnd() * colours.length)];
+        P.box(u, v, u + size, v + size * 0.8, 0, 2 + rnd() * 6, c);
+      };
+      // Inside the walls behind what stands, front to back; at the front
+      // over it, back to front.
+      ctx.globalCompositeOperation = "destination-over";
+      for (const p of [...pieces].reverse()) if (!outside(p)) piece(p);
+      ctx.globalCompositeOperation = "source-over";
+      for (const p of pieces) if (outside(p)) piece(p);
+      ctx.globalCompositeOperation = "destination-over";
+      P.shadow(0.2, 0.2, w - 0.2, d - 0.2, 0.3);
+    }
+    ctx.globalCompositeOperation = "source-over";
+    return element;
+  };
+  return {
+    canvas: wear(picture.canvas, false),
+    ax: picture.ax,
+    ay: picture.ay,
+    flat: picture.flat && wear(picture.flat, true),
+  };
 }
 
 // --- Ground textures --------------------------------------------------------

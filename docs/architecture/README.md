@@ -36,10 +36,11 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/state.ts` | The save in IndexedDB ([ADR 0003](decisions/0003-save-the-waldstatt-in-indexeddb.md)): the settlement, the people and one record per chunk, validated on load, written in part, reset by deleting the database; snapshots of the whole forest, and replacing it with another in one transaction |
 | `game/saves.ts` | Forests saved under a name in the database `waldstatt-games-saves`, and forests as JSON files to download and read back ([ADR 0004](decisions/0004-keep-named-waldstatt-saves-and-files.md)) |
 | `game/savesDialog.ts` | The dialog «Wälder»: save under a name, the list to load, download or delete, the forest being played as a file, and a forest from a file |
-| `game/sim.ts` | The rules: the tools on the ground, marking and felling, the hidden texts, Waldleute and their tasks (walking back to eat included), bridges, ports and ships, building sites, placing rules, what the build menu shows, ruins and repair, the ravens; it steps the systems below in turn |
+| `game/sim.ts` | The rules: the tools on the ground, marking and felling, the hidden texts, Waldleute and their tasks (walking back to eat included), bridges, ports and ships, building sites, repairs and clearing ruins as work, refunds and the Recyclinghof's reach, placing rules, what the build menu shows, the ravens; it steps the systems below in turn |
 | `game/economy.ts` | The goods: the shared stock and its limits, the crews and recipes of the producing buildings, beer for the Spielhäuser and the theatre, the upkeep of the Klause, the churches and the Kloster, the Brot auswerfen |
 | `game/people.ts` | The Waldleute's lives: ages, meals and where food reaches, children, deaths, graves and tombstones, beds, the fire and the first pair |
-| `game/mood.ts` | Motivation: where it tends with what stands, passing events, and the work speed it sets |
+| `game/mood.ts` | Motivation: where it tends with what stands and how worn it is, passing events, and the work speed it sets |
+| `game/wear.ts` | Wear: every finished building's condition, its most by material and size, the wear levels the art shows, and falling into ruins |
 | `game/growth.ts` | The forest growing back: seedlings on felled ground beside forest, kept down where Waldleute walk |
 | `game/flood.ts` | The Sihlsee filling and draining tile by tile, buildings sinking, and the flood wave down the Sihl |
 | `game/nav.ts` | Finding ways: the Waldleute's search over open ground and crossings by ship, straightening ways, and ships' routes over their lake |
@@ -123,11 +124,16 @@ contacts swisstopo or BAFU. The game's menu credits both.
 
 **Play.** The tools lie on the ground and are picked up with a tap: the axe
 in the first clearing, beside the Waldmensch; the saw, once a hut stands and
-100 trees are felled, where the last of them fell. Until then their buttons
-are missing from the toolbox. The axe marks single trees; the saw marks every tree in a dragged area
-(two fingers or another mouse button pan meanwhile); with «Abreissen», a first
-tap marks a building in red and a second tap on it tears it down, returning half
-its costs. Waldleute walk only on open ground: felled forest, the natural gaps,
+100 trees are felled, where the last of them fell. Both are one tool,
+«Holzhacken», missing from the toolbox until the axe is picked up: a tap marks
+or unmarks a single tree; once the saw is picked up, it upgrades the tool, whose
+icon turns into the saw, and a drag marks every tree in the dragged area (two
+fingers or another mouse button pan meanwhile), while a tap still marks one; with «Abreissen», a first
+tap marks a building in red and a second tap on it tears it down. Only within
+10 km of a finished Recyclinghof does that return anything: half its costs, less
+as far as it is worn; a site nobody worked on yet returns its whole costs. With
+«Reparieren» (shown once a building stands that wears), a tap orders a
+building's repair (see **Wear and repair**). Waldleute walk only on open ground: felled forest, the natural gaps,
 bridges and the finished dam, never through standing trees or water. They build
 the nearest site they can reach (counted a few tiles nearer) and otherwise fell
 the nearest marked tree beside open ground, so a sawn area is cleared from its
@@ -197,14 +203,40 @@ with beer, and lowered by Spielhäuser without beer, overcrowding and hunger;
 opening a game from a Spielhaus, the Brot auswerfen and lonely deaths move it
 for a while. The Klause, the churches and the Kloster use food and books every
 minute, but only goods the settlement can already make; without them they
-decay, lose their effect below half (the raven leaves), and fall into ruins,
-which a tap repairs for half the costs. A Spielhaus and the theatre drink beer;
+decay a twentieth of their condition a minute on top of their wear, lose their
+effect below half (the raven leaves), and fall into ruins. Ruins lower
+motivation by 4 % each, at most 20 %; the average condition of the other
+finished buildings lowers it below 50 %, up to 15 % at none, and raises it
+above 80 %, up to 6 % when all are sound. A Spielhaus and the theatre drink beer;
 without it they are shut, and their play link and stage do not open. The
 Brot auswerfen waits for 100 loaves, then throws them one by one to the
 hungriest nearby and takes itself down. While it throws, a crowd as large as
 the settlement (5 to 16) stands cheering in front of the stage, two Waldleute
 on it throw, and each loaf flies in an arc to somebody who jumps to catch it;
 the crowd is drawn only, it takes nobody from work (`render.ts`).
+
+**Wear and repair** (`wear.ts`). Every finished building but the Brot
+auswerfen loses a point of condition a year of play (40 seconds). Its most
+condition, the years it lasts from new, is set by its material and grows with
+the square root of its footprint: 6 for fields and pens, 20 for wood, 32 for
+wood and stone, 50 for stone, each for 2 × 2 tiles. So a Getreidehof lasts 13
+years, a hut 20, a Steinhaus 75 and the Kloster 198. The condition is saved as
+a share of the most. Below two thirds a building looks worn (stains, moss,
+streaks), below a third crumbling (cracks, holes, grime) and is announced as
+«baufällig»; at none it falls into ruins: its upper part falls in, rubble lies
+in and before it, fields go to weeds, and it does nothing more (no beds, crew,
+effect, crossing or ship). A worn-out dam breaks and sends the flood wave. The
+pictures are the building's art with the wear painted over by `weathered()` in
+`art.ts` and `weatheredPlan()` in `plan.ts`, the same for a kind and size every
+time, and cached per level. A building's card shows «Zustand: 15 von 75,
+baufällig». A repair, ordered with the tool, the card or the finder, costs
+half the building's costs as far as it is worn, rounded up, paid at once;
+Waldleute then work on it from beside it like a site, scaffolded with a bar,
+and a full repair takes as long as building it. A ruin is rebuilt as a building
+site for half its costs, or, within 10 km of a Recyclinghof, cleared away with
+«Abreissen» or the card's «Wegräumen»: that gives nothing back and takes four
+times its building work. The Recyclinghof (Handwerk, 30 Holz and 20 Steine)
+appears once a Steinbruch stands. Balance lives in `config.ts`.
 
 **The forest grows back** (`growth.ts`): felled ground beside forest grows
 seedlings, drawn small and light, which become trees after four minutes. They
@@ -233,14 +265,14 @@ the Brauerei with a Getreidehof and 20, a game's Spielhaus once its scroll lay
 free and a Brauerei stands, its Bibliothek with its Spielhaus, the theatre with
 a Brauerei and a Spielhaus, churches with a Druckerei and 20 Waldleute, the
 graveyard with a church or the Kloster, the Kloster with a Druckerei and 50,
-the ISE AG with a Druckerei, the Brot auswerfen with a Bäckerei, the dam once
+the ISE AG with a Druckerei, the Recyclinghof with a Steinbruch, the Brot auswerfen with a Bäckerei, the dam once
 every tree on its site is felled, and the Steinhaus at 100 Waldleute. A dot on
 «Bauen» marks that something appeared, until the menu is opened. Content
 buildings are one of a kind (per game for a game's buildings). Nothing on the
 map opens a panel or dialog: a tap on a building turns the view to its text or
 stage, or opens its game or source; otherwise it opens a small card on the map
-above the building with its state and stock, − and + for a crew, or the repair
-of a ruin. A tap anywhere else, the card's ×, or Escape closes it. Other
+above the building with its state, condition and stock, − and + for a crew,
+its repair, or a ruin's rebuilding and clearing. A tap anywhere else, the card's ×, or Escape closes it. Other
 messages show as a short label over a building for a few seconds. Nothing explains the game: there are no hints,
 and announcements tell only what happened. Only «Neu beginnen» and loading,
 overwriting or deleting a saved forest ask for confirmation.
@@ -340,7 +372,7 @@ Kloster that lay in it come back as ruins, the rest is gone.
 **State and offline.** The save is in the IndexedDB database
 `waldstatt-games` ([ADR 0003](decisions/0003-save-the-waldstatt-in-indexeddb.md)):
 a record with the settlement (stock, marks and planned cobbles, buildings with
-their crew, condition, graves and how far they sank, the flood's level and the
+their crew, condition, an ordered repair or clearing, graves and how far they sank, the flood's level and the
 wave, the camera, the tools, where the saw lies, the seed and positions of the
 hidden texts, the explored texts, what appeared in the build menu, the goods
 seen, motivation and its passing events, and the tombstones), a record with
@@ -405,14 +437,15 @@ along y, so every tile is reached), at an even pace while held, and the view gli
 screen; digits typed before a movement are a count, so «10» and then → moves
 ten tiles, and a badge shows the count until it is used or Escape drops it;
 with Shift they pan smoothly; + and − zoom; v starts a rectangle for
-the saw or paving at the cursor and o jumps to its other corner, as in vim;
-Enter or Space applies the tool or opens a
-building, Escape cancels (`input.ts`). Jumps of the view take the cursor
+Holzhacken with the saw or for paving at the cursor and o jumps to its other corner, as in vim;
+with those tools Enter or Space also begins a rectangle and closes it, and
+closing it on the tile it began on marks or unmarks one tree; otherwise Enter or
+Space applies the tool or opens a building, Escape cancels (`input.ts`). Jumps of the view take the cursor
 along: to the first clearing (`/start`, `:lichtung`, the menu), and onto a
 text or the stage unless it is on it already. Turning back from a text leaves
 the cursor where it is: the view returns to where it was if the cursor did
 not move, and otherwise turns onto the cursor. Anywhere outside text fields and
-dialogs, a, g, p and x choose Axt, Säge, Pflastern and Abreissen, b opens
+dialogs, a, p, r and x choose Holzhacken, Pflastern, Reparieren and Abreissen, b opens
 Bauen and m the menu, which lists these keys and opens «Tasten». The map's
 description and the menu's list are written from the keymap. In «Tasten»,
 each action can have several keys, but a key only one action: adding a key
@@ -442,9 +475,14 @@ closed with Escape returns focus to where it was opened from: its button when
 clicked, the map when its key or the finder opened it. «/» opens a finder over the
 starting point (`start`) and the texts found so far and jumps to the one
 chosen; «:» one over commands:
-`tool:…` for the tools at hand, `build:…` for the buildings the menu shows,
-`lichtung`, `bauen`, `menü`, `wälder`, `tasten` and `neu-beginnen`, and `wald:…` for
-the saved forests (see below). Both match fuzzily, ignoring
+`tool:…` for the tools at hand (`tool:holzhacken`, whether with the axe or the
+saw), `build:…` for the buildings the menu shows,
+`lichtung`, `bauen`, `menü`, `wälder`, `tasten` and `neu-beginnen`, `wald:…` for
+the saved forests (see below), and `reparieren:…`, which choose finished
+buildings by condition: `baufällig`, `abgenutzt`, `alle`, `unter-5` to
+`unter-50` in points, or any number typed, such as «rep 30», and `ruinen` to
+rebuild the ruins. Each hints how many buildings and what it costs, and
+orders as many as the stock pays for, the most worn first. Both match fuzzily, ignoring
 accents, and take arrows or Tab, Enter and Escape. While the view is turned onto the stage,
 the keys from the game's controls play it instead. Every tool, menu item and
 link is a real button or link with a German name; status, finished buildings,

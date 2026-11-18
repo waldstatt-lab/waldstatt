@@ -47,6 +47,9 @@ Alternatives considered for where it lives:
   move; v selects; o jumps to the other corner; Enter and Space apply; + =
   and - _ zoom; a, g, p, x choose Axt, Säge, Pflastern and Abreissen (the saw
   moved from s to g); b, m, / and : as before.
+  _Later:_ the axe and the saw became one tool, «Holzhacken» (action `fell`,
+  key a), and «Reparieren» (action `repair`, key r) was added; a saved
+  keymap without `fell` takes the keys it had for `axe`.
 - The text mode on a text read top-down, started with Enter on it and left
   with Escape
   ([`textCursor.ts`](../../../src/waldstatt/game/textCursor.ts)),

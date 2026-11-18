@@ -24,9 +24,9 @@ export type Action =
   | "apply"
   | "zoomIn"
   | "zoomOut"
-  | "axe"
-  | "saw"
+  | "fell"
   | "pave"
+  | "repair"
   | "demolish"
   | "build"
   | "menu"
@@ -76,9 +76,9 @@ export const groups: {
     name: "Überall",
     scope: "map",
     actions: [
-      ["axe", "Axt"],
-      ["saw", "Säge"],
+      ["fell", "Holzhacken"],
       ["pave", "Pflastern"],
+      ["repair", "Reparieren"],
       ["demolish", "Abreissen"],
       ["build", "Bauen"],
       ["menu", "Menü"],
@@ -137,10 +137,9 @@ export const defaults: Keymap = {
   apply: ["Enter", " "],
   zoomIn: ["+", "="],
   zoomOut: ["-", "_"],
-  axe: ["a"],
-  // «s» moves left, as in the Neo layout.
-  saw: ["g"],
+  fell: ["a"],
   pave: ["p"],
+  repair: ["r"],
   demolish: ["x"],
   build: ["b"],
   menu: ["m"],
@@ -330,7 +329,8 @@ export function check(raw: unknown): Keymap | undefined {
   const map = {} as Keymap;
   const missing: Action[] = [];
   for (const action of actionList) {
-    const keys = record[action];
+    // Holzhacken was the axe and the saw: it takes the axe's keys.
+    const keys = record[action] ?? (action === "fell" ? record.axe : undefined);
     if (!Array.isArray(keys)) {
       missing.push(action);
       map[action] = [];
