@@ -1,12 +1,17 @@
 /**
- * The theatre's stage, painted into one canvas that lies on the amphitheatre's
- * floor (render.ts): the preview of a game, a status line, and wooden signs
- * for the programme, for each key of the game's controls and for the real
+ * The theatre's stage, painted into two canvases. In the isometric view the
+ * preview stands on the stage in 3D (`iso`, upright between the theatre's back
+ * and front stands); the floor canvas then shows only the boards. Turned
+ * top-down to play, the floor canvas lying on the amphitheatre's floor
+ * (render.ts) shows the preview in 2D, a status line, and wooden signs for
+ * the programme, for each key of the game's controls and for the real
  * game. Signs are pressed by tapping them on the map; while the view is
  * turned onto the stage, the keyboard plays too. A demonstration plays until
  * somebody takes over, and again after eight idle seconds; with reduced
  * motion there is none.
  */
+import { Painter } from "./art";
+import { TH, TW } from "./iso";
 import type { Game, Input, Report } from "./preview";
 import { carGame } from "./previewCar";
 import { motoGame } from "./previewMoto";
@@ -14,6 +19,10 @@ import type { GameInfo } from "./texts";
 
 /** Canvas pixels per tile. */
 export const STAGE_RES = 96;
+/** Canvas pixels per world unit of the 3D picture. */
+export const ISO_RES = 1.5;
+/** Room above the stage for the 3D picture, in world units. */
+const isoHeadroom = 90;
 
 interface KeySign {
   action: string;
@@ -89,6 +98,16 @@ export class Stage {
   private clock = 0;
   /** Set when the picture changed and the texture needs an update. */
   dirty = true;
+  /** The preview standing on the stage, for the isometric view. */
+  readonly iso = document.createElement("canvas");
+  /** Where the stage's corner lies on `iso`, in canvas pixels. */
+  readonly isoOrigin: { x: number; y: number };
+  isoDirty = true;
+  private isoCtx: CanvasRenderingContext2D;
+  /** Whether the view is turned top-down onto the stage. */
+  private plan = false;
+  private floorOnly = false;
+  private isoEmpty = false;
 
   constructor(
     /** The stage's size in tiles. */
@@ -103,6 +122,12 @@ export class Stage {
     const ctx = this.canvas.getContext("2d");
     if (!ctx) throw new Error("2d context");
     this.ctx = ctx;
+    this.iso.width = Math.ceil((((w + h) * TW) / 2) * ISO_RES);
+    this.iso.height = Math.ceil((((w + h) * TH) / 2 + isoHeadroom) * ISO_RES);
+    this.isoOrigin = { x: ((h * TW) / 2) * ISO_RES, y: isoHeadroom * ISO_RES };
+    const isoCtx = this.iso.getContext("2d");
+    if (!isoCtx) throw new Error("2d context");
+    this.isoCtx = isoCtx;
     this.choose(this.programme()[0]?.id ?? "");
   }
 
@@ -198,6 +223,14 @@ export class Stage {
     this.dirty = true;
   }
 
+  /** Whether the view is turned top-down: then the stage plays in 2D. */
+  view(plan: boolean) {
+    if (plan === this.plan) return;
+    this.plan = plan;
+    this.dirty = true;
+    this.isoDirty = true;
+  }
+
   /** Runs and paints the stage; call while it is on screen. */
   frame(dt: number) {
     const game = this.game();
@@ -220,8 +253,94 @@ export class Stage {
       game.step(step, this.input, this.demo);
       this.input.pressed.clear();
     }
-    this.paint(game);
-    this.dirty = true;
+    if (this.plan) {
+      this.floorOnly = false;
+      this.paint(game);
+      this.dirty = true;
+      this.clearIso();
+    } else {
+      // The boards change only when the view turns; the 3D picture always.
+      if (!this.floorOnly) {
+        this.floorOnly = true;
+        this.paintFloor();
+        this.dirty = true;
+      }
+      this.paintIso(game);
+    }
+  }
+
+  private clearIso() {
+    if (this.isoEmpty) return;
+    this.isoCtx.setTransform(1, 0, 0, 1, 0, 0);
+    this.isoCtx.clearRect(0, 0, this.iso.width, this.iso.height);
+    this.isoEmpty = true;
+    this.isoDirty = true;
+  }
+
+  /** The preview standing on the stage, seen from the isometric angle. */
+  private paintIso(game: Game | undefined) {
+    const ctx = this.isoCtx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.iso.width, this.iso.height);
+    this.isoEmpty = false;
+    ctx.setTransform(ISO_RES, 0, 0, ISO_RES, 0, 0);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    const P = new Painter(
+      ctx,
+      this.isoOrigin.x / ISO_RES,
+      this.isoOrigin.y / ISO_RES,
+    );
+    if (game) game.iso(P, this.w, this.h);
+    else {
+      const [x, y] = P.p(this.w / 2, this.h / 2, 24);
+      ctx.font = `700 15px ${serif}`;
+      ctx.textAlign = "center";
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "#2a1d12";
+      ctx.strokeText("Das Programm ist leer", x, y);
+      ctx.fillStyle = "#f6ead0";
+      ctx.fillText("Das Programm ist leer", x, y);
+    }
+    this.isoDirty = true;
+  }
+
+  /** The floorboards alone, with a note to turn the view onto the stage. */
+  private paintFloor() {
+    this.regions = [];
+    this.boards();
+    const ctx = this.ctx;
+    ctx.fillStyle = "#2a1d12";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.font = `700 34px ${serif}`;
+    ctx.fillText("Theater der Waldstatt", 24, 54);
+    ctx.font = `600 24px ${sans}`;
+    ctx.fillText(
+      "Tipp die Bühne an: Sie dreht sich, und du spielst.",
+      24,
+      this.canvas.height - 30,
+      this.canvas.width - 48,
+    );
+  }
+
+  /** The stage's floorboards and frame. */
+  private boards() {
+    const ctx = this.ctx;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#a8743f";
+    ctx.fillRect(0, 0, W, H);
+    for (let y = 0; y < H; y += 32) {
+      ctx.fillStyle = (y / 32) % 2 ? "#a06d3a" : "#b07a44";
+      ctx.fillRect(0, y, W, 30);
+      ctx.fillStyle = "#6b4423";
+      ctx.fillRect(0, y + 30, W, 2);
+    }
+    ctx.strokeStyle = "#4a3320";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, W - 6, H - 6);
   }
 
   // --- Painting -----------------------------------------------------------
@@ -284,21 +403,8 @@ export class Stage {
   private paint(game: Game | undefined) {
     const ctx = this.ctx;
     const W = this.canvas.width;
-    const H = this.canvas.height;
     this.regions = [];
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    // The stage's floorboards.
-    ctx.fillStyle = "#a8743f";
-    ctx.fillRect(0, 0, W, H);
-    for (let y = 0; y < H; y += 32) {
-      ctx.fillStyle = (y / 32) % 2 ? "#a06d3a" : "#b07a44";
-      ctx.fillRect(0, y, W, 30);
-      ctx.fillStyle = "#6b4423";
-      ctx.fillRect(0, y + 30, W, 2);
-    }
-    ctx.strokeStyle = "#4a3320";
-    ctx.lineWidth = 6;
-    ctx.strokeRect(3, 3, W - 6, H - 6);
+    this.boards();
 
     const pad = 24;
     ctx.fillStyle = "#2a1d12";

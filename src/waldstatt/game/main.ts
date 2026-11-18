@@ -7,15 +7,16 @@
  */
 import { Application } from "pixi.js";
 import { href } from "../../lib/url";
-import { kinds, STAGE, type Kind } from "./config";
+import { kinds, STAGE, texts } from "./config";
 import { attachInput } from "./input";
 import { textLength, WorldLayer } from "./overlay";
 import { Renderer } from "./render";
 import { Stage } from "./stage";
-import { Game, type Events } from "./sim";
+import { Game, type Events, type TextSpec } from "./sim";
 import { clearSaved, load, save } from "./state";
 import { readGames } from "./texts";
 import { Ui } from "./ui";
+import { loadPages, onPage, town } from "./world";
 
 const root = document.querySelector<HTMLElement>("[data-wg]");
 if (root) void start(root);
@@ -40,6 +41,13 @@ async function start(root: HTMLElement) {
 
   const games = readGames();
   const { state, problem } = load(new Set(games.map((g) => g.id)));
+  // The water round Einsiedeln, where the texts lie hidden, and round the view.
+  const reach = 130;
+  const c = state.camera;
+  await Promise.all([
+    loadPages(town.x - reach, town.y - reach, town.x + reach, town.y + reach),
+    loadPages(c.x - 40, c.y - 40, c.x + 40, c.y + 40),
+  ]);
   const still = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   // The rules exist before the picture and interface; their events wait.
@@ -105,8 +113,8 @@ async function start(root: HTMLElement) {
         // Only announce once, when the work completes.
         announced.add(b.id);
         ui.announce(
-          kinds[b.kind].text
-            ? `${kinds[b.kind].name} ist fertig. Der Text steht jetzt im Wald.`
+          b.kind === "klause" || b.kind === "kloster"
+            ? `${kinds[b.kind].name} ist fertig. Ein Rabe fliegt auf.`
             : `${kinds[b.kind].name} ist fertig.`,
         );
       }
@@ -122,20 +130,42 @@ async function start(root: HTMLElement) {
       );
     },
     hint: () => ui?.updateHint(),
+    text: (t, found) => {
+      world?.text(t);
+      renderer?.text(t);
+      ui?.text(t, found);
+    },
+    items: () => {
+      renderer?.items();
+      ui?.items();
+    },
+    raven: (_r, t) => ui?.raven(t),
     dirty: scheduleSave,
   };
-  const scrollFor = (kind: Kind, game?: string) =>
-    textLength(
-      root,
+  // The texts hidden in the forest, as long as their text needs.
+  const specs: TextSpec[] = [
+    ...(["ortstafel", "chronik"] as const).map((kind) => ({
+      key: kind,
       kind,
-      games.find((g) => g.id === game),
-    );
+      w: texts[kind].w,
+      h: textLength(root, kind, undefined),
+    })),
+    ...games.map((g) => ({
+      key: `game:${g.id}`,
+      kind: "game" as const,
+      game: g.id,
+      w: texts.game.w,
+      h: textLength(root, "game", g),
+    })),
+  ];
   const game = new Game(
     state,
     games.map((g) => g.id),
-    scrollFor,
+    specs,
     events,
   );
+  // Pages arriving later bring new ways and work.
+  onPage(() => game.pagesChanged());
 
   const app = new Application();
   // Shown before PixiJS measures it; the still forest stays on top until ready.
@@ -143,7 +173,9 @@ async function start(root: HTMLElement) {
   try {
     await app.init({
       resizeTo: host,
-      background: "#1c3420",
+      // Transparent, so the texts lying under the ground show through its
+      // gaps (overlay.ts); the map's own background is the forest floor.
+      backgroundAlpha: 0,
       antialias: false,
       resolution: Math.min(window.devicePixelRatio || 1, 2),
       autoDensity: true,
@@ -160,7 +192,7 @@ async function start(root: HTMLElement) {
   app.canvas.setAttribute("aria-hidden", "true");
 
   renderer = new Renderer(app, game, () => still.matches);
-  world = new WorldLayer(host, game, games, (b) => ui?.focus(b));
+  world = new WorldLayer(host, game, games);
   ui = new Ui({
     root,
     game,
@@ -185,6 +217,10 @@ async function start(root: HTMLElement) {
     .querySelector<HTMLElement>("[data-fallback]")
     ?.setAttribute("hidden", "");
   root.dataset.ready = "true";
+  if (problem === "old")
+    ui.announce(
+      "Die Waldleute sind nach Holzrüti gezogen. Ein neuer Wald wächst, und die Schriften liegen darin verborgen.",
+    );
   if (problem === "invalid")
     ui.announce("Der gespeicherte Wald war beschädigt. Ein neuer Wald wächst.");
   if (problem === "storage")
@@ -200,6 +236,7 @@ async function start(root: HTMLElement) {
     if (stage && renderer) {
       const area = { w: STAGE.u1 - STAGE.u0, h: STAGE.v1 - STAGE.v0 };
       if (renderer.onScreen(stageAt.x, stageAt.y, area.w, area.h)) {
+        stage.view(renderer.inPlan);
         stage.frame(dt);
         renderer.updateStage(stage);
       }

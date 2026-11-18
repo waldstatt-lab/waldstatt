@@ -40,26 +40,28 @@ export const balance = {
   boardingCost: 6,
   /** Tiles a Waldmensch searches at most when looking for a way to work. */
   searchTiles: 40000,
+  /** The saw appears once a hut stands and this many trees are felled. */
+  sawAfterTrees: 100,
+  /** How far ahead of the clearing a raven circles, in tiles (500 m). */
+  ravenLead: 10,
+  /** Tiles per second a raven flies. */
+  ravenSpeed: 6,
 } as const;
 
 export type Kind =
   | "huette"
   | "schafweide"
   | "druckerei"
-  | "ortstafel"
-  | "chronik"
-  | "spielidee"
-  | "anleitung"
   | "spielhaus"
   | "theater"
+  | "klause"
   | "kloster"
   | "damm"
   | "bruecke"
   | "hafen"
   | "schiff";
 
-export type Group =
-  "Wohnen" | "Wirtschaft" | "Wege" | "Wissen" | "Spiele" | "Prestige";
+export type Group = "Wohnen" | "Wirtschaft" | "Wege" | "Spiele" | "Prestige";
 
 export interface Cost {
   wood: number;
@@ -71,22 +73,13 @@ export interface KindInfo {
   name: string;
   group: Group;
   cost: Cost;
-  /**
-   * Footprint in tiles; for texts lying on the ground, h follows the text, and
-   * a bridge is as long as the river is wide.
-   */
+  /** Footprint in tiles; a bridge is as long as the river is wide. */
   w: number;
   h: number;
   /** Seconds of work for one Waldmensch. */
   work: number;
   /** "one": a single one; "game": one per game; "many": any number. */
   limit: "one" | "game" | "many";
-  /** The text a visitor can read once it is built. */
-  text?: "ortstafel" | "chronik" | "idea" | "controls";
-  /** The text lies on the footprint, which is as long as the text needs. */
-  fit?: boolean;
-  /** Drawn as a parchment scroll rather than a board. */
-  scroll?: boolean;
   /** One short line for the build menu. */
   about: string;
 }
@@ -116,7 +109,7 @@ export const kinds: Record<Kind, KindInfo> = {
     h: 3,
     work: 6,
     limit: "many",
-    about: "Schafe geben Pergament für Schriftrollen.",
+    about: "Schafe geben Pergament für Spielhäuser und das Kloster.",
   },
   druckerei: {
     name: "Druckerei",
@@ -126,78 +119,39 @@ export const kinds: Record<Kind, KindInfo> = {
     h: 3,
     work: 14,
     limit: "one",
-    about: "Druckt Pergament zu Drucken für Anleitungen.",
-  },
-  ortstafel: {
-    name: "Ortstafel",
-    group: "Wissen",
-    cost: cost(3),
-    w: 5,
-    h: 0,
-    work: 3,
-    limit: "one",
-    text: "ortstafel",
-    fit: true,
-    about: "Woher der Name kommt.",
-  },
-  chronik: {
-    name: "Chronik",
-    group: "Wissen",
-    cost: cost(4, 4),
-    w: 7,
-    h: 0,
-    work: 8,
-    limit: "one",
-    text: "chronik",
-    fit: true,
-    scroll: true,
-    about: "Eine Schriftrolle: wer wir sind und wie wir arbeiten.",
-  },
-  spielidee: {
-    name: "Spielidee",
-    group: "Wissen",
-    cost: cost(3, 3),
-    w: 7,
-    h: 0,
-    work: 8,
-    limit: "game",
-    text: "idea",
-    fit: true,
-    scroll: true,
-    about: "Eine Schriftrolle: die Idee des Spiels und was dich erwartet.",
-  },
-  anleitung: {
-    name: "Anleitung",
-    group: "Wissen",
-    cost: cost(4, 0, 2),
-    w: 6,
-    h: 0,
-    work: 5,
-    limit: "game",
-    text: "controls",
-    fit: true,
-    about: "Ein gedruckter Anschlag mit der Steuerung.",
+    about: "Druckt Pergament zu Programmzetteln für das Theater.",
   },
   spielhaus: {
     name: "Spielhaus",
     group: "Spiele",
-    cost: cost(12),
-    w: 4,
-    h: 4,
-    work: 10,
+    cost: cost(24, 4),
+    w: 5,
+    h: 5,
+    work: 16,
     limit: "game",
-    about: "Hier wohnt das Spiel: spielen und Quellcode.",
+    about: "Hier wohnt das Spiel. Antippen öffnet es in einem neuen Tab.",
   },
   theater: {
     name: "Theater",
     group: "Spiele",
-    cost: cost(40),
+    cost: cost(40, 0, 4),
     w: 12,
     h: 13,
     work: 24,
     limit: "one",
     about:
       "Ein hölzernes Amphitheater: Auf der Bühne spielst du die Spiele an, deren Spielhaus steht.",
+  },
+  klause: {
+    name: "Meinrads Klause",
+    group: "Prestige",
+    cost: cost(20),
+    w: 3,
+    h: 3,
+    work: 14,
+    limit: "one",
+    about:
+      "Die Klause des Einsiedlers Meinrad. Ein Rabe zeigt dir den Weg zum nächsten Spiel.",
   },
   kloster: {
     name: "Kloster Einsiedeln",
@@ -207,7 +161,7 @@ export const kinds: Record<Kind, KindInfo> = {
     h: 7,
     work: 90,
     limit: "one",
-    about: "Der grösste Bau der Waldstatt. Nur zum Bewundern.",
+    about: "Der grösste Bau der Waldstatt. Mit ihm kommt ein zweiter Rabe.",
   },
   bruecke: {
     name: "Brücke",
@@ -257,10 +211,42 @@ export const groups: Group[] = [
   "Wohnen",
   "Wirtschaft",
   "Wege",
-  "Wissen",
   "Spiele",
   "Prestige",
 ];
+
+/** The buildings that bring a raven: Meinrad kept two. */
+export const ravenKinds: Kind[] = ["klause", "kloster"];
+
+/**
+ * The texts that lie hidden in the forest. Each lies under trees until the
+ * Waldleute fell them; it is found with its first felled tree and explored
+ * once all its trees are felled. Width in tiles; the length follows the text.
+ */
+export type TextKind = "ortstafel" | "chronik" | "game";
+
+export const texts: Record<
+  TextKind,
+  {
+    name: string;
+    w: number;
+    style: "board" | "scroll";
+    /** Where it lies: within 1 km of the Klosterplatz, or 1.5 to 5 km out. */
+    where: "town" | "far";
+  }
+> = {
+  ortstafel: { name: "Ortstafel", w: 5, style: "board", where: "town" },
+  chronik: { name: "Chronik", w: 7, style: "scroll", where: "town" },
+  game: { name: "Schriftrolle", w: 8, style: "scroll", where: "far" },
+};
+
+/** Distances of hidden texts from the Klosterplatz, in tiles. */
+export const placing = {
+  town: { min: 0, max: 20 },
+  far: { min: 30, max: 100 },
+  /** Free tiles kept round each text and round the first clearing. */
+  gap: 3,
+};
 
 /** Text pixels per tile for texts lying on the ground, and their margin in tiles. */
 export const TEXT_SCALE = 32;
@@ -278,6 +264,3 @@ export const STAGE = {
   rows: 3,
   row: 0.75,
 };
-
-/** The heading of the controls section in the games' Markdown. */
-export const controlsHeading = "Steuerung";

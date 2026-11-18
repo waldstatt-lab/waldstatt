@@ -2,3 +2,5 @@
 /*.md
 /docs/
 package-lock.json
+# Generated water data for the Waldstatt, one long line by design.
+/src/waldstatt/data/

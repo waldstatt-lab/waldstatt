@@ -1,12 +1,23 @@
 /**
  * The game's rules: Waldleute fell marked trees and build building sites,
  * sheep grow parchment, the printing press prints, and the finished dam floods
- * the Sihlsee. Waldleute walk only on open ground (nav.ts): they fell their
+ * the Sihlsee. The site's texts lie hidden under the forest and are found by
+ * felling it; the axe and the saw lie on the ground to be picked up, and
+ * ravens show the way to the games' scrolls. Waldleute walk only on open ground (nav.ts): they fell their
  * way into the forest from its edge, cross rivers on bridges and the dam, and
  * cross a lake by ship between its ports. Felled wood counts at once. No
  * rendering and no DOM here.
  */
-import { balance, CHUNK, kinds, type Kind } from "./config";
+import {
+  balance,
+  CHUNK,
+  kinds,
+  placing,
+  ravenKinds,
+  texts,
+  type Kind,
+  type TextKind,
+} from "./config";
 import {
   clearLine,
   search,
@@ -22,10 +33,16 @@ import type { Building, Saved } from "./state";
 import {
   damSite,
   hasBaseTree,
+  isAbroad,
+  isKnown,
+  isLakeBasin,
+  isNaturalLake,
   isRiver,
-  lakeLabels,
+  isWall,
+  lakeAt,
   lakeTiles,
   start,
+  town,
 } from "./world";
 
 /** A point to walk to, or a crossing by ship that ends at (x, y). */
@@ -47,6 +64,46 @@ export interface Worker {
   ways: number;
   /** Seconds in the current phase. */
   t: number;
+  facing: 1 | -1;
+}
+
+/** A text hidden under the forest: found with its first felled tree. */
+export interface HiddenText {
+  /** "ortstafel", "chronik" or "game:<id>". */
+  key: string;
+  kind: TextKind;
+  game?: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Tiles of it without a tree. */
+  cleared: number;
+}
+
+/** What a text needs to be placed: its key and size in tiles. */
+export interface TextSpec {
+  key: string;
+  kind: TextKind;
+  game?: string;
+  w: number;
+  h: number;
+}
+
+export const isFound = (t: HiddenText) => t.cleared > 0;
+export const isExplored = (t: HiddenText) => t.cleared >= t.w * t.h;
+
+/** One of Meinrad's ravens, showing the way to a game's scroll. */
+export interface Raven {
+  /** The building it came with. */
+  id: number;
+  x: number;
+  y: number;
+  /** Where it circles, and the text it leads to, if any. */
+  goal: Point;
+  target?: string;
+  /** Its angle round the goal, and its heading for the picture. */
+  orbit: number;
   facing: 1 | -1;
 }
 
@@ -80,6 +137,12 @@ export interface Events {
   building(b: Building, removed?: boolean): void;
   supplies(): void;
   flooded(drowned: Building[]): void;
+  /** A hidden text was found, or more of it lies free. */
+  text(t: HiddenText, found: boolean): void;
+  /** The axe or the saw appeared or was picked up. */
+  items(): void;
+  /** A raven took up a new text to lead to, or came. */
+  raven(r: Raven, text: HiddenText | undefined): void;
   /** The Waldmensch has something new to say. */
   hint(): void;
   /** Something worth saving changed. */
@@ -109,6 +172,35 @@ function chunkOf(x: number, y: number) {
 const clamp = (v: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, v));
 
+/** A small deterministic random generator in [0, 1). */
+function random(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const directions = [
+  "Osten",
+  "Südosten",
+  "Süden",
+  "Südwesten",
+  "Westen",
+  "Nordwesten",
+  "Norden",
+  "Nordosten",
+];
+
+/** The compass direction from one point to another; north is −y. */
+export function compass(from: Point, to: Point): string {
+  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  return directions[(Math.round(angle / (Math.PI / 4)) + 8) % 8];
+}
+
 const neighbours: [number, number][] = [
   [0, 1],
   [1, 0],
@@ -120,16 +212,8 @@ const neighbours: [number, number][] = [
   [-1, -1],
 ];
 
-export const hints = [
-  "Nimm die Axt und zeig mir, welche Bäume fallen sollen. Durch den Wald komme ich nur, wo er gefällt ist.",
-  "Gut! Mit 8 Holz bauen wir unter «Bauen» eine Hütte – aber nur auf freiem Boden. Fäll also genug Bäume.",
-  "Zu zweit geht’s schneller. Die Säge markiert ganze Flächen. Bau als Nächstes ein Spielhaus: Dort wohnen unsere Spiele.",
-  "Am Spielhaus hängt das Schild zum Spielen. Für Schriften brauchen wir Pergament – bau eine Schafweide.",
-  "Schriftrollen brauchen so viel Platz wie ihr Text. Tippst du eine an, dreht sich die Karte, und du liest sie direkt im Wald.",
-  "Die Druckerei druckt Anleitungen. Tippst du die Bühne des Theaters an, spielst du unsere Spiele direkt darauf an.",
-  "Die Sihl liesse sich stauen. Aber was im Becken steht, geht unter.",
-  "Schwimmen können wir nicht. Über Flüsse führen Brücken; an einem See bauen wir Häfen, und Schiffe bringen uns hinüber.",
-];
+/** The Waldmensch's hints, one per milestone, in the order they are reached. */
+export const hintCount = 14;
 
 export class Game {
   readonly workers: Worker[] = [];
@@ -138,8 +222,6 @@ export class Game {
   private occupancy = new Map<number, Building>();
   /** The Sihlsee's basin. */
   private lake = new Set<number>();
-  /** Which lake's water a tile is, 0 for none. */
-  private lakeOf: (x: number, y: number) => number;
   /** The marked trees, by tile id. */
   private marked = new Set<number>();
   /** Trees a Waldmensch is on the way to fell. */
@@ -156,6 +238,14 @@ export class Game {
   private searches = 0;
   /** The tiles from which searches found no work, until a change. */
   private noWork: { chances: number; tiles: Set<number> } | null = null;
+  /** The hidden texts, and their tiles by tile id. */
+  readonly hidden: HiddenText[] = [];
+  private textTiles = new Map<number, HiddenText>();
+  readonly ravens: Raven[] = [];
+  private ravenClock = 0;
+  /** Trees felled so far, and the last one, for the saw. */
+  private felledCount = 0;
+  private lastFelled: Point | null = null;
   private pastureClock = 0;
   private pressClock = 0;
   private nextWorker = 1;
@@ -163,21 +253,27 @@ export class Game {
   constructor(
     readonly state: Saved,
     readonly gameIds: string[],
-    /** A scroll's height in tiles, from its text. */
-    private scrollHeight: (kind: Kind, game?: string) => number,
+    /** The texts to hide in the forest, with their sizes. */
+    specs: TextSpec[],
     private events: Events,
   ) {
     for (const [x, y] of lakeTiles()) this.lake.add(tileId(x, y));
-    this.lakeOf = lakeLabels(state.flooded);
+    for (const bits of state.felled.values())
+      for (const byte of bits) {
+        let b = byte;
+        while (b) {
+          b &= b - 1;
+          this.felledCount++;
+        }
+      }
     for (const k of state.marks) {
       const [x, y] = k.split(",").map(Number);
       this.marked.add(tileId(x, y));
     }
-    for (const b of state.buildings) {
-      if (kinds[b.kind].fit) b.h = scrollHeight(b.kind, b.game);
-      this.occupy(b);
-    }
+    for (const b of state.buildings) this.occupy(b);
+    this.hideTexts(specs);
     this.syncWorkers();
+    this.syncRavens();
     this.syncShips();
   }
 
@@ -209,12 +305,23 @@ export class Game {
 
   /** Which lake's water a tile is, natural or the dammed Sihlsee; 0 for none. */
   lakeAt(x: number, y: number): number {
-    return this.lakeOf(x, y);
+    return lakeAt(x, y, this.state.flooded);
+  }
+
+  private lakeOf(x: number, y: number): number {
+    return lakeAt(x, y, this.state.flooded);
+  }
+
+  /** A page of water arrived: ways and work there are new. */
+  pagesChanged() {
+    this.waysChanged(false);
+    this.syncShips();
   }
 
   isTree(x: number, y: number): boolean {
     return (
-      hasBaseTree(x, y) &&
+      // Hidden texts lie under unbroken forest.
+      (hasBaseTree(x, y) || this.textTiles.has(tileId(x, y))) &&
       !this.isFelled(x, y) &&
       !(this.state.flooded && this.isLake(x, y))
     );
@@ -241,7 +348,7 @@ export class Game {
 
   /** Marks or unmarks one tree. */
   toggleMark(x: number, y: number): "marked" | "unmarked" | "none" {
-    if (!this.isTree(x, y)) return "none";
+    if (!this.isTree(x, y) || !isKnown(x, y)) return "none";
     const marked = this.isMarked(x, y);
     if (marked) this.unmark(x, y);
     else this.mark(x, y);
@@ -258,7 +365,7 @@ export class Game {
     for (let y = ay; y <= by; y++) {
       for (let x = ax; x <= bx; x++) {
         if (count >= balance.sawMaxTiles) break;
-        if (this.isTree(x, y) && !this.isMarked(x, y)) {
+        if (this.isTree(x, y) && !this.isMarked(x, y) && isKnown(x, y)) {
           this.mark(x, y);
           this.events.tree(x, y);
           count++;
@@ -267,6 +374,140 @@ export class Game {
     }
     if (count) this.events.dirty();
     return count;
+  }
+
+  // --- Hidden texts and the tools on the ground ----------------------------
+
+  /** The hidden text lying on a tile, if any. */
+  textAt(x: number, y: number): HiddenText | undefined {
+    return this.textTiles.get(tileId(x, y));
+  }
+
+  text(key: string): HiddenText | undefined {
+    return this.hidden.find((t) => t.key === key);
+  }
+
+  /** Whether the game's scroll lies wholly free of trees. */
+  explored(game: string): boolean {
+    const t = this.text(`game:${game}`);
+    return !!t && isExplored(t);
+  }
+
+  /**
+   * Lays each text where this forest's seed puts it: the Ortstafel and the
+   * Chronik within 1 km of the Klosterplatz, the games' scrolls 1.5 to 5 km
+   * out, on dry land outside the Sihlsee's basin and clear of each other and
+   * the first clearing. Positions are saved; sizes follow the current text.
+   */
+  private hideTexts(specs: TextSpec[]) {
+    const taken: { x: number; y: number; w: number; h: number }[] = [];
+    const place = (spec: TextSpec, at: { x: number; y: number }) => {
+      const t: HiddenText = { ...spec, ...at, cleared: 0 };
+      for (let y = t.y; y < t.y + t.h; y++)
+        for (let x = t.x; x < t.x + t.w; x++) {
+          this.textTiles.set(tileId(x, y), t);
+          if (!this.isTree(x, y)) t.cleared++;
+        }
+      this.hidden.push(t);
+      taken.push(t);
+    };
+    const fresh: TextSpec[] = [];
+    for (const spec of specs) {
+      const saved = this.state.texts.get(spec.key);
+      if (saved) place(spec, saved);
+      else fresh.push(spec);
+    }
+    const gap = placing.gap;
+    const free = (x: number, y: number, w: number, h: number) => {
+      for (const o of taken)
+        if (
+          x - gap < o.x + o.w &&
+          o.x - gap < x + w &&
+          y - gap < o.y + o.h &&
+          o.y - gap < y + h
+        )
+          return false;
+      const sx = clamp(start.x + 0.5, x, x + w);
+      const sy = clamp(start.y + 0.5, y, y + h);
+      if (Math.hypot(sx - start.x - 0.5, sy - start.y - 0.5) < 3 + gap)
+        return false;
+      for (let ty = y - 1; ty <= y + h; ty++)
+        for (let tx = x - 1; tx <= x + w; tx++)
+          if (
+            isRiver(tx, ty) ||
+            isNaturalLake(tx, ty) ||
+            isWall(tx, ty) ||
+            isAbroad(tx, ty) ||
+            isLakeBasin(tx, ty) ||
+            this.occupancy.has(tileId(tx, ty)) ||
+            this.isFelled(tx, ty)
+          )
+            return false;
+      return true;
+    };
+    for (const spec of fresh) {
+      const range = placing[texts[spec.kind].where];
+      // Each text has its own sequence, so adding a game moves no other text.
+      let seed = this.state.seed;
+      for (const c of spec.key)
+        seed = Math.imul(seed ^ c.charCodeAt(0), 0x9e3779b1);
+      const rnd = random(seed);
+      let at: { x: number; y: number } | null = null;
+      for (let attempt = 0; attempt < 4000 && !at; attempt++) {
+        // Wider rings as attempts fail, so a text always finds a place.
+        const grow = Math.floor(attempt / 1000) * 10;
+        const angle = rnd() * Math.PI * 2;
+        const r = Math.sqrt(
+          range.min ** 2 + rnd() * ((range.max + grow) ** 2 - range.min ** 2),
+        );
+        const x = Math.round(town.x + Math.cos(angle) * r - spec.w / 2);
+        const y = Math.round(town.y + Math.sin(angle) * r - spec.h / 2);
+        if (free(x, y, spec.w, spec.h)) at = { x, y };
+      }
+      if (!at) continue;
+      this.state.texts.set(spec.key, at);
+      place(spec, at);
+      this.events.dirty();
+    }
+  }
+
+  /** The item lying on or right beside a tile, if any. */
+  itemNear(x: number, y: number): "axe" | "saw" | undefined {
+    const near = (p: Point) => Math.abs(p.x - x) <= 1 && Math.abs(p.y - y) <= 1;
+    if (!this.state.tools.axe && near(this.axeAt())) return "axe";
+    const saw = this.state.sawAt;
+    if (saw && !this.state.tools.saw && near(saw)) return "saw";
+    return undefined;
+  }
+
+  /** Where the axe lies: in the first clearing, beside the Waldmensch. */
+  axeAt(): Point {
+    return { x: start.x - 1, y: start.y };
+  }
+
+  /** Picks up an item lying on or beside a tile. */
+  pickUp(x: number, y: number): "axe" | "saw" | undefined {
+    const item = this.itemNear(x, y);
+    if (!item) return undefined;
+    this.state.tools[item] = true;
+    if (item === "saw") this.state.sawAt = null;
+    this.events.items();
+    this.events.dirty();
+    this.checkHint();
+    return item;
+  }
+
+  /** Lays the saw down once a hut stands and enough trees have fallen. */
+  private checkSaw() {
+    const s = this.state;
+    if (s.tools.saw || s.sawAt || this.felledCount < balance.sawAfterTrees)
+      return;
+    if (!this.done("huette")) return;
+    const at = this.lastFelled ?? this.home();
+    s.sawAt = { x: Math.floor(at.x), y: Math.floor(at.y) };
+    this.events.items();
+    this.events.dirty();
+    this.checkHint();
   }
 
   // --- Ways -------------------------------------------------------------
@@ -279,7 +520,11 @@ export class Game {
       const b = this.occupancy.get(id);
       const crossing =
         b?.state === "done" && (b.kind === "bruecke" || b.kind === "damm");
-      open = !this.isTree(x, y) && (crossing || !this.isWater(x, y));
+      open =
+        !this.isTree(x, y) &&
+        !isWall(x, y) &&
+        !isAbroad(x, y) &&
+        (crossing || !this.isWater(x, y));
       if (this.openCache.size > 250_000) this.openCache.clear();
       this.openCache.set(id, open);
     }
@@ -463,12 +708,8 @@ export class Game {
     );
   }
 
-  size(kind: Kind, game?: string): { w: number; h: number } {
-    const info = kinds[kind];
-    return {
-      w: info.w,
-      h: info.fit ? this.scrollHeight(kind, game) : info.h,
-    };
+  size(kind: Kind): { w: number; h: number } {
+    return { w: kinds[kind].w, h: kinds[kind].h };
   }
 
   /** Why a building cannot be chosen now, or undefined if it can. */
@@ -481,6 +722,12 @@ export class Game {
       );
       if (existing)
         return existing.state === "site" ? "Ist schon im Bau." : "Steht schon.";
+    }
+    if (kind === "spielhaus" && game && !this.explored(game)) {
+      const scroll = this.text(`game:${game}`);
+      return scroll && isFound(scroll)
+        ? "Erst wenn die ganze Schriftrolle frei liegt."
+        : "Zuerst die Schriftrolle des Spiels im Wald finden.";
     }
     if (kind === "theater" && !this.done("spielhaus"))
       return "Braucht ein fertiges Spielhaus.";
@@ -503,13 +750,8 @@ export class Game {
    * Checks a footprint whose top-left tile is (x, y). The dam has its fixed
    * site; a bridge spans the river from the tile (x, y) to both banks.
    */
-  placement(
-    kind: Kind,
-    game: string | undefined,
-    x: number,
-    y: number,
-  ): Placement {
-    let { w, h } = this.size(kind, game);
+  placement(kind: Kind, x: number, y: number): Placement {
+    let { w, h } = this.size(kind);
     if (kind === "damm") ({ x, y } = damSite);
     if (kind === "bruecke") {
       const span = this.bridgeSpan(x, y);
@@ -534,6 +776,12 @@ export class Game {
         if (this.occupancy.has(tileId(tx, ty))) {
           tile = "blocked";
           reason ??= "Da steht schon etwas.";
+        } else if (isWall(tx, ty) || isAbroad(tx, ty)) {
+          tile = "blocked";
+          reason ??= "Hier endet die Schweiz.";
+        } else if (this.textTiles.has(tileId(tx, ty))) {
+          tile = "blocked";
+          reason ??= "Hier liegt eine Schrift im Boden.";
         } else if (kind === "schiff") {
           if (!this.lakeAt(tx, ty)) {
             tile = "blocked";
@@ -596,7 +844,7 @@ export class Game {
     y: number,
   ): Building | undefined {
     if (this.unavailable(kind, game)) return undefined;
-    const spot = this.placement(kind, game, x, y);
+    const spot = this.placement(kind, x, y);
     if (!spot.ok) return undefined;
     const info = kinds[kind];
     this.state.wood -= info.cost.wood;
@@ -643,6 +891,7 @@ export class Game {
     this.waysChanged(true);
     this.syncShips();
     this.syncWorkers();
+    this.syncRavens();
     this.events.building(b, true);
     this.events.supplies();
     this.events.dirty();
@@ -849,6 +1098,7 @@ export class Game {
     this.searches = 2;
     for (const w of this.workers) this.stepWorker(w, dt, instant);
     this.stepShips(dt, instant);
+    this.stepRavens(dt, instant);
     this.produce(dt);
   }
 
@@ -1109,9 +1359,19 @@ export class Game {
     this.setFelled(x, y);
     this.openCache.delete(tileId(x, y));
     this.state.wood += balance.woodPerTree;
+    this.felledCount++;
+    this.lastFelled = { x, y };
     this.events.tree(x, y);
+    const t = this.textAt(x, y);
+    if (t) {
+      t.cleared++;
+      this.events.text(t, t.cleared === 1);
+      // A found or freed text sends the raven on.
+      if (t.cleared === 1 || isExplored(t)) this.ravenClock = 0;
+    }
     this.events.supplies();
     this.events.dirty();
+    this.checkSaw();
     this.checkHint();
   }
 
@@ -1122,6 +1382,8 @@ export class Game {
       if (w.task?.type === "build" && w.task.id === b.id) this.idle(w);
     this.waysChanged(false);
     if (b.kind === "huette") this.syncWorkers();
+    if (b.kind === "huette") this.checkSaw();
+    if (ravenKinds.includes(b.kind)) this.syncRavens();
     if (b.kind === "schiff") this.syncShips();
     if (b.kind === "damm") this.flood();
     this.events.building(b);
@@ -1129,36 +1391,216 @@ export class Game {
     this.checkHint();
   }
 
-  private shownHint = -1;
+  private shownHint = "";
 
-  /** The first milestone not yet reached; hints.length when all are. */
-  currentHint(): number {
-    const milestones = [
-      () => this.state.felled.size > 0,
+  /** Whether any of the town's texts or a game's scroll was found. */
+  private foundAny(where: "town" | "far"): boolean {
+    return this.hidden.some((t) => texts[t.kind].where === where && isFound(t));
+  }
+
+  /**
+   * The milestones in the order a visitor reaches them; the first not yet
+   * reached is the current hint.
+   */
+  private milestones(): (() => boolean)[] {
+    return [
+      () => this.state.tools.axe,
+      () => this.felledCount > 0,
       () => this.done("huette"),
-      () => this.done("spielhaus"),
+      () => !!this.state.sawAt || this.state.tools.saw,
+      () => this.state.tools.saw,
+      () => this.foundAny("town"),
+      () => this.done("klause") || this.done("kloster"),
+      () => this.foundAny("far"),
+      () => this.gameIds.some((g) => this.explored(g)),
       () => this.done("schafweide"),
-      () => this.done("chronik") || this.done("spielidee"),
-      () => this.done("druckerei") || this.done("theater"),
+      () => this.done("spielhaus"),
+      () => this.done("theater") || this.done("druckerei"),
       () => !!this.standing("damm") || this.state.flooded,
       () => this.done("bruecke") || this.done("schiff"),
     ];
-    const index = milestones.findIndex((reached) => !reached());
-    return index < 0 ? hints.length : index;
+  }
+
+  /** The first milestone not yet reached; hintCount when all are. */
+  currentHint(): number {
+    const index = this.milestones().findIndex((reached) => !reached());
+    return index < 0 ? hintCount : Math.min(index, hintCount);
+  }
+
+  /** What the Waldmensch says for the current milestone. */
+  hintText(): string {
+    const scroll = this.hidden.find(
+      (t) => t.kind === "game" && isFound(t) && !isExplored(t),
+    );
+    switch (this.currentHint()) {
+      case 0:
+        return "Da liegt meine Axt im Gras. Tipp sie an und nimm sie mit.";
+      case 1:
+        return "Zeig mir mit der Axt, welche Bäume fallen sollen. Durch den Wald komme ich nur, wo er gefällt ist.";
+      case 2:
+        return "Gut! Mit 8 Holz bauen wir unter «Bauen» eine Hütte – aber nur auf freiem Boden.";
+      case 3:
+        return `Zu zweit geht’s schneller. Fällt weiter: Nach ${balance.sawAfterTrees} Bäumen findet sich bestimmt etwas Nützliches.`;
+      case 4:
+        return "Da liegt eine Säge, wo eben der Baum fiel! Tipp sie an: Mit ihr markierst du ganze Flächen.";
+      case 5:
+        return "Im Süden liegt Einsiedeln. Keinen Kilometer um das Kloster liegen alte Schriften unter den Bäumen. Wo der Waldboden hell schimmert, lohnt sich das Fällen.";
+      case 6:
+        return "Hier lebte einst der Einsiedler Meinrad, und zwei Raben leisteten ihm Gesellschaft. Bau unter «Bauen» seine Klause: Ein Rabe kennt den Weg zu unseren Spielen.";
+      case 7:
+        return "Folge dem Raben: Er kreist über dem Wald, den wir als Nächstes fällen müssen. Irgendwo dahinter liegt die Schriftrolle eines Spiels.";
+      case 8:
+        return scroll
+          ? "Eine Schriftrolle! Fällt alle Bäume darüber, dann liegt das Spiel frei."
+          : "Folge dem Raben weiter. Fällt alle Bäume über der Schriftrolle, dann liegt das Spiel frei.";
+      case 9:
+        return "Für das Spielhaus brauchen wir Pergament. Bau eine Schafweide.";
+      case 10:
+        return "Das Spiel liegt frei: Unter «Bauen» steht sein Spielhaus bereit.";
+      case 11:
+        return "Tipp ein Spielhaus an, und das Spiel öffnet sich in einem neuen Tab. Im Theater spielst du die Spiele an; die Druckerei druckt die Programmzettel dafür.";
+      case 12:
+        return "Die Sihl liesse sich stauen. Aber was im Becken steht, geht unter.";
+      default:
+        return "Schwimmen können wir nicht. Über Flüsse führen Brücken; an einem See bauen wir Häfen, und Schiffe bringen uns hinüber.";
+    }
   }
 
   /** Tells the interface when the Waldmensch has something new to say. */
   checkHint() {
-    const current = this.currentHint();
+    const current = String(this.currentHint());
     if (current !== this.shownHint) {
       this.shownHint = current;
       this.events.hint();
     }
   }
 
+  // --- Ravens -------------------------------------------------------------
+
+  /** Keeps a raven for every finished Klause and Kloster. */
+  private syncRavens() {
+    const homes = this.state.buildings.filter(
+      (b) => ravenKinds.includes(b.kind) && b.state === "done",
+    );
+    for (let i = this.ravens.length - 1; i >= 0; i--)
+      if (!homes.some((b) => b.id === this.ravens[i].id))
+        this.ravens.splice(i, 1);
+    for (const b of homes) {
+      if (this.ravens.some((r) => r.id === b.id)) continue;
+      const x = b.x + b.w / 2;
+      const y = b.y + b.h / 2;
+      this.ravens.push({
+        id: b.id,
+        x,
+        y,
+        goal: { x, y },
+        orbit: this.ravens.length * Math.PI,
+        facing: 1,
+      });
+    }
+    this.ravenClock = 0;
+  }
+
+  /**
+   * The open tile nearest a point: felled forest or the first clearing,
+   * where the Waldleute could start felling towards it.
+   */
+  private nearestOpen(to: Point): Point {
+    let best: Point = { x: start.x + 0.5, y: start.y + 0.5 };
+    let bestD = Math.hypot(best.x - to.x, best.y - to.y);
+    for (const [k, bits] of this.state.felled) {
+      const [cx, cy] = k.split(",").map(Number);
+      const x0 = cx * CHUNK;
+      const y0 = cy * CHUNK;
+      const dx = Math.max(x0 - to.x, 0, to.x - x0 - CHUNK);
+      const dy = Math.max(y0 - to.y, 0, to.y - y0 - CHUNK);
+      if (Math.hypot(dx, dy) >= bestD) continue;
+      for (let i = 0; i < CHUNK * CHUNK; i++) {
+        if (!(bits[i >> 3] & (1 << (i & 7)))) continue;
+        const x = x0 + (i % CHUNK) + 0.5;
+        const y = y0 + Math.floor(i / CHUNK) + 0.5;
+        const d = Math.hypot(x - to.x, y - to.y);
+        if (d < bestD) {
+          bestD = d;
+          best = { x, y };
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Gives each raven a scroll to lead to: the unexplored ones, nearest the
+   * first clearing first, one per raven while there are enough. A raven
+   * circles about 500 m into the forest from the nearest felled ground
+   * towards its scroll, and over the scroll itself once it is found. Without
+   * a scroll left it circles its own building.
+   */
+  private guideRavens() {
+    const scrolls = this.hidden
+      .filter((t) => t.kind === "game" && !isExplored(t))
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - start.x, a.y - start.y) -
+          Math.hypot(b.x - start.x, b.y - start.y),
+      );
+    this.ravens.forEach((r, i) => {
+      const t = scrolls.length ? scrolls[i % scrolls.length] : undefined;
+      let goal: Point;
+      if (!t) {
+        const home = this.state.buildings.find((b) => b.id === r.id);
+        goal = home
+          ? { x: home.x + home.w / 2, y: home.y + home.h / 2 }
+          : { x: r.x, y: r.y };
+      } else {
+        const centre = { x: t.x + t.w / 2, y: t.y + t.h / 2 };
+        if (isFound(t)) goal = centre;
+        else {
+          const from = this.nearestOpen(centre);
+          const d = Math.hypot(centre.x - from.x, centre.y - from.y);
+          const k = Math.min(balance.ravenLead, d) / (d || 1);
+          goal = {
+            x: from.x + (centre.x - from.x) * k,
+            y: from.y + (centre.y - from.y) * k,
+          };
+        }
+      }
+      r.goal = goal;
+      if (r.target !== t?.key) {
+        r.target = t?.key;
+        this.events.raven(r, t);
+      }
+    });
+  }
+
+  private stepRavens(dt: number, instant: boolean) {
+    if (!this.ravens.length) return;
+    this.ravenClock -= dt;
+    if (this.ravenClock <= 0) {
+      this.ravenClock = 2;
+      this.guideRavens();
+    }
+    for (const r of this.ravens) {
+      r.orbit += dt * 0.9;
+      const want = {
+        x: r.goal.x + Math.cos(r.orbit) * 1.8,
+        y: r.goal.y + Math.sin(r.orbit) * 1.8,
+      };
+      const dx = want.x - r.x;
+      const dy = want.y - r.y;
+      const d = Math.hypot(dx, dy);
+      const step = instant ? d : Math.min(d, balance.ravenSpeed * dt);
+      if (d > 0.001) {
+        r.x += (dx / d) * step;
+        r.y += (dy / d) * step;
+        // Facing follows the direction on screen, as for the Waldleute.
+        if (Math.abs(dx - dy) > 0.01) r.facing = dx - dy > 0 ? 1 : -1;
+      }
+    }
+  }
+
   private flood() {
     this.state.flooded = true;
-    this.lakeOf = lakeLabels(true);
     const drowned = this.wouldDrown();
     for (const b of drowned) {
       b.state = "drowned";

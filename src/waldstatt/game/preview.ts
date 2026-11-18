@@ -7,6 +7,8 @@
  * there.
  */
 
+import type { Painter } from "./art";
+
 export interface Input {
   /** Actions whose key or on-screen key is held down. */
   held: Set<string>;
@@ -31,6 +33,47 @@ export interface Game {
   step(dt: number, input: Input, demo: boolean): void;
   /** Draws the scene; `scale` is canvas pixels per scene unit. */
   draw(ctx: CanvasRenderingContext2D, scale: number): void;
+  /**
+   * Paints the scene standing on the stage in the isometric view, in the
+   * stage's tiles (u, v from its corner; the stage is w × h tiles) and world
+   * units of height.
+   */
+  iso(P: Painter, w: number, h: number): void;
+}
+
+/** A thin circle standing upright along u at (u, v), radius r in world units. */
+export function wheelPoints(
+  P: Painter,
+  u: number,
+  v: number,
+  z: number,
+  r: number,
+  unit: number,
+): [number, number][] {
+  return Array.from({ length: 18 }, (_, k) => {
+    const a = (k / 18) * Math.PI * 2;
+    return P.p(u + (Math.cos(a) * r) / unit, v, z + Math.sin(a) * r);
+  });
+}
+
+/** Fills a closed outline given in screen points. */
+export function fillOutline(
+  ctx: CanvasRenderingContext2D,
+  points: [number, number][],
+  fill: string,
+  line?: string,
+  width = 1,
+) {
+  ctx.beginPath();
+  points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (line) {
+    ctx.strokeStyle = line;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  }
 }
 
 /**

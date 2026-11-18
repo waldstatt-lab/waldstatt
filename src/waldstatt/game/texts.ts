@@ -1,9 +1,10 @@
 /**
  * The site's texts, which Astro renders at build time into inert `<template>`
- * elements (Game.astro): the Ortstafel, the Chronik and each game's Markdown.
- * A text is split into sections at its `<h2>` headings. Nodes are cloned from the templates, never built from strings.
+ * elements (Game.astro): the Ortstafel, the Chronik and each game's Markdown,
+ * which lie hidden in the forest. A text is split into sections at its `<h2>`
+ * headings. Nodes are cloned from the templates, never built from strings.
  */
-import { controlsHeading, type KindInfo } from "./config";
+import type { TextKind } from "./config";
 
 export interface Section {
   heading: string;
@@ -55,21 +56,12 @@ function split(key: string): Section[] {
 
 const cache = new Map<string, Section[]>();
 
-/** The sections a building shows, for its kind and game. */
-export function sectionsFor(info: KindInfo, game?: string): Section[] {
-  const key = `${info.text}:${game ?? ""}`;
+/** The sections of a hidden text: the Ortstafel, the Chronik or a game's scroll. */
+export function sectionsFor(kind: TextKind, game?: string): Section[] {
+  const key = kind === "game" ? `game:${game ?? ""}` : kind;
   const cached = cache.get(key);
   if (cached) return cached;
-  let sections: Section[] = [];
-  if (info.text === "ortstafel" || info.text === "chronik") {
-    sections = split(info.text);
-  } else if (game && (info.text === "idea" || info.text === "controls")) {
-    const all = split(`game:${game}`);
-    sections = all.filter(
-      (section) =>
-        (section.heading === controlsHeading) === (info.text === "controls"),
-    );
-  }
+  const sections = kind === "game" && !game ? [] : split(key);
   cache.set(key, sections);
   return sections;
 }

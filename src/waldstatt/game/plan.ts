@@ -128,10 +128,43 @@ const gameColours: Record<string, [string, string]> = {
   "car-drive": ["#2a62b8", "#f2f2f2"],
 };
 
-function frame(ctx: Ctx, w: number, h: number) {
-  ctx.strokeStyle = "#6b4423";
-  ctx.lineWidth = 0.15;
-  ctx.strokeRect(0.075, 0.075, w - 0.15, h - 0.15);
+const redTiles = ["#c8402e", "#8c2a1e", "#5e1c14"] as const;
+const blueSlate = ["#4f7fc0", "#2c5490", "#1d3a66"] as const;
+
+/** A pyramid roof from above: four triangles meeting in the middle. */
+function pyramid(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  [lit, dark, course]: readonly [string, string, string],
+) {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const faces: [number, number, number, number, string][] = [
+    [x, y, x + w, y, lit],
+    [x, y, x, y + h, lit],
+    [x, y + h, x + w, y + h, dark],
+    [x + w, y, x + w, y + h, dark],
+  ];
+  for (const [ax, ay, bx, by, fill] of faces) {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.lineTo(cx, cy);
+    ctx.fill();
+  }
+  ctx.strokeStyle = course;
+  ctx.lineWidth = 0.04;
+  ctx.strokeRect(x, y, w, h);
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + w, y + h);
+  ctx.moveTo(x + w, y);
+  ctx.lineTo(x, y + h);
+  ctx.stroke();
 }
 
 function sheep(ctx: Ctx, x: number, y: number) {
@@ -310,6 +343,30 @@ export function planPicture(
       rect(ctx, 1.25, 0.45, 0.2, 0.2, "#7a705e", "#3a3028");
       break;
     case "spielhaus": {
+      if (game === "moto-devil") {
+        roof(ctx, 0.4, 0.5, 2.6, 2.8, "y", ...redTiles);
+        shadow(ctx, 3.0, 0.4, 1.5, 1.5, 0.6);
+        pyramid(ctx, 3.0, 0.4, 1.5, 1.5, redTiles);
+        rect(ctx, 3.3, 2.2, 1.3, 1.1, "#c0915a", "#4a3320");
+        ctx.strokeStyle = "#8a5a32";
+        ctx.lineWidth = 0.03;
+        for (let k = 1; k < 6; k++) {
+          ctx.beginPath();
+          ctx.moveTo(3.3 + (1.3 * k) / 6, 2.2);
+          ctx.lineTo(3.3 + (1.3 * k) / 6, 3.3);
+          ctx.stroke();
+        }
+        rect(ctx, 3.62, 1.05, 0.26, 0.12, "#c23b2a");
+        break;
+      }
+      if (game === "car-drive") {
+        roof(ctx, 0.4, 0.5, 4.2, 2.8, "x", ...blueSlate);
+        shadow(ctx, 2.2, 1.6, 0.6, 0.6, 0.3);
+        pyramid(ctx, 2.2, 1.6, 0.6, 0.6, blueSlate);
+        for (const x of [0.3, 4.7])
+          rect(ctx, x - 0.05, 3.45, 0.1, 0.1, "#3a2614");
+        break;
+      }
       const [flag, sign] = gameColours[game ?? ""] ?? ["#b0782e", "#f0e0b0"];
       const x = (w - 3) / 2;
       roof(ctx, x + 0.35, 0.35, 2.3, 2.3, "y", tiles[0], tiles[1], tiles[2]);
@@ -343,24 +400,14 @@ export function planPicture(
         sheep(ctx, x, y);
       break;
     }
-    case "ortstafel":
-    case "anleitung":
-      frame(ctx, w, h);
-      if (kind === "anleitung")
-        roof(ctx, 0.05, -0.1, w - 0.1, 0.4, "x", tiles[0], tiles[1], tiles[2]);
-      break;
-    case "chronik":
-    case "spielidee":
-      for (const y of [0.25, h - 0.25]) {
-        shadow(ctx, 0.15, y - 0.22, w - 0.3, 0.44, 0.08);
-        const g = ctx.createLinearGradient(0, y - 0.22, 0, y + 0.22);
-        g.addColorStop(0, "#f5e9c8");
-        g.addColorStop(1, "#c4a97a");
-        ctx.fillStyle = g;
-        ctx.fillRect(0.3, y - 0.22, w - 0.6, 0.44);
-        rect(ctx, 0, y - 0.18, 0.3, 0.36, "#8a5a32");
-        rect(ctx, w - 0.3, y - 0.18, 0.3, 0.36, "#8a5a32");
-      }
+    case "klause":
+      shadow(ctx, 0.5, 0.5, 1.8, 1.7);
+      roof(ctx, 0.5, 0.5, 1.8, 1.7, "y", "#8a7a62", "#5e5242", "#463c30");
+      rect(ctx, 0.55, 2.35, 0.45, 0.4, "#c9a46c", "#6b4423");
+      ctx.fillStyle = "#c9a46c";
+      ctx.beginPath();
+      ctx.arc(2.5, 2.6, 0.2, 0, Math.PI * 2);
+      ctx.fill();
       break;
     case "theater":
       theatre(ctx, w, h);
@@ -515,6 +562,63 @@ export function planWorker(): HTMLCanvasElement {
   ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(c, c, 0.1, 0, Math.PI * 2);
+  ctx.fill();
+  return element;
+}
+
+/** The axe in its stump, or the saw on its log, from above, about a tile across. */
+export function planItem(item: "axe" | "saw"): HTMLCanvasElement {
+  const { element, ctx } = canvas(1, 1);
+  if (item === "axe") {
+    ctx.fillStyle = "#c9a46c";
+    ctx.beginPath();
+    ctx.arc(0.45, 0.55, 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#6b4423";
+    ctx.lineWidth = 0.05;
+    ctx.stroke();
+    ctx.strokeStyle = "#7a4e26";
+    ctx.lineWidth = 0.08;
+    ctx.beginPath();
+    ctx.moveTo(0.45, 0.5);
+    ctx.lineTo(0.9, 0.1);
+    ctx.stroke();
+    rect(ctx, 0.3, 0.4, 0.3, 0.16, "#9aa4ad");
+  } else {
+    rect(ctx, 0.15, 0.4, 0.75, 0.25, "#7a4e26");
+    rect(ctx, 0.05, 0.3, 0.9, 0.12, "#c2cad1");
+    ctx.strokeStyle = "#8a5a32";
+    ctx.lineWidth = 0.06;
+    ctx.strokeRect(0.07, 0.12, 0.86, 0.2);
+  }
+  return element;
+}
+
+/** A raven from above, wings spread, facing right, about a tile across. */
+export function planRaven(): HTMLCanvasElement {
+  const { element, ctx } = canvas(1, 1);
+  ctx.fillStyle = "#16141c";
+  ctx.beginPath();
+  ctx.ellipse(0.5, 0.5, 0.2, 0.07, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(0.55, 0.47);
+  ctx.quadraticCurveTo(0.45, 0.2, 0.3, 0.05);
+  ctx.quadraticCurveTo(0.42, 0.3, 0.42, 0.5);
+  ctx.quadraticCurveTo(0.42, 0.7, 0.3, 0.95);
+  ctx.quadraticCurveTo(0.45, 0.8, 0.55, 0.53);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(0.32, 0.47);
+  ctx.lineTo(0.18, 0.42);
+  ctx.lineTo(0.18, 0.58);
+  ctx.lineTo(0.32, 0.53);
+  ctx.fill();
+  ctx.fillStyle = "#3a3630";
+  ctx.beginPath();
+  ctx.moveTo(0.7, 0.47);
+  ctx.lineTo(0.78, 0.5);
+  ctx.lineTo(0.7, 0.53);
   ctx.fill();
   return element;
 }

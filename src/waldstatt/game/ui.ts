@@ -2,9 +2,10 @@
  * The HTML interface over the map: the toolbox with supplies and tools
  * (axe, saw, tearing down), the build menu, placing buildings, the
  * Waldmensch's hints and the announcements for screen readers. Things on the
- * map react directly, without panels or dialogs: a text, a Spielhaus plate or
- * the stage turns the view top-down onto it, other buildings show a short
- * status label, and tearing down takes a second tap. Only «Neu beginnen» in
+ * map react directly, without panels or dialogs: a found text or the stage
+ * turns the view top-down onto it, a Spielhaus opens its game in a new tab,
+ * the axe and the saw are picked up, other buildings show a short status
+ * label, and tearing down takes a second tap. Only «Neu beginnen» in
  * the menu asks first. Nodes are created with the DOM API, never from HTML
  * strings.
  */
@@ -13,11 +14,18 @@ import type { MapHandlers, Tile } from "./input";
 import { PLAN } from "./iso";
 import type { WorldLayer } from "./overlay";
 import type { Renderer } from "./render";
-import { hints, type Game } from "./sim";
+import {
+  compass,
+  hintCount,
+  isExplored,
+  isFound,
+  type Game,
+  type HiddenText,
+} from "./sim";
 import { STAGE_RES, type Stage } from "./stage";
 import type { Building } from "./state";
 import type { GameInfo } from "./texts";
-import { damSite } from "./world";
+import { damSite, start } from "./world";
 
 type Tool = "none" | "axe" | "saw" | "demolish";
 
@@ -62,9 +70,11 @@ export class Ui {
   private sawFrom: Tile | null = null;
   /** The building torn down by the next tap with the Abreissen tool. */
   private doomed: Building | null = null;
-  /** While reading or playing: the building, and where the camera was. */
+  /** While reading or playing: what, and where the camera was. */
   private reading: {
-    b: Building;
+    /** A building's id (the theatre) or a hidden text's key. */
+    id: number | string;
+    stage: boolean;
     back: { x: number; y: number; zoom: number };
     /** The closest zoom so far; zooming out from it leads back to the map. */
     zoom: number;
@@ -123,6 +133,7 @@ export class Ui {
     });
     need(this.hint, "[data-hint-close]").addEventListener("click", () => {
       o.game.state.hint = o.game.currentHint() + 1;
+      this.hintSeen = "";
       this.hint.hidden = true;
       o.moved();
       this.mapHost().focus();
@@ -159,7 +170,16 @@ export class Ui {
         this.closeMenus();
     });
     this.renderBuildMenu();
+    this.items();
     this.updateHint();
+  }
+
+  /** Shows the tools picked up so far. */
+  items() {
+    for (const tool of ["axe", "saw"] as const) {
+      const button = need(this.toolbox, `[data-tool=${tool}]`);
+      button.hidden = !this.o.game.state.tools[tool];
+    }
   }
 
   private mapHost(): HTMLElement {
@@ -205,6 +225,8 @@ export class Ui {
   // --- Tools and menus ------------------------------------------------------
 
   setTool(tool: Tool) {
+    if ((tool === "axe" || tool === "saw") && !this.o.game.state.tools[tool])
+      return;
     if (this.placing) this.stopPlacing();
     this.tool = this.tool === tool ? "none" : tool;
     this.sawFrom = null;
@@ -258,7 +280,7 @@ export class Ui {
     const box = this.mapHost().getBoundingClientRect();
     if (action === "home") {
       if (this.reading) this.leaveReading();
-      r.centerOn(0.5, 0.5);
+      r.centerOn(start.x + 0.5, start.y + 0.5);
       this.o.moved();
     } else if (action === "zoom-in") {
       r.zoomAt(1.25, box.width / 2, box.height / 2);
@@ -389,7 +411,7 @@ export class Ui {
 
   private anchor(tile: Tile): Tile {
     if (!this.placing) return tile;
-    const { w, h } = this.o.game.size(this.placing.kind, this.placing.game);
+    const { w, h } = this.o.game.size(this.placing.kind);
     return { x: tile.x - Math.floor(w / 2), y: tile.y - Math.floor(h / 2) };
   }
 
@@ -398,7 +420,7 @@ export class Ui {
     this.placing.at = tile;
     const { kind, game } = this.placing;
     const at = this.anchor(tile);
-    const spot = this.o.game.placement(kind, game, at.x, at.y);
+    const spot = this.o.game.placement(kind, at.x, at.y);
     this.o.renderer.setGhost(spot, { kind, game });
     need<HTMLButtonElement>(this.placingBar, "[data-place-here]").disabled =
       !spot.ok;
@@ -411,7 +433,7 @@ export class Ui {
     if (!this.placing) return;
     const { kind, game } = this.placing;
     const at = this.anchor(tile);
-    const spot = this.o.game.placement(kind, game, at.x, at.y);
+    const spot = this.o.game.placement(kind, at.x, at.y);
     if (!spot.ok) return this.announce(spot.reason ?? "Hier nicht.");
     const b = this.o.game.place(kind, game, at.x, at.y);
     if (!b)
@@ -437,7 +459,7 @@ export class Ui {
 
   /** The stage, while the view is turned onto the theatre. */
   private playing() {
-    if (this.reading?.b.kind !== "theater") return null;
+    if (!this.reading?.stage) return null;
     return this.o.stage();
   }
 
@@ -450,7 +472,7 @@ export class Ui {
           (at.x - on.x) * STAGE_RES,
           (at.y - on.y) * STAGE_RES,
         );
-        if (result.open) window.location.href = result.open;
+        if (result.open) this.openGame(result.open);
         return result.handled;
       },
       release: () => this.o.stage()?.stage.release(),
@@ -534,8 +556,19 @@ export class Ui {
 
   private activateTile(tile: Tile) {
     const g = this.o.game;
+    const item = g.pickUp(tile.x, tile.y);
+    if (item) {
+      this.setTool(item);
+      return this.announce(
+        item === "axe"
+          ? "Du hast die Axt. Tipp Bäume an, die fallen sollen."
+          : "Du hast die Säge. Zieh über die Bäume, die fallen sollen.",
+      );
+    }
     const b = g.buildingAt(tile.x, tile.y);
-    if (this.reading && b?.id === this.reading.b.id) return;
+    if (this.reading && b?.id === this.reading.id) return;
+    const text = g.textAt(tile.x, tile.y);
+    if (text && this.reading?.id === text.key) return;
     if (this.tool === "demolish") {
       if (b) this.demolish(b);
       else {
@@ -545,6 +578,13 @@ export class Ui {
       return;
     }
     if (b) return this.react(b);
+    // A found text: unless the axe marks one of its trees, read it.
+    if (
+      text &&
+      isFound(text) &&
+      !(this.tool === "axe" && g.isTree(tile.x, tile.y))
+    )
+      return this.readText(text);
     if (this.tool === "axe") {
       const result = g.toggleMark(tile.x, tile.y);
       if (result === "marked") this.announce("Baum markiert.");
@@ -552,21 +592,27 @@ export class Ui {
       return;
     }
     if (this.tool === "none" && g.isTree(tile.x, tile.y))
-      this.announce("Nimm die Axt oder die Säge, um Bäume zu markieren.");
+      this.announce(
+        g.state.tools.axe
+          ? "Nimm die Axt oder die Säge, um Bäume zu markieren."
+          : "Ohne Axt fällt hier kein Baum. Sie liegt in der ersten Lichtung.",
+      );
   }
 
   // --- Buildings react directly ---------------------------------------------------
 
-  private readable(b: Building): boolean {
-    return (
-      b.state === "done" &&
-      (!!kinds[b.kind].fit || b.kind === "theater" || b.kind === "spielhaus")
-    );
-  }
-
-  /** A tap on a building: read it, or show how it is doing. */
+  /** A tap on a building: play on the stage, open the game, or show how it is doing. */
   private react(b: Building) {
-    if (this.readable(b)) return this.read(b);
+    if (b.state === "done" && b.kind === "theater") return this.readStage(b);
+    if (b.state === "done" && b.kind === "spielhaus") {
+      const game = this.o.games.find((g) => g.id === b.game);
+      if (game) {
+        this.openGame(game.playUrl);
+        const text = `${game.title} öffnet sich in einem neuen Tab.`;
+        this.o.world.toast(b, text);
+        return this.announce(text);
+      }
+    }
     const text = this.stateText(b);
     this.o.world.toast(b, `${this.label(b.kind, b.game)}: ${text}`);
     this.announce(`${this.label(b.kind, b.game)}: ${text}`);
@@ -575,7 +621,7 @@ export class Ui {
   /** Called when something on a building changes; nothing to refresh here. */
   building(b: Building, removed: boolean) {
     if (removed && this.doomed?.id === b.id) this.setDoomed(null);
-    if (removed && this.reading?.b.id === b.id) this.leaveReading();
+    if (removed && this.reading?.id === b.id) this.leaveReading();
     if (!this.buildMenu.hidden) this.updateBuildMenu();
   }
 
@@ -590,7 +636,10 @@ export class Ui {
       huette: "hier wohnt ein Waldmensch.",
       schafweide: `Pergament ${this.o.game.state.parchment} von ${balance.maxParchment}.`,
       druckerei: `Drucke ${this.o.game.state.prints} von ${balance.maxPrints}.`,
-      kloster: "der Stolz der Waldstatt.",
+      kloster: "der Stolz der Waldstatt. Ein Rabe wohnt im Turm.",
+      klause:
+        "hier lebte einst der Einsiedler Meinrad. Sein Rabe zeigt den Weg.",
+      theater: "die Bühne öffnet sich, sobald ein Spielhaus steht.",
       damm: "staut die Sihl zum Sihlsee.",
       bruecke: "hier kommen die Waldleute über den Fluss.",
       hafen: this.portText(b),
@@ -638,28 +687,51 @@ export class Ui {
 
   // --- Reading and playing on the map --------------------------------------------
 
-  /** Turns the view top-down onto a text, a plate or the stage. */
-  private read(b: Building) {
+  /** Opens a game in a new tab, so the Waldstatt stays as it is. */
+  private openGame(url: string) {
+    window.open(url, "_blank", "noopener");
+  }
+
+  /** Turns the view top-down onto the theatre's stage, to play on it. */
+  private readStage(b: Building) {
+    this.read(
+      b.id,
+      {
+        x: b.x + STAGE.u0,
+        y: b.y + STAGE.v0,
+        w: STAGE.u1 - STAGE.u0,
+        h: STAGE.v1 - STAGE.v0,
+      },
+      true,
+      "Die Bühne. Tipp die Schilder an oder spiel mit den Tasten aus der Steuerung.",
+    );
+  }
+
+  /** Turns the view top-down onto a found text, to read it. */
+  private readText(t: HiddenText) {
+    const area = this.o.world.area(t.key) ?? t;
+    const rest = isExplored(t) ? "" : " Ein Teil liegt noch unter Bäumen.";
+    this.read(t.key, area, false, `${this.o.world.title(t)}.${rest}`);
+  }
+
+  /** Turns the view top-down onto an area: a text or the stage. */
+  private read(
+    id: number | string,
+    area: { x: number; y: number; w: number; h: number },
+    stage: boolean,
+    what: string,
+  ) {
     const r = this.o.renderer;
-    const area =
-      b.kind === "theater"
-        ? {
-            x: b.x + STAGE.u0,
-            y: b.y + STAGE.v0,
-            w: STAGE.u1 - STAGE.u0,
-            h: STAGE.v1 - STAGE.v0,
-          }
-        : (this.o.world.area(b.id) ?? { x: b.x, y: b.y, w: b.w, h: b.h });
     const box = this.mapHost().getBoundingClientRect();
     // Clear of the back button above and the toolbox below.
     const usable = { w: box.width * 0.92, h: (box.height - 200) * 0.95 };
-    const fit = (usable.w / (area.w * PLAN)) * 1;
+    const fit = usable.w / (area.w * PLAN);
     let zoom = Math.min(readingZoom, fit);
     // Centred between the back button and the toolbox.
     const shift = (box.height / 2 - (70 + usable.h / 2)) / PLAN;
     let y = area.y + area.h / 2;
-    if (b.kind === "theater" || b.kind === "spielhaus") {
-      // The stage and plates fit as a whole.
+    if (stage) {
+      // The stage fits as a whole.
       zoom = Math.min(2, fit, usable.h / (area.h * PLAN));
     } else if (area.h * PLAN * zoom > usable.h) {
       // A long text starts at its top; the rest is a pan away.
@@ -667,17 +739,14 @@ export class Ui {
     }
     y += shift / zoom;
     this.reading = {
-      b,
+      id,
+      stage,
       back: this.reading?.back ?? { ...r.camera },
       zoom,
     };
     r.flyTo({ x: area.x + area.w / 2, y, zoom, plan: 1 });
     this.backBar.hidden = false;
     this.o.moved();
-    const what =
-      b.kind === "theater"
-        ? "Die Bühne. Tipp die Schilder an oder spiel mit den Tasten aus der Steuerung."
-        : `${this.label(b.kind, b.game)}.`;
     this.announce(`${what} Escape oder «Zurück zur Karte» kehrt zurück.`);
   }
 
@@ -701,10 +770,32 @@ export class Ui {
     this.mapHost().focus({ preventScroll: true });
   }
 
-  /** Opens a building from outside the map, e.g. after a click on its plate. */
-  focus(b: Building) {
-    if (this.reading?.b.id === b.id) return;
-    this.read(b);
+  /** Something more of a hidden text lies free, or it was just found. */
+  text(t: HiddenText, found: boolean) {
+    const title = this.o.world.title(t);
+    if (found)
+      this.announce(
+        `Unter den Bäumen liegt etwas: ${title}. Fällt weiter, dann liegt es ganz frei.`,
+      );
+    else if (isExplored(t))
+      this.announce(
+        t.game
+          ? `${title} liegt ganz frei. Jetzt lässt sich das Spielhaus bauen.`
+          : `${title} liegt ganz frei. Tipp sie an zum Lesen.`,
+      );
+    if (!this.buildMenu.hidden) this.updateBuildMenu();
+  }
+
+  /** A raven took up a new scroll to lead to. */
+  raven(t: HiddenText | undefined) {
+    if (!t) return;
+    const where = compass(
+      { x: start.x + 0.5, y: start.y + 0.5 },
+      { x: t.x + t.w / 2, y: t.y + t.h / 2 },
+    );
+    this.announce(
+      `Der Rabe fliegt los, nach ${where}. Wo er kreist, fällt der Wald als Nächstes.`,
+    );
   }
 
   // --- Confirmations ------------------------------------------------------------------
@@ -729,14 +820,18 @@ export class Ui {
 
   // --- The Waldmensch's hints ------------------------------------------------------------
 
+  private hintSeen = "";
+
   updateHint() {
-    const current = this.o.game.currentHint();
-    const show = current < hints.length && current >= this.o.game.state.hint;
+    const g = this.o.game;
+    const current = g.currentHint();
+    const show = current < hintCount && current >= g.state.hint;
     if (show) {
-      const text = hints[current];
+      const text = g.hintText();
       const p = need(this.hint, "[data-hint-text]");
-      if (p.textContent !== text || this.hint.hidden) {
-        p.textContent = text;
+      if (p.textContent !== text) p.textContent = text;
+      if (this.hintSeen !== text) {
+        this.hintSeen = text;
         this.announce(`Der Waldmensch sagt: ${text}`);
       }
     }

@@ -74,6 +74,26 @@ a stock limit. The app icons are pixel art encoded as PNG at build time.
   rivers and brooks need a bridge, which spans from bank to bank. At a lake,
   ports can be built, and ships built at a port carry Waldleute between the
   ports of their lake. This replaces the rabbit hole's «no pathfinding».
+- The first clearing lies at ISE AG, Holzrüti 2, north of the village, and
+  the tools are found rather than given: the axe lies in the first clearing,
+  and the saw appears where the 100th tree fell once a hut stands.
+- Texts are explored, not built. The Ortstafel and the Chronik lie hidden
+  under the forest within 1 km of the Klosterplatz, each game's whole text as
+  one scroll 1.5 to 5 km out, placed at random for each new forest. Felling
+  their trees uncovers them; they lie on the floor under the trees still
+  standing. This replaces the Ortstafel, Chronik, Spielidee and Anleitung as
+  buildings. A game's Spielhaus can be built once its scroll lies wholly free.
+- Each game has a house of its own; tapping it opens the game in a new tab.
+- Meinrads Klause joins the prestige buildings. It and the Kloster each bring
+  a raven, which circles over the forest to fell next on the way to a game's
+  scroll.
+- The theatre has a backdrop with curtains, pennants and torches, and its
+  preview plays in 3D on the stage; tapping the stage turns the view top-down
+  onto the 2D preview with its signs.
+- The map covers all of Switzerland with the detail it had around Einsiedeln,
+  from swisstopo's swissTLM3D: every watercourse from 7 km long, the natural
+  lakes, and the national border as a wooden palisade with bare land abroad.
+  The water loads in pages of 10 × 10 km as it comes into view.
 
 This is a hobby project, so the pitch sets no appetite. The game should still
 grow in playable slices, each a sensible place to stop: forest, felling and huts;

@@ -3,8 +3,8 @@
  * The Waldstatt: a building game that fills the home page (ADR 0002). The
  * map is a PixiJS canvas; the toolbox, menus and texts on the map are HTML. The site's
  * texts lie here in inert templates, rendered at build time from the shared
- * game Markdown and the studio texts below; the game reveals them as
- * visitors build. Without JavaScript or WebGL only the still forest and a
+ * game Markdown and the studio texts below; the game hides them in the
+ * forest, and visitors find them by felling it. Without JavaScript or WebGL only the still forest and a
  * note show.
  */
 import { render } from "astro:content";
@@ -55,8 +55,9 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
   ></div>
   <p id="wg-map-help" hidden>
     Pfeiltasten bewegen die Auswahl, Umschalt mit Pfeiltasten verschiebt die
-    Karte, Plus und Minus zoomen. Die Eingabetaste wendet das Werkzeug an oder
-    öffnet ein Gebäude. Escape bricht ab.
+    Karte, Plus und Minus zoomen. Die Eingabetaste wendet das Werkzeug an, hebt
+    ein Werkzeug auf, liest eine gefundene Schrift oder öffnet ein Gebäude.
+    Escape bricht ab.
   </p>
 
   <aside class="wg-hint" data-hint hidden aria-label="Der Waldmensch">
@@ -120,8 +121,8 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
         </button>
       </li>
       <li class="wg-credit">
-        Gewässer: Bundesamt für Landestopografie swisstopo (VECTOR25) und
-        Bundesamt für Umwelt BAFU
+        Gewässer und Landesgrenze: Bundesamt für Landestopografie swisstopo
+        (swissTLM3D, swissBOUNDARIES3D)
       </li>
     </ul>
   </div>
@@ -162,6 +163,7 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
         class="wg-tool"
         data-tool="axe"
         aria-pressed="false"
+        hidden
       >
         <Icon name="axe" /> Axt
       </button>
@@ -170,6 +172,7 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
         class="wg-tool"
         data-tool="saw"
         aria-pressed="false"
+        hidden
       >
         <Icon name="saw" /> Säge
       </button>

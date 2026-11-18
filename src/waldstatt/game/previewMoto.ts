@@ -6,7 +6,16 @@
  * to the start. No traps: those wait in the real game. The rules are copied
  * from the studio website's preview; the scenery is repainted.
  */
-import { clamp, glow, type Game, type Input, type Report } from "./preview";
+import type { Painter } from "./art";
+import {
+  clamp,
+  fillOutline,
+  glow,
+  wheelPoints,
+  type Game,
+  type Input,
+  type Report,
+} from "./preview";
 
 const W = 160;
 const H = 80;
@@ -221,7 +230,202 @@ export function motoGame(report: Report): Game {
         ctx.restore();
       }
     },
+    iso(P, w, h) {
+      isoScene(P, w, h, s, shout);
+    },
   };
+}
+
+/**
+ * The scene standing on the stage in the isometric view: a dirt track along
+ * the stage with the ramp as a wooden wedge, and the bike and rider in their
+ * plane, tilted as in the side view.
+ */
+function isoScene(
+  P: Painter,
+  w: number,
+  h: number,
+  s: {
+    x: number;
+    y: number;
+    angle: number;
+    dir: 1 | -1;
+    crashed: number;
+    air: boolean;
+    jetFor: number;
+    time: number;
+    vx: number;
+  },
+  shout: { text: string; left: number },
+) {
+  const ctx = P.ctx;
+  /** World units per scene unit, and stage tiles per scene unit along the track. */
+  const unit = (w - 0.8) / W;
+  // As tall as it is long: one tile along u is about 36 world units.
+  const k = unit * 36;
+  const track = h * 0.62;
+  const U = (x: number) => 0.4 + x * unit;
+  const Z = (y: number) => (ground - y) * k;
+  const at = (x: number, y: number, dv = 0) => P.p(U(x), track + dv, Z(y));
+  // The track.
+  P.poly(
+    [
+      [0.2, track - 0.7, 0],
+      [w - 0.2, track - 0.7, 0],
+      [w - 0.2, track + 0.7, 0],
+      [0.2, track + 0.7, 0],
+    ],
+    "#9c7a4a",
+    "#6b4a28",
+  );
+  for (let x = 6; x < W; x += 14)
+    P.line([U(x), track - 0.5, 0], [U(x + 4), track - 0.45, 0], "#7a5a34", 1);
+  // The ramp: a wedge across the track.
+  const r0 = U(ramp.x0);
+  const r1 = U(ramp.x1);
+  const top = ramp.rise * k;
+  const wood = { top: "#c0915a", side: "#8a5a32", end: "#6b4423" };
+  P.poly(
+    [
+      [r0, track - 0.6, 0],
+      [r1, track - 0.6, 0],
+      [r1, track - 0.6, top],
+    ],
+    wood.side,
+    "#4a3320",
+  );
+  // The bike is drawn between the ramp's far and near halves when on it.
+  const bike3d = () => {
+    const angle = s.crashed ? s.dir * 1.6 : s.angle;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const local = (lx: number, ly: number): [number, number] => [
+      s.x + s.dir * lx * cos - ly * sin,
+      s.y + s.dir * lx * sin + ly * cos,
+    ];
+    const pt = (lx: number, ly: number, dv = 0) => {
+      const [x, y] = local(lx, ly);
+      return at(x, y, dv);
+    };
+    // Its shadow on the ground or the ramp.
+    const shadowAt = P.p(U(s.x), track, Z(surface(clamp(s.x, 0, W - 1))));
+    ctx.fillStyle = "rgba(20, 12, 4, 0.3)";
+    ctx.beginPath();
+    ctx.ellipse(shadowAt[0], shadowAt[1], 12, 4, 0.46, 0, Math.PI * 2);
+    ctx.fill();
+    if (s.air && s.jetFor > 0.25) {
+      const length = 7 + Math.sin(s.time * 40) * 1.5;
+      fillOutline(
+        ctx,
+        [pt(-7, -7.5), pt(-8 - length, -5.5), pt(-7, -3.8)],
+        "#ffd45c",
+      );
+    }
+    // Far wheel and frame, then the near ones, a little apart in v.
+    for (const dv of [-0.12, 0.12]) {
+      for (const cx of [-6, 6]) {
+        const [x, y] = local(cx, -3);
+        const ring = wheelPoints(P, U(x), track + dv, Z(y), 3 * k, k / unit);
+        fillOutline(ctx, ring, dv < 0 ? "#3a3430" : "#2a2420");
+        const hub = wheelPoints(P, U(x), track + dv, Z(y), 1.6 * k, k / unit);
+        fillOutline(ctx, hub, "#8a8a92");
+      }
+      ctx.strokeStyle = dv < 0 ? "#8c2a1e" : "#c23b2a";
+      ctx.lineWidth = 1.5 * k;
+      ctx.beginPath();
+      ctx.moveTo(...pt(-6, -3, dv));
+      ctx.lineTo(...pt(-2, -6.5, dv));
+      ctx.lineTo(...pt(3.5, -7, dv));
+      ctx.lineTo(...pt(6, -3, dv));
+      ctx.stroke();
+    }
+    // Tank and seat across the frame.
+    fillOutline(
+      ctx,
+      [
+        pt(-4.5, -7, -0.14),
+        pt(3.5, -7.6, -0.14),
+        pt(3.5, -7.6, 0.14),
+        pt(-4.5, -7, 0.14),
+      ],
+      "#e04a36",
+      "#5e1c14",
+    );
+    // The rider.
+    ctx.strokeStyle = "#3a3a46";
+    ctx.lineWidth = 1.6 * k;
+    ctx.beginPath();
+    ctx.moveTo(...pt(0.5, -4, 0.1));
+    ctx.lineTo(...pt(-1.5, -8, 0.05));
+    ctx.lineTo(...pt(0.5, -12.5));
+    ctx.lineTo(...pt(4.3, -9.6, 0.1));
+    ctx.stroke();
+    const [hx, hy] = pt(1.3, -14.2);
+    ctx.fillStyle = "#c23b2a";
+    ctx.beginPath();
+    ctx.arc(hx, hy, 2 * k, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#2a2420";
+    ctx.fillRect(
+      hx + (s.dir > 0 ? 0.3 : -2.3) * k,
+      hy - 0.8 * k,
+      2 * k,
+      1.1 * k,
+    );
+  };
+  const onRamp = s.x > ramp.x0 - 8 && s.x < ramp.x1 + 8;
+  if (!onRamp) bike3d();
+  P.poly(
+    [
+      [r0, track - 0.6, 0],
+      [r0, track + 0.6, 0],
+      [r1, track + 0.6, top],
+      [r1, track - 0.6, top],
+    ],
+    wood.top,
+    "#4a3320",
+  );
+  for (let i = 1; i < 6; i++) {
+    const u = r0 + ((r1 - r0) * i) / 6;
+    P.line(
+      [u, track - 0.6, (top * i) / 6],
+      [u, track + 0.6, (top * i) / 6],
+      "#8a5a32",
+      0.8,
+    );
+  }
+  P.poly(
+    [
+      [r1, track - 0.6, 0],
+      [r1, track + 0.6, 0],
+      [r1, track + 0.6, top],
+      [r1, track - 0.6, top],
+    ],
+    wood.end,
+    "#4a3320",
+  );
+  P.poly(
+    [
+      [r0, track + 0.6, 0],
+      [r1, track + 0.6, 0],
+      [r1, track + 0.6, top],
+    ],
+    wood.side,
+    "#4a3320",
+  );
+  if (onRamp) bike3d();
+  if (shout.left > 0) {
+    const [x, y] = at(clamp(s.x, 16, W - 16), s.y - 22);
+    ctx.globalAlpha = Math.min(1, shout.left * 2);
+    ctx.font = "700 14px Georgia, serif";
+    ctx.textAlign = "center";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#fff6dc";
+    ctx.strokeText(shout.text, x, y);
+    ctx.fillStyle = "#c23b2a";
+    ctx.fillText(shout.text, x, y);
+    ctx.globalAlpha = 1;
+  }
 }
 
 /* ---------- Drawing ---------- */

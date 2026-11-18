@@ -7,17 +7,18 @@
  * removes only those keys.
  */
 import { CHUNK, kinds, type Kind } from "./config";
+import { start } from "./world";
 
 export const keyPrefix = "waldstatt-games/";
 const saveKey = `${keyPrefix}save`;
-const version = 1;
+const version = 2;
 /** Saves larger than this are not read; the game starts over instead. */
 const maxChars = 2_000_000;
 
 export interface Building {
   id: number;
   kind: Kind;
-  /** The game a Spielhaus, Spielidee or Anleitung belongs to. */
+  /** The game a Spielhaus belongs to. */
   game?: string;
   /** Top-left tile and size in tiles. */
   x: number;
@@ -50,6 +51,14 @@ export interface Saved {
   camera: Camera;
   /** How far the Waldmensch's hints have got. */
   hint: number;
+  /** The tools picked up so far. */
+  tools: { axe: boolean; saw: boolean };
+  /** Where the saw lies, once it has appeared and until it is picked up. */
+  sawAt: { x: number; y: number } | null;
+  /** Chooses where the hidden texts lie in this forest. */
+  seed: number;
+  /** Top-left tiles of the hidden texts, by text: "ortstafel", "game:<id>". */
+  texts: Map<string, { x: number; y: number }>;
 }
 
 export function freshState(): Saved {
@@ -62,8 +71,12 @@ export function freshState(): Saved {
     buildings: [],
     nextId: 1,
     flooded: false,
-    camera: { x: 0.5, y: 0.5, zoom: 0 },
+    camera: { x: start.x + 0.5, y: start.y + 0.5, zoom: 0 },
     hint: 0,
+    tools: { axe: false, saw: false },
+    sawAt: null,
+    seed: Math.floor(Math.random() * 0x7fffffff),
+    texts: new Map(),
   };
 }
 
@@ -100,7 +113,7 @@ const isNum = (value: unknown, min: number, max: number): value is number =>
 /** Reads the saved state; anything invalid starts a fresh forest. */
 export function load(gameIds: Set<string>): {
   state: Saved;
-  problem?: string;
+  problem?: "storage" | "invalid" | "old";
 } {
   let text: string | null = null;
   try {
@@ -111,7 +124,11 @@ export function load(gameIds: Set<string>): {
   if (!text) return { state: freshState() };
   try {
     if (text.length > maxChars) throw new Error("too large");
-    return { state: parse(JSON.parse(text), gameIds) };
+    const data: unknown = JSON.parse(text);
+    // A forest from before the Waldleute moved to Holzrüti starts anew.
+    if ((data as { v?: unknown } | null)?.v === 1)
+      return { state: freshState(), problem: "old" };
+    return { state: parse(data, gameIds) };
   } catch {
     return { state: freshState(), problem: "invalid" };
   }
@@ -190,6 +207,22 @@ function parse(data: unknown, gameIds: Set<string>): Saved {
   )
     state.camera = { x: c.x, y: c.y, zoom: c.zoom };
   if (isInt(d.hint, 0, 100)) state.hint = d.hint;
+  const tools = d.tools as Record<string, unknown> | undefined;
+  state.tools = { axe: tools?.axe === true, saw: tools?.saw === true };
+  const sawAt = d.sawAt as Record<string, unknown> | null | undefined;
+  if (sawAt && isInt(sawAt.x) && isInt(sawAt.y))
+    state.sawAt = { x: sawAt.x, y: sawAt.y };
+  if (!isInt(d.seed, 0, 0x7fffffff)) throw new Error("seed");
+  state.seed = d.seed;
+  if (typeof d.texts !== "object" || d.texts === null) throw new Error("texts");
+  for (const [key, value] of Object.entries(d.texts)) {
+    const at = value as Record<string, unknown> | null;
+    if (!/^(ortstafel|chronik|game:[a-z0-9-]{1,64})$/.test(key)) continue;
+    if (!at || !isInt(at.x) || !isInt(at.y)) throw new Error("text");
+    // A game that left the collection takes its scroll with it.
+    if (key.startsWith("game:") && !gameIds.has(key.slice(5))) continue;
+    state.texts.set(key, { x: at.x, y: at.y });
+  }
   return state;
 }
 
@@ -218,6 +251,10 @@ export function save(state: Saved): boolean {
       zoom: Math.round(state.camera.zoom * 1000) / 1000,
     },
     hint: state.hint,
+    tools: state.tools,
+    sawAt: state.sawAt,
+    seed: state.seed,
+    texts: Object.fromEntries(state.texts),
   };
   try {
     localStorage.setItem(saveKey, JSON.stringify(data));

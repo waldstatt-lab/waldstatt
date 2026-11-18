@@ -63,8 +63,25 @@
 .wg-map[data-mode="place"] {
   cursor: crosshair;
 }
+.wg-map {
+  /* Its own stacking context, so the layers inside stay under the toolbox. */
+  z-index: 0;
+  background: #1c3420;
+}
+/* The found texts lie under the map's canvas, which leaves gaps in the ground
+   where they lie cleared; trees, Waldleute and buildings cover them. Plates
+   and pins lie over the canvas. */
 .wg-map canvas {
+  position: relative;
+  z-index: 1;
   display: block;
+}
+.wg-map > .wg-floor {
+  z-index: 0;
+}
+.wg-map > .wg-world:not(.wg-floor),
+.wg-map > .wg-pins {
+  z-index: 2;
 }
 
 .wg-fallback {
@@ -391,7 +408,14 @@
   font-size: 12px;
   line-height: 17px;
 }
+/* A found text's footprint: meadow round the sheet, as on cleared ground. */
+.wg-world > .wg-find {
+  overflow: visible;
+  background: var(--wg-meadow, #6f9e45);
+  background-size: 128px 128px;
+}
 .wg-sheet-scroll {
+  border-radius: 6px;
   background:
     linear-gradient(
       90deg,
@@ -401,7 +425,12 @@
       rgb(150 110 50 / 0.18)
     ),
     var(--wg-parchment);
-  box-shadow: inset 0 0 0 1px #b59c6a;
+  box-shadow:
+    inset 0 0 0 1px #b59c6a,
+    0 -9px 0 -2px #c4a97a,
+    0 9px 0 -2px #c4a97a,
+    0 -11px 0 -2px #8a5a32,
+    0 11px 0 -2px #8a5a32;
 }
 .wg-sheet-board {
   border: 3px solid #5a3a20;
@@ -419,6 +448,10 @@
   font-size: 15px;
   font-weight: 700;
   line-height: 20px;
+}
+.wg-sheet-tagline {
+  margin: 0 0 4px;
+  font-style: italic;
 }
 .wg-sheet .prose {
   --tw-prose-body: currentColor;
@@ -502,6 +535,17 @@
   text-shadow:
     0 1px 2px rgb(0 25 70 / 0.95),
     0 0 6px rgb(0 25 70 / 0.6);
+}
+.wg-place {
+  color: #fff4d6;
+  font-family: var(--wg-serif);
+  font-size: 19px;
+  font-variant: small-caps;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-shadow:
+    0 1px 2px rgb(30 18 6 / 0.95),
+    0 0 8px rgb(30 18 6 / 0.7);
 }
 .wg-lake {
   font-size: 17px;

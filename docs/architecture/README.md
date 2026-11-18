@@ -13,8 +13,8 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md) for checks.
 A building game in an endless forest, shaped in the
 [pitch](../pitches/pitch--aufbauspiel-im-wald.md): «Waldstatt» is
 the historical name for Einsiedeln, and its people were the «Waldleute». The home
-page is the whole site. Visitors fell trees, build, and earn the site's
-content building by building; there are no about or game pages, and without
+page is the whole site. Visitors fell trees, build, and find the site's
+content hidden in the forest; there are no about or game pages, and without
 JavaScript or WebGL only a still picture of the forest, the name and a note show
 ([ADR 0002](decisions/0002-make-the-waldstatt-a-browser-game.md)). The map is
 an isometric view drawn with PixiJS 8 (WebGL) that turns top-down for reading;
@@ -23,61 +23,89 @@ the map. Its folder `src/waldstatt/` holds:
 
 | Path | Contents |
 | --- | --- |
-| `Game.astro` | The page: map host, toolbox, menus, the back button, the confirmation for «Neu beginnen», and inert `<template>`s with the Ortstafel, the Chronik and each game's rendered Markdown |
+| `Game.astro` | The page: map host, toolbox, menus, the back button, the confirmation for «Neu beginnen», and inert `<template>`s with the Ortstafel, the Chronik and each game's rendered Markdown, which lie hidden in the forest |
 | `Forest.astro` | The still picture: the start of the generated forest as SVG, shown until the game is ready and instead of it |
 | `Icon.astro`, `icons.ts` | Pixel icons as colour grids for the toolbox, the Waldmensch's portrait and the app icon |
 | `png.ts` | A small PNG encoder for the app icons at build time |
-| `tools/waters.mjs`, `tools/download.mjs` | Generate `game/waters.ts` from swisstopo and BAFU data; see below |
-| `game/waters.ts` | Generated: the rivers, brooks and lakes around Einsiedeln, the Sihlsee basin, the dam's site and the water names, in tiles |
-| `game/config.ts` | The balance table: costs, footprints, build times, speeds, stock limits |
-| `game/world.ts` | The world: the forest from a fixed seed, the water grid rasterized from `waters.ts` at start-up, and each lake's connected water |
+| `tools/waters.mjs`, `tools/gpkg.mjs`, `tools/download.mjs` | Generate the water data from swisstopo's GeoPackages; see below |
+| `game/waters.ts` | Generated: the index of the water pages (which have a file, which lie wholly in Switzerland), the Sihlsee basin, the dam's site and the page format |
+| `data/water-pages.json` | Generated: Switzerland's waters and border in pages of 10 × 10 km, in tiles; one long line, ignored by Prettier |
+| `game/config.ts` | The balance table: costs, footprints, build times, speeds, stock limits, the hidden texts and where they lie |
+| `game/world.ts` | The world: the forest from a fixed seed, and the water pages, loaded as they come into view and rasterized into tiles: water, lakes by number, the palisade and the land abroad |
 | `game/iso.ts` | The projections between tiles and the screen: the isometric view, the top-down plan, and the blend between them |
 | `game/state.ts` | The save in `localStorage`: versioned JSON, validated on load, reset by key prefix |
-| `game/sim.ts` | The rules: marking and felling, Waldleute and their tasks, bridges, ports and ships, building sites, sheep and the printing press, the flood, the Waldmensch's hints |
+| `game/sim.ts` | The rules: the tools on the ground, marking and felling, the hidden texts, Waldleute and their tasks, bridges, ports and ships, building sites, sheep and the printing press, the ravens, the flood, the Waldmensch's hints |
 | `game/nav.ts` | Finding ways: the Waldleute's search over open ground and crossings by ship, straightening ways, and ships' routes over their lake |
 | `game/texts.ts` | Reads the templates and splits each text into sections at its `<h2>` headings |
-| `game/art.ts` | The painted art for the isometric view on canvases at twice the resolution: trees, Waldleute, buildings, the amphitheatre's stands, ground textures |
+| `game/art.ts` | The painted art for the isometric view on canvases at twice the resolution: trees, Waldleute, ravens, the axe and the saw, buildings (a house of its own for each game), the amphitheatre in two parts, ground textures |
 | `game/plan.ts` | The same buildings, trees and Waldleute seen from straight above, for the plan view |
-| `game/render.ts` | PixiJS: the ground in tile units under the view's projection (textured tiles in chunks of 16 × 16, rivers, lakes, the top-down art, the stage, placing, sawing and cursor overlays), and trees, buildings and Waldleute upright on top, sorted back to front; the camera's flights and the turn between the views |
-| `game/overlay.ts` | The HTML lying on the map under the same projection: texts and Spielhaus plates; upright pins for water names and status labels; and the measuring of texts that sets their footprint |
-| `game/stage.ts` | The theatre's stage, painted into one canvas on the amphitheatre's floor: the preview, a status line and wooden signs for the programme, the keys and the real game |
+| `game/render.ts` | PixiJS: the ground in tile units under the view's projection (textured tiles in chunks of 16 × 16 with gaps where found texts lie, rivers, lakes, the top-down art, the stage, placing, sawing and cursor overlays), and trees, buildings, Waldleute and the tools on the ground upright on top, sorted back to front, with the ravens and the motes over hidden texts above; the camera's flights and the turn between the views |
+| `game/overlay.ts` | The HTML lying on the map under the same projection: found texts under the canvas, Spielhaus plates over it; upright pins for water names, Einsiedeln and status labels; and the measuring of texts that sets their footprint |
+| `game/stage.ts` | The theatre's stage in two canvases: the preview standing on the stage in 3D for the isometric view, and, turned top-down, the preview in 2D with a status line and wooden signs for the programme, the keys and the real game, on the amphitheatre's floor |
 | `game/input.ts` | Pointer, touch, wheel and keyboard input on the map |
 | `game/ui.ts` | The HTML interface, reading on the map, and announcements |
-| `game/preview.ts`, `previewMoto.ts`, `previewCar.ts` | The previews' rules, copied from the studio website and repainted as a stage set |
+| `game/preview.ts`, `previewMoto.ts`, `previewCar.ts` | The previews' rules, copied from the studio website and repainted as a stage set, each with its scene in 2D and in 3D |
 | `game/main.ts` | Start-up, saving and the service worker registration |
 
-`src/pages/` holds the home page and three endpoints: the web
-manifest, the service worker `sw.js` and the app icons `icon-<size>.png`.
+`src/pages/` holds the home page and four endpoints: the web
+manifest, the service worker `sw.js`, the app icons `icon-<size>.png`, and the
+water pages `waters/<px>_<py>.json`.
 
 **The world.** One tile is 50 m; tile (0, 0) is the Klosterplatz Einsiedeln,
-the first clearing, and north is −y. The map is isometric: tiles are 2:1
+and north is −y. The first clearing lies 1.8 km north of it at Holzrüti 2
+(ISE AG, LV95 2699524 / 1222155 from the federal building register), on the
+Alp's west bank. The map is isometric: tiles are 2:1
 diamonds, so north lies to the upper right. The forest is generated per tile
 from a fixed seed, mostly firs with patches of broadleaf trees, so every visitor
-starts in the same forest and only changes are saved. The waters are real: the
-Alp, the Sihl, the Biber, the Minster, the Lorze, the Wägitaler Aa, the Muota,
-the Steiner Aa, the Jona and a few brooks, and the natural lakes from the
-Zürichsee and the Ägerisee to the Hüttnersee. Rivers are drawn wider than they
-are, as layered blue strokes with sandy banks; lakes as their shores. The
-Sihlsee is a reservoir, so it is only a basin: until the visitor's dam floods
-it, the Sihl and its brooks run through the valley along the lake axes the data
-records. Other reservoirs, such as the Wägitaler See, are left out; their rivers
-run through. Beyond the data's area, about 42 × 38 km, the forest goes on
-without water. Ground chunks are made as they come into view, a few per frame,
-and destroyed far off screen; trees, buildings and Waldleute are sorted by depth.
+starts in the same forest and only changes are saved. The map covers all of
+Switzerland, and its waters are real, from swissTLM3D: every watercourse 7 km
+long or more, whole from source to mouth, and the natural lakes from 0.03 km².
+Rivers from 14 km long are drawn wide, the others as brooks, as layered blue
+strokes with sandy banks; lakes as their shores. The Sihlsee is a reservoir, so
+it is only a basin: until the visitor's dam floods it, the Sihl and its brooks
+run through the valley along the lake axes the data records. Other reservoirs,
+found by the dams at their shores, are left out; their rivers run through. The
+national border is a wooden palisade, with gaps only where water crosses it;
+beyond it lies the land abroad, bare and dim, where nobody walks or builds.
+
+The waters come in pages of 10 × 10 km (200 × 200 tiles), one file each, about
+2 kB gzipped and at most 7 kB. The pages round Einsiedeln and round the saved
+view load before the game starts, as the hidden texts are placed by them;
+others load, four at a time, when a chunk of ground in them comes into view.
+A page is rasterized into tiles once it arrives: water, the lake each tile
+belongs to (so ships know their lake), the palisade, and abroad. Pages wholly
+abroad, or wholly in Switzerland without water, have no file. Until its page is
+there, a tile counts as forest, its ground is not drawn, and it cannot be
+marked; when it arrives, the chunks it touches are made anew and the Waldleute
+look for ways again. Ground chunks are made as they come into view, a few per
+frame, and destroyed far off screen; trees, buildings and Waldleute are sorted
+by depth.
 How far one can zoom out is limited so that about 16,000 tiles are on screen at
 most.
 
 **The water data.** `node src/waldstatt/tools/waters.mjs`
-downloads the river network (swisstopo VECTOR25 GWN07,
-`ch.swisstopo.vec25-gewaessernetz_referenz`) and the lakes (BAFU,
-`ch.bafu.vec25-seen`) from api3.geo.admin.ch, about 200 requests cached in
-`node_modules/.cache/waldstatt-games-waters/`, and writes `game/waters.ts`:
-named rivers and brooks joined into lines, lakes clipped to the area, all
-simplified and in tiles, the Sihlsee basin, the dam's site where the Sihl leaves
-the basin at its north end, and points for the names. The site itself never
-contacts swisstopo. The game's menu credits swisstopo and BAFU.
+downloads swisstopo's swissTLM3D (about 5 GB zipped, 11 GB unzipped) and
+swissBOUNDARIES3D as GeoPackages from data.geo.admin.ch, once, into
+`node_modules/.cache/waldstatt-games-waters/`; unzipping needs `unzip`. It
+reads them with Node's built-in `node:sqlite` and writes `game/waters.ts` and
+`data/water-pages.json` in a few seconds. Watercourses are chosen by their
+length, summed over their water body number (`gewiss_nr`), and their pieces,
+culverts included, are joined into lines whichever way each was drawn; stream
+order is not used, as the data records none and computing it over braided
+channels, canals and lake axes inflates it. Lake areas are the land cover's
+standing waters, named after the shore lines that cover the same box; a lake
+with a Staudamm or Staumauer within 100 m of its shore is a reservoir. The
+border is Switzerland's area without Liechtenstein, with Büsingen and Campione
+as holes. Everything is simplified (rivers to 12.5 m, lakes to 17.5 m, the
+border to 25 m), rounded to a tenth of a tile and cut into pages; lines reach
+two tiles past their page so strokes meet at its edges. The endpoint
+`waters/[page].json.ts` serves each page as its own file. The site itself never
+contacts swisstopo. The game's menu credits swisstopo.
 
-**Play.** The axe marks single trees; the saw marks every tree in a dragged area
+**Play.** The tools lie on the ground and are picked up with a tap: the axe
+in the first clearing, beside the Waldmensch; the saw, once a hut stands and
+100 trees are felled, where the last of them fell. Until then their buttons
+are missing from the toolbox. The axe marks single trees; the saw marks every tree in a dragged area
 (two fingers or another mouse button pan meanwhile); with «Abreissen», a first
 tap marks a building in red and a second tap on it tears it down, returning half
 its wood. Waldleute walk only on open ground: felled forest, the natural gaps,
@@ -115,27 +143,49 @@ either turns the view to its text (below) or shows a short status label over it
 for a few seconds. Choosing the dam names the buildings that will drown in the
 placing bar; only «Neu beginnen» in the menu asks for confirmation.
 
-**Content on the map.** What visitors read lies on the ground as real HTML,
-cloned from the templates, in a layer under the same projection as the ground,
-at 32 text pixels per tile. Each text takes as much ground as it needs: the
-Ortstafel (the name), the Chronik (the about texts), each game's Spielidee (its
-Markdown without the controls) and Anleitung (the controls table) are as long
-as their text, measured once in a hidden copy with the map's styles
-(`textLength()`), so the longer the text, the more forest must go. Scrolls lie
-between two rollers, the Ortstafel on a board, the Anleitung on a notice board.
-Each Spielhaus has a plate in front with «Spielen» and «Quellcode».
+**Content on the map.** The texts are not built; they lie hidden under the
+forest and are explored by felling it. The Ortstafel (the name) and the
+Chronik (the about texts) lie within 1 km of the Klosterplatz, each game's
+scroll (its whole Markdown, controls included) 1.5 to 5 km from it, on dry land
+outside the Sihlsee's basin. Where exactly is chosen at random for each new
+forest from a seed and saved. A hidden text lies under unbroken forest:
+its tiles always carry a tree, its ground shimmers pale, and motes of light
+drift over its treetops. Its first felled tree finds it; once all its trees are
+felled it is explored, and a game's explored scroll lets its Spielhaus be
+built. Each text is as long as its text, measured once in a hidden copy with
+the map's styles (`textLength()`). A found text is real HTML, cloned from the
+templates, in a layer under the map's canvas and under the same projection as
+the ground, at 32 text pixels per tile: the canvas is transparent where no
+ground is drawn, and the ground leaves a gap on each cleared tile of a found
+text. So the text lies on the floor, the trees still standing cover the rest,
+and Waldleute and buildings stand over it. Buildings cannot be placed on a
+text. A label marks Einsiedeln on the map.
+
+Meinrads Klause and the Kloster each bring one of Meinrad's two ravens. A
+raven leads to a game's scroll that is not yet explored, the nearest first
+and one per raven: it circles about 500 m into the forest from the felled
+ground nearest the scroll, and over the scroll once it is found; with no
+scroll left it circles its own building. Its direction is announced.
+
+Each game has a house of its own: Moto Devil a keep with a tower and a jump
+ramp, Car Drive a coach house with two gates and a lantern turret; another game
+gets a generic house. A tap on the house opens the game in a new tab; its plate
+in front carries «Spielen» and «Quellcode», which open new tabs too.
 
 The theatre is a wooden amphitheatre: tiered stands with railings rise all
-round a stage in its middle. The stage is painted on the map, not HTML
-(`stage.ts`): a canvas texture lying on the amphitheatre's floor, so the stands
-in front of it hide its edge. It shows the preview of a game whose Spielhaus
-stands, a status line, and wooden signs for the programme, for each key of the
-game's controls and for the real game. The previews are the rule sets of
+round a stage in its middle, with a backdrop and red curtains at its back,
+pennants and torches. The stage is painted on the map, not HTML (`stage.ts`).
+In the isometric view the preview of a game whose Spielhaus stands plays in 3D
+on the stage: its picture stands between the theatre's back and front, which
+are painted apart, so the front stands hide it. Turned top-down, a canvas
+texture lying on the amphitheatre's floor shows the preview in 2D, a status
+line, and wooden signs for the programme, for each key of the game's controls
+and for the real game. The previews are the rule sets of
 the studio website's previews, copied into the Waldstatt and redrawn as a painted stage; a
 demonstration plays until somebody takes over, and again after eight idle
 seconds. The stage runs only while it is on screen.
 
-A tap on a text, a plate or the stage turns the view: the camera flies to it
+A tap on a found text or the stage turns the view: the camera flies to it
 while the isometric view blends into a top-down plan with north up
 (`projection()` in `iso.ts`), so the text lies upright and fills the width at a
 comfortable size. Meanwhile trees, buildings and Waldleute blend from their
@@ -143,16 +193,19 @@ isometric pictures into ones seen from straight above (`plan.ts`). In the plan
 the map can be dragged and zoomed in; zooming out, the button «Zurück zur
 Karte» or Escape turns the view back. On the stage, taps on its signs press
 them (held while the pointer stays down), the keys from the controls table
-play, and the long sign opens the real game. The monastery is pure prestige,
-drawn without religious symbols. The dam can only stand where the Sihl leaves
+play, and the long sign opens the real game in a new tab. The monastery and
+Meinrads Klause are drawn without religious symbols. The dam can only stand where the Sihl leaves
 the basin; choosing it shows the future Sihlsee. When it is finished, the basin
 floods for good: trees in it disappear, and drowned buildings stay as ruins
 under the water.
 
 **State and offline.** The save is one versioned JSON document under
 `waldstatt-games/save`: supplies, felled trees as a bitset per chunk, marks,
-buildings, the flood, the camera and the dismissed hint. A scroll's length
-follows its current text on load, so changed texts need no migration. The game
+buildings, the flood, the camera, the dismissed hint, the tools picked up,
+where the saw lies, and the seed and positions of the hidden texts. A save
+from before the move to Holzrüti (version 1) starts a new forest with a
+notice. A text's length follows its current text on load, so changed texts
+need no migration. The game
 saves two seconds after a change and when the page is hidden. The
 organization's Pages sites share one origin and its `localStorage` (the games
 save under `moto-devil/` and `car-drive/`), so the save is validated on load, a
@@ -176,8 +229,9 @@ and the texts on the map are in the page as a region «Im Wald». With reduced
 motion Waldleute do not walk or swing their tools, ships do not sail visibly,
 and the previews play no demonstration. Screen-reader users and search engines can hardly reach the
 content: accepted in ADR 0002. The page weighs about
-10 kB of HTML and about 210 kB of scripts, styles and water data, gzipped, most
-of it PixiJS.
+10 kB of HTML, a 130 kB script (most of it PixiJS, which loads its WebGL parts
+as further chunks) and 20 kB of styles, gzipped; the water follows in pages of
+about 2 kB.
 
 ## Routes
 

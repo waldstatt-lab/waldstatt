@@ -243,6 +243,181 @@ export function ribbon(): Picture {
   return { canvas: element, ax: 8, ay: 5 };
 }
 
+// --- Items on the ground and the ravens ----------------------------------------
+
+/** A golden glint that draws the eye to something lying on the ground. */
+function glint(ctx: Ctx, x: number, y: number, r: number) {
+  ctx.fillStyle = "rgba(255, 244, 190, 0.95)";
+  ctx.beginPath();
+  ctx.moveTo(x, y - r);
+  ctx.lineTo(x + r * 0.22, y - r * 0.22);
+  ctx.lineTo(x + r, y);
+  ctx.lineTo(x + r * 0.22, y + r * 0.22);
+  ctx.lineTo(x, y + r);
+  ctx.lineTo(x - r * 0.22, y + r * 0.22);
+  ctx.lineTo(x - r, y);
+  ctx.lineTo(x - r * 0.22, y - r * 0.22);
+  ctx.fill();
+}
+
+/** The axe in a stump, or the saw on a log: tools waiting to be picked up. */
+export function itemPicture(item: "axe" | "saw"): Picture {
+  const { element, ctx } = canvas(48, 44);
+  const ax = 24;
+  const ay = 36;
+  ellipse(ctx, ax + 3, ay + 1, 15, 5, "rgba(0, 0, 0, 0.3)");
+  if (item === "axe") {
+    // A stump with the axe struck into it.
+    ctx.fillStyle = "#6b4423";
+    ctx.fillRect(ax - 10, ay - 12, 20, 12);
+    ellipse(ctx, ax, ay, 10, 4, "#5a3a20");
+    ellipse(ctx, ax, ay - 12, 10, 4, "#c9a46c");
+    ctx.strokeStyle = "#8a6a42";
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.ellipse(ax, ay - 12, 5, 2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = "#7a4e26";
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(ax + 2, ay - 14);
+    ctx.lineTo(ax + 15, ay - 33);
+    ctx.stroke();
+    ctx.fillStyle = "#9aa4ad";
+    ctx.beginPath();
+    ctx.moveTo(ax - 5, ay - 18);
+    ctx.lineTo(ax + 4, ay - 16);
+    ctx.lineTo(ax + 6, ay - 11);
+    ctx.lineTo(ax - 4, ay - 11);
+    ctx.fill();
+    ctx.fillStyle = "#dfe6ec";
+    ctx.fillRect(ax - 4, ay - 12.5, 9, 1.4);
+    glint(ctx, ax + 15, ay - 33, 5);
+  } else {
+    // A log with a frame saw lying across it.
+    ctx.fillStyle = "#7a4e26";
+    ctx.fillRect(ax - 18, ay - 9, 30, 9);
+    ellipse(ctx, ax + 12, ay - 4.5, 3.5, 4.5, "#c9a46c");
+    ctx.fillStyle = "#c2cad1";
+    ctx.beginPath();
+    ctx.moveTo(ax - 20, ay - 12);
+    ctx.lineTo(ax + 18, ay - 18);
+    ctx.lineTo(ax + 18, ay - 15);
+    ctx.lineTo(ax - 20, ay - 9);
+    ctx.fill();
+    ctx.fillStyle = "#6f7880";
+    for (let k = 0; k < 12; k++) {
+      const x = ax - 19 + k * 3.1;
+      const y = ay - 9.4 - k * 0.49;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 1.5, y + 2);
+      ctx.lineTo(x + 3, y - 0.4);
+      ctx.fill();
+    }
+    ctx.strokeStyle = "#8a5a32";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(ax - 18, ay - 11);
+    ctx.lineTo(ax - 18, ay - 25);
+    ctx.lineTo(ax + 16, ay - 31);
+    ctx.lineTo(ax + 16, ay - 17);
+    ctx.stroke();
+    glint(ctx, ax + 16, ay - 31, 5);
+  }
+  return { canvas: element, ax, ay };
+}
+
+/**
+ * A tile of the palisade along the national border: three sharpened logs
+ * bound by a rail, anchored at the tile's centre.
+ */
+export function palisadePicture(): Picture {
+  const { element, ctx } = canvas(44, 64);
+  const ax = 22;
+  const ay = 52;
+  ellipse(ctx, ax + 4, ay + 1, 20, 7, "rgba(0, 0, 0, 0.28)");
+  for (const [dx, dy, h] of [
+    [-12, -6, 38],
+    [-1, 0, 42],
+    [10, 6, 37],
+  ]) {
+    const x = ax + dx;
+    const y = ay + dy;
+    const g = ctx.createLinearGradient(x - 5, 0, x + 5, 0);
+    g.addColorStop(0, "#a87a4c");
+    g.addColorStop(0.6, "#7a5230");
+    g.addColorStop(1, "#5a3a20");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(x - 5, y);
+    ctx.lineTo(x - 5, y - h);
+    ctx.lineTo(x, y - h - 8);
+    ctx.lineTo(x + 5, y - h);
+    ctx.lineTo(x + 5, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#3a2614";
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ellipse(ctx, x, y, 5, 2, "#4a3320");
+  }
+  ctx.strokeStyle = "#4a3018";
+  ctx.lineWidth = 2.6;
+  ctx.beginPath();
+  ctx.moveTo(ax - 18, ay - 31);
+  ctx.lineTo(ax + 16, ay - 14);
+  ctx.stroke();
+  return { canvas: element, ax, ay };
+}
+
+export const ravenFrame = { w: 40, h: 28, ax: 20, ay: 16 };
+
+/** A raven facing right in three wing beats: up, level, down. */
+export function ravenAtlas(): HTMLCanvasElement {
+  const { element, ctx } = canvas(ravenFrame.w * 3, ravenFrame.h);
+  const black = "#16141c";
+  const sheen = "#3a3c58";
+  for (let f = 0; f < 3; f++) {
+    const x = f * ravenFrame.w + ravenFrame.ax;
+    const y = ravenFrame.ay;
+    const lift = [-11, -1, 8][f];
+    // Far wing, body, tail, head and beak, near wing.
+    ctx.fillStyle = sheen;
+    ctx.beginPath();
+    ctx.moveTo(x - 2, y - 2);
+    ctx.quadraticCurveTo(x - 4, y + lift - 4, x - 12, y + lift * 0.9 - 2);
+    ctx.lineTo(x + 3, y);
+    ctx.fill();
+    ctx.fillStyle = black;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 9, 3.6, -0.08, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x - 7, y - 1);
+    ctx.lineTo(x - 15, y - 3);
+    ctx.lineTo(x - 15, y + 3);
+    ctx.lineTo(x - 7, y + 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + 9, y - 2, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#3a3630";
+    ctx.beginPath();
+    ctx.moveTo(x + 11.5, y - 3);
+    ctx.lineTo(x + 17, y - 1);
+    ctx.lineTo(x + 11.5, y);
+    ctx.fill();
+    ctx.fillStyle = black;
+    ctx.beginPath();
+    ctx.moveTo(x - 3, y);
+    ctx.quadraticCurveTo(x + 2, y + lift - 2, x - 8, y + lift + 1);
+    ctx.quadraticCurveTo(x - 2, y + lift * 0.5, x + 5, y + 1);
+    ctx.fill();
+  }
+  return element;
+}
+
 // --- Waldleute --------------------------------------------------------------
 
 export const workerFrame = { w: 30, h: 44, ax: 15, ay: 41 };
@@ -324,7 +499,7 @@ export function workerAtlas(): HTMLCanvasElement {
 // --- Buildings ------------------------------------------------------------
 
 /** Paints in a footprint's own tile coordinates (u right-down, v left-down, z up). */
-class Painter {
+export class Painter {
   constructor(
     readonly ctx: Ctx,
     readonly ox: number,
@@ -528,6 +703,69 @@ class Painter {
     }
   }
 
+  /** A pyramid roof over u0..u1 × v0..v1, rising from z by rise. */
+  pyramid(
+    u0: number,
+    v0: number,
+    u1: number,
+    v1: number,
+    z: number,
+    rise: number,
+    c: { lit: string; dark: string; courses: string },
+    over = 0.12,
+  ) {
+    const [a, b, e, f] = [u0 - over, v0 - over, u1 + over, v1 + over];
+    const apex: Point = [(u0 + u1) / 2, (v0 + v1) / 2, z + rise];
+    this.poly([[a, b, z], [e, b, z], apex], c.lit, c.courses);
+    this.poly([[a, b, z], [a, f, z], apex], c.lit, c.courses);
+    this.poly([[a, f, z], [e, f, z], apex], c.dark, c.courses);
+    this.poly([[e, b, z], [e, f, z], apex], shade(c.dark, -0.15), c.courses);
+  }
+
+  /** A pennant on a pole standing at (u, v, z), blowing to the right. */
+  pennant(u: number, v: number, z: number, height: number, colors: string[]) {
+    const ctx = this.ctx;
+    const [x, y] = this.p(u, v, z);
+    ctx.strokeStyle = "#3a2614";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y - height);
+    ctx.stroke();
+    const top = y - height;
+    colors.forEach((color, i) => {
+      const k = i / colors.length;
+      const k1 = (i + 1) / colors.length;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(x + 22 * k, top + 1 + 4 * k);
+      ctx.lineTo(x + 22 * k1, top + 1 + 4 * k1);
+      ctx.lineTo(x + 22 * k1, top + 13 - 4 * k1);
+      ctx.lineTo(x + 22 * k, top + 13 - 4 * k);
+      ctx.fill();
+    });
+  }
+
+  /** A torch on a post: a warm glow. */
+  torch(u: number, v: number, z: number) {
+    const ctx = this.ctx;
+    const [x, y] = this.p(u, v, z);
+    ctx.strokeStyle = "#3a2614";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y - 16);
+    ctx.stroke();
+    const g = ctx.createRadialGradient(x, y - 19, 0, x, y - 19, 9);
+    g.addColorStop(0, "rgba(255, 236, 160, 0.95)");
+    g.addColorStop(0.4, "rgba(255, 160, 50, 0.7)");
+    g.addColorStop(1, "rgba(255, 120, 30, 0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y - 19, 9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   /** A window or door on the left face (v = v) between u0..u1 and z0..z1. */
   leftOpening(
     v: number,
@@ -580,11 +818,8 @@ const heights: Record<Kind, number> = {
   huette: 70,
   schafweide: 50,
   druckerei: 96,
-  ortstafel: 40,
-  chronik: 30,
-  spielidee: 30,
-  anleitung: 40,
-  spielhaus: 110,
+  spielhaus: 160,
+  klause: 90,
   theater: 130,
   kloster: 190,
   damm: 50,
@@ -717,6 +952,230 @@ function spielhaus(P: Painter, game?: string) {
   ctx.fillRect(fx + 2, fy - 14, 14, 2);
 }
 
+const redTiles = {
+  lit: "#c8402e",
+  dark: "#8c2a1e",
+  gable: "#efe4cc",
+  courses: "#5e1c14",
+};
+const blueSlate = {
+  lit: "#4f7fc0",
+  dark: "#2c5490",
+  gable: "#e3d3b0",
+  courses: "#1d3a66",
+};
+
+/** An arched opening on the left face, with a lit or dark inside. */
+function leftArch(
+  P: Painter,
+  v: number,
+  u0: number,
+  u1: number,
+  z0: number,
+  z1: number,
+  fill: string,
+) {
+  const ctx = P.ctx;
+  const um = (u0 + u1) / 2;
+  const r = ((u1 - u0) * TW) / 4;
+  ctx.beginPath();
+  ctx.moveTo(...P.p(u0, v, z0));
+  ctx.lineTo(...P.p(u0, v, z1 - r));
+  const [mx, my] = P.p(um, v, z1 - r);
+  ctx.ellipse(mx, my, r * 1.12, r, Math.atan2(TH, TW), Math.PI, 0);
+  ctx.lineTo(...P.p(u1, v, z0));
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = "#3a2614";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+}
+
+/** Battlements along the top of a box's two visible faces. */
+function crenels(
+  P: Painter,
+  u0: number,
+  v0: number,
+  u1: number,
+  v1: number,
+  z: number,
+  c: { top: string; left: string; right: string; line?: string },
+) {
+  const step = 0.3;
+  for (let u = u0; u < u1 - 0.05; u += step * 2)
+    P.box(u, v1 - 0.18, Math.min(u1, u + step), v1, z, z + 6, c);
+  for (let v = v0; v < v1 - 0.05; v += step * 2)
+    P.box(u1 - 0.18, v, u1, Math.min(v1, v + step), z, z + 6, c);
+}
+
+/**
+ * Moto Devil's house: the devil's keep. A timber-framed hall with a tall
+ * stone tower, red roofs, banners in the game's red and gold, and a wooden
+ * jump ramp leaning against the tower.
+ */
+function motoHouse(P: Painter) {
+  const red = "#c23b2a";
+  const gold = "#f4d24a";
+  P.shadow(0.2, 0.2, 4.7, 3.6, 1.8);
+  P.box(0.2, 0.2, 4.8, 3.6, 0, 3, stone);
+  // The hall.
+  P.box(0.4, 0.5, 3.0, 3.3, 3, 40, plaster);
+  timber(P, 0.4, 0.5, 3.0, 3.3, 3, 40);
+  leftArch(P, 3.3, 1.2, 2.1, 3, 26, glow);
+  for (const v of [0.8, 1.6, 2.4])
+    P.rightOpening(3.0, v, v + 0.35, 18, 30, glass);
+  // Banners hanging on the hall's front.
+  for (const u of [0.6, 2.35]) {
+    P.leftOpening(3.3, u, u + 0.4, 12, 36, red, "#5e1c14");
+    P.leftOpening(3.3, u + 0.12, u + 0.28, 12, 36, gold, red);
+  }
+  P.gable(0.4, 0.5, 3.0, 3.3, 40, 36, "v", redTiles, 0.2);
+  // The tower, with battlements and a tall roof.
+  P.box(3.0, 0.4, 4.5, 1.9, 0, 86, stone);
+  for (let z = 10; z < 86; z += 12) {
+    P.line([3.0, 1.9, z], [4.5, 1.9, z], "#8f8572", 0.8);
+    P.line([4.5, 0.4, z], [4.5, 1.9, z], "#7a705e", 0.8);
+  }
+  for (const z of [30, 56]) {
+    P.leftOpening(1.9, 3.55, 3.95, z, z + 12, glow);
+    P.rightOpening(4.5, 0.95, 1.35, z, z + 12, glass);
+  }
+  crenels(P, 3.0, 0.4, 4.5, 1.9, 86, stone);
+  P.pyramid(3.1, 0.5, 4.4, 1.8, 92, 40, redTiles, 0.05);
+  P.pennant(3.75, 1.15, 132, 26, [red, gold, red]);
+  // The jump ramp in front of the tower.
+  const ramp = {
+    top: "#c0915a",
+    left: "#8a5a32",
+    right: "#6b4423",
+    line: "#4a3320",
+  };
+  P.poly(
+    [
+      [3.3, 2.2, 0],
+      [4.6, 2.2, 0],
+      [4.6, 2.2, 22],
+    ],
+    ramp.right,
+    ramp.line,
+  );
+  P.poly(
+    [
+      [3.3, 2.2, 0],
+      [3.3, 3.3, 0],
+      [4.6, 3.3, 22],
+      [4.6, 2.2, 22],
+    ],
+    ramp.top,
+    ramp.line,
+  );
+  for (let k = 1; k < 6; k++) {
+    const u = 3.3 + (1.3 * k) / 6;
+    P.line([u, 2.2, (22 * k) / 6], [u, 3.3, (22 * k) / 6], "#8a5a32", 0.8);
+  }
+  P.poly(
+    [
+      [4.6, 2.2, 0],
+      [4.6, 3.3, 0],
+      [4.6, 3.3, 22],
+      [4.6, 2.2, 22],
+    ],
+    ramp.right,
+    ramp.line,
+  );
+  P.torch(0.3, 3.5, 3);
+  P.torch(3.15, 3.5, 3);
+}
+
+/**
+ * Car Drive's house: a coach house for wagons, with two wide gates, a blue
+ * slate roof with a lantern turret, a cart wheel over the gates and pennants
+ * in the game's blue and white.
+ */
+function carHouse(P: Painter) {
+  const blue = "#2a62b8";
+  const white = "#f2f2f2";
+  P.shadow(0.2, 0.2, 4.8, 3.6, 1.6);
+  P.box(0.2, 0.3, 4.8, 3.6, 0, 3, stone);
+  P.box(0.4, 0.5, 4.6, 3.3, 3, 36, logs);
+  for (let z = 7; z < 36; z += 4) {
+    P.line([0.4, 3.3, z], [4.6, 3.3, z], "#5a3c22", 0.8);
+    P.line([4.6, 0.5, z], [4.6, 3.3, z], "#4a3018", 0.8);
+  }
+  // Two wide gates, open onto a lit inside.
+  for (const u of [0.8, 2.75]) {
+    leftArch(P, 3.3, u, u + 1.45, 3, 28, "#4a2f1c");
+    leftArch(P, 3.3, u + 0.12, u + 1.33, 3, 26, glow);
+  }
+  // A cart wheel over the gates.
+  const ctx = P.ctx;
+  const [wx, wy] = P.p(2.5, 3.3, 31);
+  ctx.save();
+  ctx.translate(wx, wy);
+  ctx.transform(1, 0.5, 0, 1, 0, 0);
+  ctx.strokeStyle = "#3a2614";
+  ctx.fillStyle = "#c9a46c";
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.arc(0, -2, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.lineWidth = 1.2;
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * 8, -2 + Math.sin(a) * 8);
+    ctx.lineTo(-Math.cos(a) * 8, -2 - Math.sin(a) * 8);
+    ctx.stroke();
+  }
+  ctx.restore();
+  for (const v of [0.8, 1.7, 2.5])
+    P.rightOpening(4.6, v, v + 0.35, 16, 28, glass);
+  P.gable(0.4, 0.5, 4.6, 3.3, 36, 30, "u", blueSlate, 0.2);
+  // The lantern turret on the ridge.
+  P.box(2.2, 1.6, 2.8, 2.2, 58, 74, plaster);
+  P.leftOpening(2.2, 2.35, 2.65, 61, 71, glow);
+  P.rightOpening(2.8, 1.75, 2.05, 61, 71, glow);
+  P.pyramid(2.2, 1.6, 2.8, 2.2, 74, 20, blueSlate, 0.1);
+  P.pennant(2.5, 1.9, 94, 22, [blue, white, blue]);
+  P.pennant(0.3, 3.5, 3, 46, [blue, white]);
+  P.pennant(4.7, 3.5, 3, 46, [white, blue]);
+}
+
+/**
+ * Meinrad's hermitage: a small log cell under a shingle roof, a stack of
+ * firewood and a stump by the door, without religious symbols.
+ */
+function klause(P: Painter) {
+  const shingles = {
+    lit: "#8a7a62",
+    dark: "#5e5242",
+    gable: "#9a6a3c",
+    courses: "#463c30",
+  };
+  P.shadow(0.3, 0.3, 2.7, 2.7, 1.1);
+  P.box(0.5, 0.5, 2.3, 2.2, 0, 22, logs);
+  for (let z = 4; z < 22; z += 3.6) {
+    P.line([0.5, 2.2, z], [2.3, 2.2, z], "#5a3c22", 0.8);
+    P.line([2.3, 0.5, z], [2.3, 2.2, z], "#4a3018", 0.8);
+  }
+  P.leftOpening(2.2, 1.0, 1.4, 0, 14, "#2e1e10");
+  P.rightOpening(2.3, 1.0, 1.35, 9, 15, glow);
+  P.gable(0.5, 0.5, 2.3, 2.2, 22, 20, "v", shingles, 0.22);
+  // Firewood and a stump.
+  for (let k = 0; k < 3; k++)
+    P.box(0.55, 2.35 + k * 0.01, 1.0, 2.75, k * 4, k * 4 + 4, {
+      top: "#c9a46c",
+      left: "#8a5a32",
+      right: "#6b4423",
+      line: "#4a3320",
+    });
+  const [sx, sy] = P.p(2.5, 2.6, 0);
+  ellipse(P.ctx, sx, sy - 4, 7, 3.5, "#5a3c22");
+  ellipse(P.ctx, sx, sy - 8, 7, 3.5, "#c9a46c");
+}
+
 function druckerei(P: Painter) {
   P.shadow(0.2, 0.2, 2.8, 2.8, 1.4);
   P.box(0.3, 0.3, 2.7, 2.7, 0, 34, stone);
@@ -833,30 +1292,6 @@ function schafweide(P: Painter, w: number, d: number) {
   for (let v = 0.1; v <= d; v += 0.5) post(w - 0.1, v);
 }
 
-/** A low wooden frame round a board lying on the ground; its text is HTML. */
-function board(P: Painter, w: number, d: number, roof: boolean) {
-  P.shadow(0.05, 0.05, w - 0.05, d - 0.05, 0.25);
-  const frame = {
-    top: "#a87a4c",
-    left: "#8a5a32",
-    right: "#6b4423",
-    line: "#4a3320",
-  };
-  P.box(0, 0, w, 0.15, 0, 4, frame);
-  P.box(0, 0.15, 0.15, d - 0.15, 0, 4, frame);
-  P.box(w - 0.15, 0.15, w, d - 0.15, 0, 4, frame);
-  P.box(0, d - 0.15, w, d, 0, 4, frame);
-  if (!roof) return;
-  // Two posts and a small roof at the back, like a notice board.
-  P.box(0.2, 0.05, 0.35, 0.2, 0, 30, logs);
-  P.box(w - 0.35, 0.05, w - 0.2, 0.2, 0, 30, logs);
-  P.gable(0.05, -0.1, w - 0.05, 0.3, 30, 8, "u", tiles, 0.05);
-}
-
-function anleitung(P: Painter, w: number, d: number) {
-  board(P, w, d, true);
-}
-
 /** The bands of the stands round the stage: row r, its back, sides and front. */
 export function standBands(w: number, d: number) {
   const S = STAGE;
@@ -894,12 +1329,23 @@ const plank = {
 };
 
 /**
- * A wooden amphitheatre: tiered stands all round the stage. The stage itself
- * is left empty: its picture lies on the ground below (stage.ts), so the
- * stands in front of it hide its edge.
+ * A wooden amphitheatre: tiered stands all round the stage, a backdrop with
+ * red curtains at the stage's back, and pennants and torches round it. The
+ * stage itself is left empty: its picture lies on the ground below
+ * (stage.ts), so the stands in front of it hide its edge. Painted in two
+ * parts, so the preview standing on the stage comes between them: the back
+ * (floor, back and left stands, backdrop) and the front (right and front
+ * stands, the poles in front).
  */
-function theater(P: Painter, w: number, d: number) {
+function theater(
+  P: Painter,
+  w: number,
+  d: number,
+  part: "all" | "back" | "front" = "all",
+) {
   const S = STAGE;
+  const back = part !== "front";
+  const front = part !== "back";
   const earth = "#b49a6a";
   for (const [u0, v0, u1, v1] of [
     [0, 0, w, S.v0],
@@ -907,17 +1353,18 @@ function theater(P: Painter, w: number, d: number) {
     [S.u1, S.v0, w, S.v1],
     [0, S.v1, w, d],
   ])
-    P.poly(
-      [
-        [u0, v0, 0],
-        [u1, v0, 0],
-        [u1, v1, 0],
-        [u0, v1, 0],
-      ],
-      earth,
-    );
+    if (back)
+      P.poly(
+        [
+          [u0, v0, 0],
+          [u1, v0, 0],
+          [u1, v1, 0],
+          [u0, v1, 0],
+        ],
+        earth,
+      );
   const rnd = random(4);
-  for (let i = 0; i < 220; i++) {
+  for (let i = 0; i < (back ? 220 : 0); i++) {
     const u = rnd() * w;
     const v = rnd() * d;
     if (u > S.u0 && u < S.u1 && v > S.v0 && v < S.v1) continue;
@@ -961,24 +1408,148 @@ function theater(P: Painter, w: number, d: number) {
     P.line([a[0], a[1], z + 8], [c[0], c[1], z + 8], "#5a3a20", 1.2);
   };
   const outer = bands.length - 1;
+  const top = bands[outer];
+  const flags = ["#c23b2a", "#f4d24a", "#2a62b8", "#f2f2f2", "#3f8a4a"];
   // Back to front: the back and left stands from the outside in, then the
-  // stage, then the right and front stands from the inside out.
-  for (const band of [...bands].reverse()) {
-    tier(band.back, band.height, "u");
-    if (band.r === outer) railing(band.back, band.height, "back");
+  // backdrop and the stage, then the right and front stands from the inside
+  // out.
+  if (back) {
+    for (const band of [...bands].reverse()) {
+      tier(band.back, band.height, "u");
+      if (band.r === outer) railing(band.back, band.height, "back");
+    }
+    for (const band of [...bands].reverse()) {
+      tier(band.left, band.height, "v");
+      if (band.r === outer) railing(band.left, band.height, "left");
+    }
+    P.pennant(top.back.u0 + 0.1, top.back.v0 + 0.1, top.height, 54, [
+      flags[0],
+      flags[1],
+    ]);
+    P.pennant(top.back.u1 - 0.1, top.back.v0 + 0.1, top.height, 54, [
+      flags[2],
+      flags[3],
+    ]);
+    P.pennant(top.left.u0 + 0.1, top.front.v0, top.height, 54, [
+      flags[4],
+      flags[1],
+    ]);
+    backdrop(P);
   }
-  for (const band of [...bands].reverse()) {
-    tier(band.left, band.height, "v");
-    if (band.r === outer) railing(band.left, band.height, "left");
+  if (front) {
+    for (const band of bands) {
+      tier(band.right, band.height, "v");
+      if (band.r === outer) railing(band.right, band.height, "right");
+    }
+    for (const band of bands) {
+      tier(band.front, band.height, "u");
+      if (band.r === outer) railing(band.front, band.height, "front");
+    }
+    P.pennant(top.right.u1 - 0.1, top.right.v0 + 0.1, top.height, 54, [
+      flags[1],
+      flags[0],
+    ]);
+    P.pennant(top.front.u1 - 0.1, top.front.v1 - 0.1, top.height, 54, [
+      flags[3],
+      flags[2],
+    ]);
+    for (const [u, v] of [
+      [S.u0 - 0.1, S.v1 + 0.1],
+      [S.u1 + 0.1, S.v1 + 0.1],
+      [S.u1 + 0.1, S.v0 + 0.3],
+    ])
+      P.torch(u, v, 0);
   }
-  for (const band of bands) {
-    tier(band.right, band.height, "v");
-    if (band.r === outer) railing(band.right, band.height, "right");
+}
+
+/**
+ * The backdrop at the stage's back edge: a timber frame with a painted sky,
+ * red curtains drawn to the sides and a pelmet with gold fringe.
+ */
+function backdrop(P: Painter) {
+  const S = STAGE;
+  const v = S.v0 + 0.05;
+  const u0 = S.u0 + 0.3;
+  const u1 = S.u1 - 0.3;
+  const height = 62;
+  const ctx = P.ctx;
+  // The painted sky and hills.
+  P.path([
+    [u0, v, 0],
+    [u1, v, 0],
+    [u1, v, height],
+    [u0, v, height],
+  ]);
+  const [, skyTop] = P.p(u0, v, height);
+  const [, skyBottom] = P.p(u0, v, 0);
+  const sky = ctx.createLinearGradient(0, skyTop, 0, skyBottom);
+  sky.addColorStop(0, "#6fa6d8");
+  sky.addColorStop(0.7, "#d8e8f0");
+  ctx.fillStyle = sky;
+  ctx.fill();
+  P.poly(
+    [
+      [u0, v, 0],
+      [u0, v, 18],
+      [u0 + 1.5, v, 30],
+      [u0 + 3.2, v, 16],
+      [u0 + 4.6, v, 26],
+      [u1, v, 14],
+      [u1, v, 0],
+    ],
+    "#4f7a3a",
+  );
+  // Curtains, gathered to both sides, and the pelmet.
+  for (const [a, b] of [
+    [u0, u0 + 1.0],
+    [u1 - 1.0, u1],
+  ]) {
+    P.poly(
+      [
+        [a, v + 0.02, 0],
+        [b, v + 0.02, 0],
+        [b, v + 0.02, height],
+        [a, v + 0.02, height],
+      ],
+      "#9c2a32",
+      "#5e1820",
+    );
+    for (let k = 1; k < 4; k++) {
+      const u = a + ((b - a) * k) / 4;
+      P.line([u, v + 0.02, 2], [u, v + 0.02, height], "#6e1a22", 1.2);
+    }
   }
-  for (const band of bands) {
-    tier(band.front, band.height, "u");
-    if (band.r === outer) railing(band.front, band.height, "front");
-  }
+  P.poly(
+    [
+      [u0, v + 0.03, height - 12],
+      [u1, v + 0.03, height - 12],
+      [u1, v + 0.03, height],
+      [u0, v + 0.03, height],
+    ],
+    "#b8323a",
+    "#5e1820",
+  );
+  for (let u = u0 + 0.1; u < u1; u += 0.25)
+    P.line(
+      [u, v + 0.03, height - 12],
+      [u, v + 0.03, height - 15],
+      "#f0c35a",
+      1.6,
+    );
+  // The timber frame.
+  P.box(u0 - 0.2, v - 0.15, u0, v + 0.05, 0, height + 6, logs);
+  P.box(u1, v - 0.15, u1 + 0.2, v + 0.05, 0, height + 6, logs);
+  P.box(u0 - 0.2, v - 0.15, u1 + 0.2, v + 0.05, height, height + 8, logs);
+}
+
+/** The theatre in its two parts, for the preview between them. */
+export function theaterParts(w: number, d: number) {
+  const parts = (["back", "front"] as const).map((part) => {
+    const { element, P, ax, ay } = painter("theater", w, d);
+    theater(P, w, d, part);
+    return { canvas: element, ax, ay };
+  });
+  return { back: parts[0], front: parts[1] };
 }
 
 function kloster(P: Painter, w: number, d: number) {
@@ -1262,26 +1833,6 @@ function schiff(P: Painter, w: number, d: number) {
   ctx.fill();
 }
 
-/** A scroll's two rollers; the parchment between them is HTML. */
-function scroll(P: Painter, w: number, d: number) {
-  P.shadow(0.2, 0.2, w - 0.2, d - 0.2, 0.3);
-  for (const v of [0.25, d - 0.25]) {
-    P.box(0.3, v - 0.22, w - 0.3, v + 0.22, 0, 9, {
-      top: "#f5e9c8",
-      left: "#e2cc98",
-      right: "#c4a97a",
-      line: "#9a7f52",
-    });
-    P.box(0, v - 0.18, 0.3, v + 0.18, 0, 8, logs);
-    P.box(w - 0.3, v - 0.18, w, v + 0.18, 0, 8, logs);
-  }
-  P.box(w / 2 - 0.15, d - 0.5, w / 2 + 0.15, d - 0.05, 9, 11, {
-    top: "#b8323a",
-    left: "#a02a32",
-    right: "#7c1f26",
-  });
-}
-
 /** A building's picture for its footprint, anchored at the footprint's top corner. */
 export function buildingPicture(
   kind: Kind,
@@ -1297,15 +1848,18 @@ export function buildingPicture(
       hut(P);
       break;
     case "spielhaus":
-      // The house stands centred at the back; its plate lies in front.
-      spielhaus(
-        new Painter(
-          P.ctx,
-          P.ox + ((w - 3) / 2) * (TW / 2),
-          P.oy + ((w - 3) / 2) * (TH / 2),
-        ),
-        game,
-      );
+      // The house stands at the back; its plate lies in front.
+      if (game === "moto-devil") motoHouse(P);
+      else if (game === "car-drive") carHouse(P);
+      else
+        spielhaus(
+          new Painter(
+            P.ctx,
+            P.ox + ((w - 3) / 2) * (TW / 2),
+            P.oy + ((w - 3) / 2) * (TH / 2),
+          ),
+          game,
+        );
       break;
     case "druckerei":
       druckerei(P);
@@ -1313,11 +1867,8 @@ export function buildingPicture(
     case "schafweide":
       schafweide(P, w, d);
       break;
-    case "ortstafel":
-      board(P, w, d, false);
-      break;
-    case "anleitung":
-      anleitung(P, w, d);
+    case "klause":
+      klause(P);
       break;
     case "theater":
       theater(P, w, d);
@@ -1336,10 +1887,6 @@ export function buildingPicture(
       break;
     case "schiff":
       schiff(P, w, d);
-      break;
-    case "chronik":
-    case "spielidee":
-      scroll(P, w, d);
       break;
   }
   return { canvas: element, ax, ay };

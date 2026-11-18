@@ -5,6 +5,7 @@
  * boost gauge. The rules are copied from the studio website's preview; the
  * scenery is repainted.
  */
+import { shade as shadeOf, type Painter } from "./art";
 import { clamp, glow, type Game, type Report } from "./preview";
 
 const W = 200;
@@ -265,7 +266,149 @@ export function carGame(report: Report): Game {
         ctx.fillText("R STARTET NEU", W / 2, H / 2 + 8);
       }
     },
+    iso(P, w, h) {
+      isoScene(P, w, h, s, vehicles);
+    },
   };
+}
+
+/**
+ * The scene standing on the stage in the isometric view: the road runs along
+ * the stage towards the backdrop, its lanes across, and the cars are boxes
+ * with roofs and windows, sorted back to front.
+ */
+function isoScene(
+  P: Painter,
+  w: number,
+  h: number,
+  s: {
+    x: number;
+    scroll: number;
+    hurt: number;
+    shield: number;
+    boosting: boolean;
+    over: boolean;
+    time: number;
+    pickup: { kind: string; lane: number; y: number };
+  },
+  vehicles: Vehicle[],
+) {
+  const ctx = P.ctx;
+  /** Stage tiles per scene unit along the road and across it. */
+  const along = (w - 0.6) / H;
+  const across = 0.06;
+  const mid = h * 0.55;
+  const U = (y: number) => 0.3 + y * along;
+  const V = (x: number) => mid + (x - (road.x + road.width / 2)) * across;
+  const flat = (x0: number, x1: number, y0: number, y1: number, fill: string) =>
+    P.poly(
+      [
+        [U(y0), V(x0), 0],
+        [U(y1), V(x0), 0],
+        [U(y1), V(x1), 0],
+        [U(y0), V(x1), 0],
+      ],
+      fill,
+    );
+  flat(road.x - 14, road.x + road.width + 14, 0, H, "#6f9a4a");
+  flat(road.x - 2, road.x + road.width + 2, 0, H, "#8a8478");
+  flat(road.x, road.x + road.width, 0, H, "#55534e");
+  // Lane markings, moving with the road.
+  for (let lane = 1; lane < 3; lane++) {
+    const x = road.x + lane * road.lane;
+    for (let y = (s.scroll % 14) - 14; y < H; y += 14)
+      flat(x - 0.5, x + 0.5, Math.max(0, y), Math.min(H, y + 7), "#efe6cf");
+  }
+  type Thing = { depth: number; paint: () => void };
+  const things: Thing[] = [];
+  const carBox = (
+    x: number,
+    y: number,
+    color: string,
+    truck: boolean,
+    alpha = 1,
+  ) => {
+    const size = truck ? { w: 11, h: 25 } : { w: 9, h: 14 };
+    if (y > H || y + size.h < 0) return;
+    const y0 = clamp(y, 0, H);
+    const y1 = clamp(y + size.h, 0, H);
+    const v0 = V(x - size.w / 2);
+    const v1 = V(x + size.w / 2);
+    const body = {
+      top: color,
+      left: shadeOf(color, -0.2),
+      right: shadeOf(color, -0.4),
+      line: "#2a2420",
+    };
+    things.push({
+      depth: U(y1) + v1,
+      paint: () => {
+        ctx.globalAlpha = alpha;
+        P.poly(
+          [
+            [U(y0) + 0.08, v0 + 0.08, 0],
+            [U(y1) + 0.12, v0 + 0.08, 0],
+            [U(y1) + 0.12, v1 + 0.12, 0],
+            [U(y0) + 0.08, v1 + 0.12, 0],
+          ],
+          "rgba(20, 12, 4, 0.3)",
+        );
+        P.box(U(y0), v0, U(y1), v1, 1, truck ? 14 : 7, body);
+        if (!truck) {
+          // The cabin with its windscreen towards the front.
+          const c0 = U(y0 + 3.5);
+          const c1 = U(y1 - 4);
+          P.box(c0, v0 + 0.05, c1, v1 - 0.05, 7, 11, {
+            top: shadeOf(color, 0.15),
+            left: "#3a4a5a",
+            right: "#2a3644",
+            line: "#2a2420",
+          });
+        } else P.box(U(y0), v0, U(y0 + 6), v1, 14, 18, body);
+        ctx.globalAlpha = 1;
+      },
+    });
+  };
+  for (const v of vehicles) carBox(v.x, v.y, v.color, v.truck);
+  const blink = s.hurt > 0 && Math.floor(s.hurt * 10) % 2 ? 0.4 : 1;
+  carBox(s.x, playerY, "#c23b2a", false, blink);
+  const { kind, lane, y } = s.pickup;
+  if (y > 0 && y < H) {
+    const u = U(y + 4);
+    const v = V(laneCenter(lane));
+    things.push({
+      depth: u + v,
+      paint: () => {
+        const [px, py] = P.p(u, v, 10 + Math.sin(s.time * 4) * 2);
+        ctx.fillStyle = kind === "heart" ? "#c23b2a" : "#2a62b8";
+        ctx.strokeStyle = "#fff6dc";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(px, py, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      },
+    });
+  }
+  things.sort((a, b) => a.depth - b.depth);
+  for (const thing of things) thing.paint();
+  if (s.boosting) {
+    const [fx, fy] = P.p(U(playerY + car.h) + 0.3, V(s.x), 4);
+    ctx.fillStyle = "#ffd45c";
+    ctx.beginPath();
+    ctx.arc(fx, fy, 4 + Math.sin(s.time * 40), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (s.over) {
+    const [x, y] = P.p(w / 2, mid, 40);
+    ctx.font = "700 18px Georgia, serif";
+    ctx.textAlign = "center";
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "#2a1d12";
+    ctx.strokeText("GAME OVER", x, y);
+    ctx.fillStyle = "#fff6dc";
+    ctx.fillText("GAME OVER", x, y);
+  }
 }
 
 /* ---------- Drawing ---------- */

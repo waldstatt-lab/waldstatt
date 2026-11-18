@@ -5,8 +5,8 @@
  *   textured tiles in chunks of 16 × 16, rivers, lakes, the Sihlsee once it
  *   is dammed, and the overlays for placing, sawing and the cursor;
  * - upright things, painted for the isometric view and positioned through
- *   the same projection: trees, buildings, ribbons and Waldleute, sorted back
- *   to front.
+ *   the same projection: trees, buildings, ribbons, Waldleute and the tools
+ *   lying on the ground, sorted back to front, and the ravens above them.
  *
  * The view is usually isometric. To read a text or play on the stage it turns
  * into a top-down plan with north up: while it turns, the upright pictures
@@ -29,34 +29,52 @@ import {
   buildingPicture,
   groundTexture,
   hill,
+  itemPicture,
+  palisadePicture,
+  ravenAtlas,
+  ravenFrame,
   RES,
   ribbon,
+  theaterParts,
   treeAtlas,
   treeFrame,
   workerAtlas,
   workerFrame,
 } from "./art";
-import { kinds } from "./config";
+import { STAGE } from "./config";
 import {
   PLAN_RES,
+  planItem,
   planPicture,
+  planRaven,
   planTreeAtlas,
   planTreeSize,
   planWorker,
 } from "./plan";
 import { apply, invert, iso, projection, TH, type Linear } from "./iso";
-import type { Game, Placement } from "./sim";
-import { STAGE_RES, type Stage } from "./stage";
-import { key } from "./sim";
+import {
+  isFound,
+  key,
+  type Game,
+  type HiddenText,
+  type Placement,
+} from "./sim";
+import { ISO_RES, STAGE_RES, type Stage } from "./stage";
 import type { Building, Camera } from "./state";
-import { lines, type Lake } from "./waters";
+import { PAGE, type Lake } from "./waters";
 import {
   halfWidth,
   hasBaseTree,
   hash,
+  isAbroad,
+  isWall,
+  loadedPages,
+  needPages,
+  onPage,
+  sihlsee,
   start,
   treeVariant,
-  waters,
+  type LoadedPage,
 } from "./world";
 
 /** Tiles per side of a render chunk. */
@@ -90,6 +108,8 @@ interface ChunkView {
   ground: Graphics;
   trees: Map<string, Upright>;
   marks: Map<string, Upright>;
+  /** The palisade's posts along the border. */
+  walls: Upright[];
   /** The trees from above, made only while the view is not isometric. */
   planTrees: Map<string, Sprite> | null;
   dirty: boolean;
@@ -122,6 +142,30 @@ function insideRing(x: number, y: number, ring: number[]): boolean {
       inside = !inside;
   }
   return inside;
+}
+
+/** A page's lakes: banks along the shores, water, and islands as land again. */
+function drawPageLakes(g: Graphics, page: LoadedPage, water: number) {
+  const data = page.data;
+  if (!data) return;
+  for (const shore of data.shores)
+    g.poly(shore, false).stroke({
+      width: 0.45,
+      color: 0x8c7a52,
+      join: "round",
+      cap: "round",
+    });
+  for (const lake of data.lakes)
+    for (const ring of lake.rings) g.poly(ring).fill(water);
+  for (const shore of data.shores)
+    g.poly(shore, false).stroke({
+      width: 0.1,
+      color: 0x2a6fb8,
+      alpha: 0.8,
+      join: "round",
+    });
+  for (const lake of data.lakes)
+    for (const ring of lake.islands) g.poly(ring).fill(0x3d5a30);
 }
 
 /** A lake's shores, its water, and its islands drawn as land again. */
@@ -166,6 +210,27 @@ export class Renderer {
   /** The theatre's stage, painted on the ground (stage.ts). */
   private stageLayer = new Container();
   private stageSprite: Sprite | null = null;
+  /** The preview standing on the stage in the isometric view. */
+  private stageIso: Sprite | null = null;
+  /** The theatre's slot between its back and front, for stageIso. */
+  private stageSlot: { slot: Container; b: Building } | null = null;
+  /** The tools lying on the ground, upright and from above. */
+  private itemViews: { upright: Upright; plan: Sprite }[] = [];
+  private itemArt: Record<"axe" | "saw", { art: Art; plan: Texture }>;
+  private ravenTextures: Texture[];
+  private planRavenTexture: Texture;
+  private ravenSprites = new Map<
+    number,
+    { sprite: Sprite; plan: Sprite; x: number; y: number }
+  >();
+  private skyLayer = new Container();
+  /** Light motes over the treetops where a text lies hidden. */
+  private motes = new Map<string, { sprite: Sprite; x: number; y: number }[]>();
+  private moteTexture: Texture;
+  private ravenShadows = new Graphics();
+  private palisade: Art;
+  /** The pages of water already drawn. */
+  private drawnPages = new Set<string>();
   private previewLayer = new Container();
   private lakePreview = new Graphics();
   private ghost = new Graphics();
@@ -245,6 +310,43 @@ export class Renderer {
         }),
     );
     this.planWorkerTexture = Texture.from(planWorker());
+    const item = (name: "axe" | "saw") => {
+      const picture = itemPicture(name);
+      return {
+        art: {
+          texture: Texture.from(picture.canvas),
+          ax: picture.ax,
+          ay: picture.ay,
+        },
+        plan: Texture.from(planItem(name)),
+      };
+    };
+    this.itemArt = { axe: item("axe"), saw: item("saw") };
+    this.ravenTextures = frames(
+      Texture.from(ravenAtlas()),
+      ravenFrame.w,
+      ravenFrame.h,
+      3,
+    );
+    this.planRavenTexture = Texture.from(planRaven());
+    const post = palisadePicture();
+    this.palisade = {
+      texture: Texture.from(post.canvas),
+      ax: post.ax,
+      ay: post.ay,
+    };
+    const mote = document.createElement("canvas");
+    mote.width = mote.height = 32;
+    const mctx = mote.getContext("2d");
+    if (mctx) {
+      const glow = mctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+      glow.addColorStop(0, "rgba(255, 250, 215, 1)");
+      glow.addColorStop(0.3, "rgba(255, 228, 140, 0.7)");
+      glow.addColorStop(1, "rgba(255, 210, 100, 0)");
+      mctx.fillStyle = glow;
+      mctx.fillRect(0, 0, 32, 32);
+    }
+    this.moteTexture = Texture.from(mote);
     const mark = ribbon();
     this.ribbonArt = {
       texture: Texture.from(mark.canvas),
@@ -276,6 +378,7 @@ export class Renderer {
       this.lake,
       this.planLayer,
       this.stageLayer,
+      this.ravenShadows,
       this.marksOnGround,
       this.previewLayer,
       this.ghost,
@@ -296,13 +399,16 @@ export class Renderer {
       this.markLayer,
       this.workerLayer,
       this.ghostSprite,
+      this.skyLayer,
     );
     app.stage.addChild(this.ground, this.upright);
-    for (const ring of waters.basin.rings)
+    for (const ring of sihlsee.rings)
       this.lakePreview.poly(ring).fill(0x2f8de0);
-    this.drawWaters();
+    for (const page of loadedPages()) this.page(page);
+    onPage((page) => this.page(page));
     this.drawLake();
     for (const b of game.state.buildings) this.building(b);
+    this.items();
   }
 
   get camera(): Camera {
@@ -474,6 +580,8 @@ export class Renderer {
       for (const chunk of this.chunks.values()) this.ensurePlanTrees(chunk);
     this.updateWorkers();
     this.updateShips();
+    this.updateRavens();
+    this.updateMotes();
     for (const b of this.game.state.buildings) {
       const view = this.buildings.get(b.id);
       if (view?.bar) this.drawBar(view.bar, b);
@@ -484,6 +592,7 @@ export class Renderer {
     const view = this.visibleTiles(64);
     const keep = this.visibleTiles(1200);
     const wanted: [number, number, number][] = [];
+    let waiting = false;
     const mid = { x: this.camera.x / RCHUNK, y: this.camera.y / RCHUNK };
     for (
       let cy = Math.floor(view.y0 / RCHUNK);
@@ -497,13 +606,20 @@ export class Renderer {
       ) {
         if (this.chunks.has(key(cx, cy))) continue;
         if (!this.chunkOnScreen(cx, cy, 64)) continue;
+        // Its water must be known first; the page is on its way.
+        const x0 = cx * RCHUNK;
+        const y0 = cy * RCHUNK;
+        if (!needPages(x0, y0, x0 + RCHUNK - 1, y0 + RCHUNK - 1)) {
+          waiting = true;
+          continue;
+        }
         wanted.push([cx, cy, Math.hypot(cx + 0.5 - mid.x, cy + 0.5 - mid.y)]);
       }
     }
     // A few chunks per frame, nearest first, so panning stays smooth.
     wanted.sort((a, b) => a[2] - b[2]);
     for (const [cx, cy] of wanted.slice(0, 4)) this.createChunk(cx, cy);
-    this.missing = wanted.length > 4;
+    this.missing = wanted.length > 4 || waiting;
     for (const chunk of this.chunks.values()) {
       const far =
         (chunk.cx + 1) * RCHUNK < keep.x0 ||
@@ -545,6 +661,7 @@ export class Renderer {
       ground: new Graphics(),
       trees: new Map(),
       marks: new Map(),
+      walls: [],
       planTrees: null,
       dirty: false,
     };
@@ -553,6 +670,7 @@ export class Renderer {
       for (let x = cx * RCHUNK; x < (cx + 1) * RCHUNK; x++) {
         if (this.game.isTree(x, y)) this.addTree(chunk, x, y);
         if (this.game.isMarked(x, y)) this.addMark(chunk, x, y);
+        if (isWall(x, y)) this.addPost(chunk, x, y);
       }
     }
     this.groundLayer.addChild(chunk.ground);
@@ -563,6 +681,7 @@ export class Renderer {
     chunk.ground.destroy();
     for (const u of chunk.trees.values()) u.object.destroy();
     for (const u of chunk.marks.values()) u.object.destroy();
+    for (const u of chunk.walls) u.object.destroy();
     if (chunk.planTrees)
       for (const sprite of chunk.planTrees.values()) sprite.destroy();
     this.chunks.delete(key(chunk.cx, chunk.cy));
@@ -587,8 +706,10 @@ export class Renderer {
     for (const chunk of this.chunks.values()) {
       for (const u of chunk.trees.values()) this.put(u);
       for (const u of chunk.marks.values()) this.put(u);
+      for (const u of chunk.walls) this.put(u);
     }
     for (const view of this.buildings.values()) this.put(view.upright);
+    for (const view of this.itemViews) this.put(view.upright);
     this.put(this.ghostAt);
   }
 
@@ -606,7 +727,27 @@ export class Renderer {
     for (let y = chunk.cy * RCHUNK; y < (chunk.cy + 1) * RCHUNK; y++) {
       for (let x = chunk.cx * RCHUNK; x < (chunk.cx + 1) * RCHUNK; x++) {
         if (game.state.flooded && game.isLake(x, y)) continue;
+        // A gap in the ground: the found text lies here (overlay.ts).
+        const text = game.textAt(x, y);
+        if (text && isFound(text) && !game.isTree(x, y)) continue;
         const built = game.buildingAt(x, y);
+        if (isAbroad(x, y)) {
+          // Abroad: bare, dim ground beyond the palisade.
+          g.rect(x, y, 1, 1).fill({
+            fill: this.patterns.floor,
+            color: 0x6a6a64,
+          });
+          continue;
+        }
+        if (isWall(x, y)) {
+          // The palisade's footing; its posts stand upright on it.
+          g.rect(x, y, 1, 1).fill({
+            fill: this.patterns.bank,
+            color: 0xb0a080,
+          });
+          g.rect(x + 0.2, y + 0.2, 0.6, 0.6).fill(0x6b4423);
+          continue;
+        }
         let kind: GroundKind = "floor";
         if (game.isWater(x, y)) kind = "bank";
         else if (built || game.isFelled(x, y)) kind = "meadow";
@@ -618,6 +759,12 @@ export class Renderer {
           fill: this.patterns[kind],
           color: this.tint(x, y),
         });
+        // A hidden text shimmers pale through the forest floor.
+        if (text && !isFound(text))
+          g.rect(x + 0.08, y + 0.08, 0.84, 0.84).fill({
+            color: 0xf0dfa8,
+            alpha: 0.22 + hash(x, y, 83) * 0.12,
+          });
         if (!built && game.isFelled(x, y)) stumps.push([x, y]);
       }
     }
@@ -635,9 +782,38 @@ export class Renderer {
     }
   }
 
-  /** Rivers, brooks and the natural lakes, drawn once from the data. */
-  private drawWaters() {
-    for (const line of lines) {
+  /**
+   * A page of water arrived: its rivers, brooks and lakes are drawn, and the
+   * chunks it touches are made again with what now is known.
+   */
+  page(page: LoadedPage) {
+    const id = key(page.px, page.py);
+    if (this.drawnPages.has(id)) return;
+    this.drawnPages.add(id);
+    if (page.data) {
+      const rivers = new Graphics();
+      this.drawRivers(rivers, page);
+      this.riverLayer.addChild(rivers);
+      const lakes = new Graphics();
+      drawPageLakes(lakes, page, 0x3586d4);
+      this.lakeLayer.addChild(lakes);
+    }
+    for (const chunk of [...this.chunks.values()]) {
+      const x0 = chunk.cx * RCHUNK;
+      const y0 = chunk.cy * RCHUNK;
+      const touches =
+        x0 + RCHUNK > page.px * PAGE &&
+        x0 < (page.px + 1) * PAGE &&
+        y0 + RCHUNK > page.py * PAGE &&
+        y0 < (page.py + 1) * PAGE;
+      if (touches) this.destroyChunk(chunk);
+    }
+    this.missing = true;
+  }
+
+  /** A page's rivers and brooks: layered blue strokes with sandy banks. */
+  private drawRivers(g: Graphics, page: LoadedPage) {
+    for (const line of page.data?.lines ?? []) {
       const hw = (line.wide ? halfWidth.river : halfWidth.brook) * 1.4;
       const layers: [number, number, number][] = [
         [hw * 2 + 0.5, 0x8c7a52, 1],
@@ -647,27 +823,18 @@ export class Renderer {
         [0.05, 0xa8dcff, 0.6],
       ];
       for (const [width, color, alpha] of layers) {
-        this.riverLayer.moveTo(line.points[0], line.points[1]);
+        g.moveTo(line.points[0], line.points[1]);
         for (let i = 2; i < line.points.length; i += 2)
-          this.riverLayer.lineTo(line.points[i], line.points[i + 1]);
-        this.riverLayer.stroke({
-          width,
-          color,
-          alpha,
-          cap: "round",
-          join: "round",
-        });
+          g.lineTo(line.points[i], line.points[i + 1]);
+        g.stroke({ width, color, alpha, cap: "round", join: "round" });
       }
     }
-    for (const lake of waters.lakes)
-      drawLakeShape(this.lakeLayer, lake, 0x3586d4);
   }
 
   /** The Sihlsee, once the dam stands: water over the basin. */
   private drawLake() {
     this.lake.clear();
-    if (this.game.state.flooded)
-      drawLakeShape(this.lake, waters.basin, 0x3586d4);
+    if (this.game.state.flooded) drawLakeShape(this.lake, sihlsee, 0x3586d4);
   }
 
   private addTree(chunk: ChunkView, x: number, y: number) {
@@ -687,6 +854,22 @@ export class Renderer {
     this.put(u);
     this.objects.addChild(sprite);
     chunk.trees.set(key(x, y), u);
+  }
+
+  /** A tile of the palisade along the border. */
+  private addPost(chunk: ChunkView, x: number, y: number) {
+    const sprite = new Sprite();
+    this.dress(sprite, this.palisade);
+    const u: Upright = {
+      object: sprite,
+      x: x + 0.5,
+      y: y + 0.5,
+      lift: 0,
+      depth: 0,
+    };
+    this.put(u);
+    this.objects.addChild(sprite);
+    chunk.walls.push(u);
   }
 
   private addMark(chunk: ChunkView, x: number, y: number) {
@@ -760,6 +943,143 @@ export class Renderer {
     }
   }
 
+  /** A hidden text was found: its shimmer gives way to the text. */
+  text(t: HiddenText) {
+    if (t.cleared !== 1) return;
+    for (let y = t.y; y < t.y + t.h; y += RCHUNK / 2)
+      for (let x = t.x; x < t.x + t.w; x += RCHUNK / 2) {
+        const chunk = this.chunkAt(x, y);
+        if (chunk) chunk.dirty = true;
+      }
+    const last = this.chunkAt(t.x + t.w - 1, t.y + t.h - 1);
+    if (last) last.dirty = true;
+  }
+
+  /** Lays the tools still lying on the ground. */
+  items() {
+    for (const view of this.itemViews) {
+      view.upright.object.destroy();
+      view.plan.destroy();
+    }
+    this.itemViews = [];
+    const s = this.game.state;
+    const lying: ["axe" | "saw", { x: number; y: number }][] = [];
+    if (!s.tools.axe) lying.push(["axe", this.game.axeAt()]);
+    if (s.sawAt && !s.tools.saw) lying.push(["saw", s.sawAt]);
+    for (const [name, at] of lying) {
+      const { art, plan } = this.itemArt[name];
+      const sprite = new Sprite();
+      this.dress(sprite, art);
+      const upright: Upright = {
+        object: sprite,
+        x: at.x + 0.5,
+        y: at.y + 0.5,
+        lift: 0,
+        depth: 0.2,
+      };
+      this.put(upright);
+      this.objects.addChild(sprite);
+      const top = new Sprite(plan);
+      top.scale.set(1 / PLAN_RES);
+      top.position.set(at.x, at.y);
+      this.planBuildings.addChild(top);
+      this.itemViews.push({ upright, plan: top });
+    }
+  }
+
+  /** The ravens circle high above the forest; their shadows run below. */
+  private updateRavens() {
+    const ravens = this.game.ravens;
+    const still = this.still();
+    const g = this.ravenShadows;
+    g.clear();
+    const seen = new Set<number>();
+    for (const r of ravens) {
+      seen.add(r.id);
+      let view = this.ravenSprites.get(r.id);
+      if (!view) {
+        const sprite = new Sprite(this.ravenTextures[1]);
+        sprite.anchor.set(
+          ravenFrame.ax / ravenFrame.w,
+          ravenFrame.ay / ravenFrame.h,
+        );
+        this.skyLayer.addChild(sprite);
+        const plan = new Sprite(this.planRavenTexture);
+        plan.anchor.set(0.5);
+        plan.scale.set(1.3 / PLAN_RES);
+        this.planWorkerLayer.addChild(plan);
+        view = { sprite, plan, x: r.x, y: r.y };
+        this.ravenSprites.set(r.id, view);
+      }
+      const beat = still
+        ? 1
+        : [0, 1, 2, 1][Math.floor(this.time * 8 + r.id) % 4];
+      view.sprite.texture = this.ravenTextures[beat];
+      view.sprite.scale.set((r.facing * 1.2) / RES, 1.2 / RES);
+      const p = apply(this.L, r.x, r.y);
+      view.sprite.position.set(p.x, p.y - 120 * (1 - ease(this.plan)));
+      view.plan.position.set(r.x, r.y);
+      const dx = r.x - view.x;
+      const dy = r.y - view.y;
+      if (Math.hypot(dx, dy) > 0.001) view.plan.rotation = Math.atan2(dy, dx);
+      view.x = r.x;
+      view.y = r.y;
+      g.ellipse(r.x + 0.3, r.y + 0.3, 0.35, 0.2).fill({
+        color: 0x0a140a,
+        alpha: 0.28,
+      });
+    }
+    for (const [id, view] of this.ravenSprites) {
+      if (seen.has(id)) continue;
+      view.sprite.destroy();
+      view.plan.destroy();
+      this.ravenSprites.delete(id);
+    }
+  }
+
+  /**
+   * A few motes of light drift over the treetops of each hidden text not yet
+   * found, so a clearer can see where to fell; they go once it is found.
+   */
+  private updateMotes() {
+    const still = this.still();
+    for (const t of this.game.hidden) {
+      let list = this.motes.get(t.key);
+      if (isFound(t)) {
+        if (list) {
+          for (const m of list) m.sprite.destroy();
+          this.motes.delete(t.key);
+        }
+        continue;
+      }
+      if (!list) {
+        list = [];
+        const count = Math.max(3, Math.round((t.w * t.h) / 10));
+        for (let i = 0; i < count; i++) {
+          const sprite = new Sprite(this.moteTexture);
+          sprite.anchor.set(0.5);
+          sprite.blendMode = "add";
+          this.skyLayer.addChild(sprite);
+          list.push({
+            sprite,
+            x: t.x + 0.5 + hash(i, t.y, 91) * (t.w - 1),
+            y: t.y + 0.5 + hash(t.x, i, 92) * (t.h - 1),
+          });
+        }
+        this.motes.set(t.key, list);
+      }
+      const e = ease(this.plan);
+      list.forEach((m, i) => {
+        const phase = this.time * 1.3 + i * 2.1;
+        const p = apply(this.L, m.x, m.y);
+        const rise = still ? 0 : Math.sin(phase * 0.7) * 6;
+        m.sprite.position.set(p.x, p.y - (70 + rise) * (1 - e));
+        m.sprite.alpha = still ? 0.85 : 0.55 + 0.4 * Math.sin(phase);
+        m.sprite.scale.set(1.1 + 0.2 * Math.sin(phase * 1.7));
+      });
+    }
+  }
+
   /** Redraws what the flood changed. */
   flooded() {
     this.drawLake();
@@ -826,6 +1146,11 @@ export class Renderer {
     const signature = `${b.state}:${b.w}x${b.h}`;
     if (existing && !removed && existing.signature === signature) return;
     if (existing) {
+      if (this.stageSlot?.b.id === b.id) {
+        // Keep the stage's preview; only its slot goes.
+        if (this.stageIso) this.stageSlot.slot.removeChild(this.stageIso);
+        this.stageSlot = null;
+      }
       existing.upright.object.destroy({ children: true });
       existing.plan.destroy({ children: true });
       this.buildings.delete(b.id);
@@ -836,8 +1161,27 @@ export class Renderer {
     const axis = this.axis(b);
     const container = new Container();
     const sprite = new Sprite();
-    this.dress(sprite, this.picture(b, axis));
-    container.addChild(sprite);
+    if (b.kind === "theater" && b.state === "done") {
+      // Back and front apart, with the stage's preview between them.
+      const parts = theaterParts(b.w, b.h);
+      const front = new Sprite();
+      for (const [target, part] of [
+        [sprite, parts.back],
+        [front, parts.front],
+      ] as const)
+        this.dress(target, {
+          texture: Texture.from(part.canvas),
+          ax: part.ax,
+          ay: part.ay,
+        });
+      const slot = new Container();
+      container.addChild(sprite, slot, front);
+      this.stageSlot = { slot, b };
+      this.fillSlot();
+    } else {
+      this.dress(sprite, this.picture(b, axis));
+      container.addChild(sprite);
+    }
     // Sorted by its front tile, so trees further south still overlap it.
     const upright: Upright = {
       object: container,
@@ -929,6 +1273,9 @@ export class Renderer {
 
   /** Rebuilds every building picture, e.g. after the flood. */
   rebuildAll() {
+    if (this.stageSlot && this.stageIso)
+      this.stageSlot.slot.removeChild(this.stageIso);
+    this.stageSlot = null;
     for (const view of this.buildings.values()) {
       view.upright.object.destroy({ children: true });
       view.plan.destroy({ children: true });
@@ -1023,19 +1370,46 @@ export class Renderer {
       this.stageSprite.destroy();
       this.stageSprite = null;
     }
+    if (this.stageIso) {
+      this.stageIso.texture.destroy(true);
+      this.stageIso.destroy();
+      this.stageIso = null;
+    }
     if (!stage) return;
     const sprite = new Sprite(Texture.from(stage.canvas));
     sprite.scale.set(1 / STAGE_RES);
     sprite.position.set(x, y);
     this.stageLayer.addChild(sprite);
     this.stageSprite = sprite;
+    const iso3d = new Sprite(Texture.from(stage.iso));
+    iso3d.scale.set(1 / ISO_RES);
+    iso3d.anchor.set(
+      stage.isoOrigin.x / stage.iso.width,
+      stage.isoOrigin.y / stage.iso.height,
+    );
+    this.stageIso = iso3d;
+    this.fillSlot();
   }
 
-  /** Uploads the stage's picture when it changed. */
+  /** Puts the stage's preview into the theatre, at the stage's corner. */
+  private fillSlot() {
+    if (!this.stageSlot || !this.stageIso) return;
+    const { slot, b } = this.stageSlot;
+    const at = iso(STAGE.u0 - b.w / 2, STAGE.v0 - b.h / 2);
+    this.stageIso.position.set(at.x, at.y);
+    slot.addChild(this.stageIso);
+  }
+
+  /** Uploads the stage's pictures when they changed. */
   updateStage(stage: Stage) {
-    if (!this.stageSprite || !stage.dirty) return;
-    this.stageSprite.texture.source.update();
-    stage.dirty = false;
+    if (stage.dirty && this.stageSprite) {
+      this.stageSprite.texture.source.update();
+      stage.dirty = false;
+    }
+    if (stage.isoDirty && this.stageIso) {
+      this.stageIso.texture.source.update();
+      stage.isoDirty = false;
+    }
   }
 
   /** Whether a rectangle of tiles shows on screen. */
@@ -1080,7 +1454,7 @@ export class Renderer {
     this.ghost
       .rect(spot.x, spot.y, spot.w, spot.h)
       .stroke({ width: 0.06, color: spot.ok ? 0xfff4c8 : 0xd8432f });
-    if (!spot.ok || kinds[b.kind].fit) return;
+    if (!spot.ok) return;
     const at = { kind: b.kind, x: spot.x, y: spot.y, w: spot.w, h: spot.h };
     this.dress(
       this.ghostSprite,
