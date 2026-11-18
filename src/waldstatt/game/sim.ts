@@ -1058,7 +1058,7 @@ export class Game {
         return existing.state === "site"
           ? "Ist schon im Bau."
           : existing.state === "ruin"
-            ? "Steht als Ruine."
+            ? "Steht als Ruine. Räum sie zuerst weg."
             : "Steht schon.";
     }
     if (kind === "schiff" && !this.done("hafen"))
@@ -1257,12 +1257,11 @@ export class Game {
   }
 
   /**
-   * What a repair takes: for a ruin, rebuilding it, part of its costs; for
-   * a worn building, that part as far as it is worn, rounded up.
+   * What a repair takes: part of the building's costs as far as it is worn,
+   * rounded up. A ruin is not repaired.
    */
   repairCost(b: Building): Cost {
-    if (b.state === "ruin")
-      return this.share(kinds[b.kind].cost, balance.repair);
+    if (b.state !== "done") return {};
     const worn = Math.max(0, 1 - share(b));
     const out: Cost = {};
     if (worn <= 0) return out;
@@ -1294,7 +1293,9 @@ export class Game {
     if (b.state === "drowned") return "Das liegt unter Wasser.";
     if (b.state === "site") return "Das ist noch eine Baustelle.";
     if (b.state === "ruin")
-      return b.clearing ? "Die Ruine wird weggeräumt." : undefined;
+      return b.clearing
+        ? "Die Ruine wird weggeräumt."
+        : "Eine Ruine lässt sich nicht reparieren, nur wegräumen.";
     if (!wears(b) || share(b) >= 1) return "Das ist in gutem Zustand.";
     if (b.repair) return "Wird schon repariert.";
     return undefined;
@@ -1338,8 +1339,8 @@ export class Game {
   }
 
   /**
-   * Repairs a building: a ruin becomes a building site again; a worn
-   * building is paid for and Waldleute come to mend it. Returns why not.
+   * Orders a worn building's repair: it is paid for, and Waldleute come to
+   * mend it. Returns why not.
    */
   repair(b: Building): string | undefined {
     const why = this.unrepairable(b);
@@ -1348,12 +1349,7 @@ export class Game {
     const missing = this.economy.missing(cost);
     if (missing) return `Für die Reparatur fehlen ${missing}.`;
     this.economy.pay(cost);
-    if (b.state === "ruin") {
-      b.state = "site";
-      b.work = 0;
-      b.condition = 1;
-      b.clearing = undefined;
-    } else b.repair = true;
+    b.repair = true;
     this.chances++;
     this.events.building(b);
     this.events.dirty();

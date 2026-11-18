@@ -14,7 +14,8 @@ The work succeeds when:
 - repairs cost goods and Waldleute's work, and a visitor can order them one by
   one or for all buildings chosen by their condition;
 - a building worn out falls into ruins that do nothing, weigh on motivation,
-  and must be rebuilt or, with much work, cleared away;
+  and cannot be repaired, only cleared away with much work, which needs a
+  Recyclinghof;
 - tearing down returns nothing unless a Recyclinghof stands within 10 km.
 
 # Solution
@@ -35,12 +36,12 @@ The work succeeds when:
   finder order repairs. A repair costs half the building's costs as far as it
   is worn, paid at once; Waldleute then work on it like a building site. The
   finder's `reparieren:…` commands choose buildings by condition: crumbling,
-  worn, all, under a number of points, or a number typed, and the ruins to
-  rebuild. A ruin is rebuilt as a site for half its costs.
+  worn, all, under a number of points, or a number typed.
 - **Recyclinghof.** A new building, appearing once a Steinbruch stands. Within
   its 10 km, tearing down returns half the costs as far as the building is not
-  worn, and ruins can be cleared away, which returns nothing and takes four
-  times the building's work. Without it, ruins can only be rebuilt.
+  worn, and ruins can be cleared away (one by one, or all with
+  `wegräumen:ruinen`), which returns nothing and takes four times the
+  building's work. Without it, ruins stay.
 
 # Security
 
@@ -62,3 +63,4 @@ validated like the others; saves without them load as before.
 - No wear of building sites, drowned buildings or the Brot auswerfen.
 - No automatic repairs.
 - No cancelling an ordered repair.
+- No repairing or rebuilding ruins.

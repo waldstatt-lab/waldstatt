@@ -380,7 +380,7 @@ export class Ui {
   /**
    * Opens a card over a building: its name, state and condition, its stock,
    * for a producing building − and + for its crew, its repair, and for a
-   * ruin its rebuilding and clearing away.
+   * ruin its clearing away.
    */
   private openCard(b: Building) {
     const g = this.o.game;
@@ -416,7 +416,7 @@ export class Ui {
     });
     const clear = el(
       "button",
-      { type: "button", className: "wg-button" },
+      { type: "button", className: "wg-button wg-primary" },
       "Wegräumen",
     );
     clear.addEventListener("click", () => {
@@ -530,12 +530,14 @@ export class Ui {
       else if (lacking.length)
         note = `Es fehlt ${lacking.map((key) => goodName(key)).join(" und ")}.`;
     }
-    // Its condition, its repair, and for a ruin its rebuilding or clearing.
+    // Its condition, its repair, and for a ruin its clearing away.
     const ruin = b.state === "ruin";
     const repairable = !g.unrepairable(b);
     const cost = this.costText(g.repairCost(b));
-    const action = ruin ? "Wieder aufbauen" : "Reparieren";
-    set(card.repair, repairable ? (cost ? `${action} (${cost})` : action) : "");
+    set(
+      card.repair,
+      repairable ? (cost ? `Reparieren (${cost})` : "Reparieren") : "",
+    );
     card.clear.hidden = !ruin || !!b.clearing;
     card.clear.disabled = !g.canDemolish(b);
     let condition = "";
@@ -980,17 +982,14 @@ export class Ui {
 
   /**
    * The repair commands: the finished buildings to repair, chosen by their
-   * condition (`reparieren:baufällig`, `reparieren:unter-10` and more), and
-   * the ruins to rebuild. Each orders as many repairs as the stock pays for,
-   * the most worn first.
+   * condition (`reparieren:baufällig`, `reparieren:unter-10` and more),
+   * each ordering as many repairs as the stock pays for, the most worn
+   * first; and `wegräumen:ruinen` for the ruins a Recyclinghof is near.
    */
   private repairItems(): FinderItem[] {
     const g = this.o.game;
     const worn = g.state.buildings.filter(
       (b) => b.state === "done" && !g.unrepairable(b),
-    );
-    const ruins = g.state.buildings.filter(
-      (b) => b.state === "ruin" && !g.unrepairable(b),
     );
     const item = (label: string, list: Building[]) => ({
       label,
@@ -1015,7 +1014,37 @@ export class Ui {
           worn.filter((b) => points(b) < n),
         ),
       );
-    items.push(item("reparieren:ruinen", ruins));
+    const ruins = g.state.buildings.filter(
+      (b) => b.state === "ruin" && !b.clearing,
+    );
+    const near = ruins.filter((b) => g.canDemolish(b));
+    items.push({
+      label: "wegräumen:ruinen",
+      hint: !ruins.length
+        ? "keine Ruinen"
+        : !near.length
+          ? "kein Recyclinghof in der Nähe"
+          : `${near.length === 1 ? "1 Ruine" : `${near.length} Ruinen`} · viel Arbeit`,
+      run: () => {
+        if (!ruins.length) return this.announce("Es gibt keine Ruinen.");
+        for (const b of near) g.demolish(b);
+        const cleared =
+          near.length === 1
+            ? "Die Waldleute räumen eine Ruine weg."
+            : `Die Waldleute räumen ${near.length} Ruinen weg.`;
+        const far = ruins.length - near.length;
+        this.announce(
+          [
+            near.length ? cleared : "",
+            far
+              ? `Für ${far === 1 ? "eine Ruine" : `${far} Ruinen`} braucht es einen Recyclinghof im Umkreis von 10 km.`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+      },
+    });
     return items;
   }
 
@@ -1699,7 +1728,7 @@ export class Ui {
 
   /**
    * A tap on a building: play on the stage, open the game or its source,
-   * set a crew, repair a ruin, or show how it is doing.
+   * set a crew, repair it or clear its ruin away, or show how it is doing.
    */
   private react(b: Building) {
     const g = this.o.game;
@@ -1828,18 +1857,13 @@ export class Ui {
     );
   }
 
-  /** Orders a building's repair, or a ruin's rebuilding, and says so. */
+  /** Orders a building's repair, and says so. */
   private repair(b: Building) {
     const g = this.o.game;
     const name = this.label(b.kind, b.game);
-    const ruin = b.state === "ruin";
     const cost = this.costText(g.repairCost(b));
     const why = g.repair(b);
-    const text =
-      why ??
-      (ruin
-        ? `${name} wird wieder aufgebaut${cost ? ` (${cost})` : ""}.`
-        : `${name} wird repariert${cost ? ` (${cost})` : ""}.`);
+    const text = why ?? `${name} wird repariert${cost ? ` (${cost})` : ""}.`;
     this.o.world.toast(b, text);
     this.announce(text);
   }

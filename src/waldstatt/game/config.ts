@@ -25,7 +25,7 @@ export const balance = {
    * reach of a Recyclinghof, less as it wears; without one, nothing.
    */
   refund: 0.5,
-  /** Share of the costs a ruin's rebuilding takes, and a full repair. */
+  /** Share of the costs a full repair takes. */
   repair: 0.5,
   /** Trees the saw marks at most in one stroke. */
   sawMaxTiles: 600,

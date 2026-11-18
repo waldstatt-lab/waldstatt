@@ -232,10 +232,12 @@ time, and cached per level. A building's card shows «Zustand: 15 von 75,
 baufällig». A repair, ordered with the tool, the card or the finder, costs
 half the building's costs as far as it is worn, rounded up, paid at once;
 Waldleute then work on it from beside it like a site, scaffolded with a bar,
-and a full repair takes as long as building it. A ruin is rebuilt as a building
-site for half its costs, or, within 10 km of a Recyclinghof, cleared away with
-«Abreissen» or the card's «Wegräumen»: that gives nothing back and takes four
-times its building work. The Recyclinghof (Handwerk, 30 Holz and 20 Steine)
+and a full repair takes as long as building it. A ruin cannot be repaired or
+rebuilt; it stands, weighing on motivation, until it is cleared away with
+«Abreissen», the card's «Wegräumen» or `:wegräumen:ruinen`, which needs a
+Recyclinghof within 10 km, gives nothing back and takes four times its
+building work. A building that is one of a kind cannot be built again while
+its ruin stands. The Recyclinghof (Handwerk, 30 Holz and 20 Steine)
 appears once a Steinbruch stands. Balance lives in `config.ts`.
 
 **The forest grows back** (`growth.ts`): felled ground beside forest grows
@@ -272,7 +274,7 @@ buildings are one of a kind (per game for a game's buildings). Nothing on the
 map opens a panel or dialog: a tap on a building turns the view to its text or
 stage, or opens its game or source; otherwise it opens a small card on the map
 above the building with its state, condition and stock, − and + for a crew,
-its repair, or a ruin's rebuilding and clearing. A tap anywhere else, the card's ×, or Escape closes it. Other
+its repair, or a ruin's clearing away. A tap anywhere else, the card's ×, or Escape closes it. Other
 messages show as a short label over a building for a few seconds. Nothing explains the game: there are no hints,
 and announcements tell only what happened. Only «Neu beginnen» and loading,
 overwriting or deleting a saved forest ask for confirmation.
@@ -480,9 +482,10 @@ saw), `build:…` for the buildings the menu shows,
 `lichtung`, `bauen`, `menü`, `wälder`, `tasten` and `neu-beginnen`, `wald:…` for
 the saved forests (see below), and `reparieren:…`, which choose finished
 buildings by condition: `baufällig`, `abgenutzt`, `alle`, `unter-5` to
-`unter-50` in points, or any number typed, such as «rep 30», and `ruinen` to
-rebuild the ruins. Each hints how many buildings and what it costs, and
-orders as many as the stock pays for, the most worn first. Both match fuzzily, ignoring
+`unter-50` in points, or any number typed, such as «rep 30». Each hints how
+many buildings and what it costs, and orders as many as the stock pays for,
+the most worn first. `wegräumen:ruinen` clears away every ruin within reach of
+a Recyclinghof. Both match fuzzily, ignoring
 accents, and take arrows or Tab, Enter and Escape. While the view is turned onto the stage,
 the keys from the game's controls play it instead. Every tool, menu item and
 link is a real button or link with a German name; status, finished buildings,

@@ -5,9 +5,10 @@
  * huts some more, stone halls and the Kloster longest. At none left it falls
  * into ruins and does nothing more: no beds, no work, no way across; a
  * worn-out dam breaks and sends the flood wave down the Sihl. Waldleute
- * repair what is paid for, rebuild ruins as building sites, and clear ruins
- * away with much work. The condition is saved as a share of the most, so a
- * change of balance keeps how worn each building looks.
+ * repair what is paid for. Ruins cannot be repaired: within reach of a
+ * Recyclinghof they are cleared away with much work. The condition is saved
+ * as a share of the most, so a change of balance keeps how worn each
+ * building looks.
  */
 import { balance, durability, kinds } from "./config";
 import type { Game } from "./sim";
