@@ -4,6 +4,8 @@ status: accepted
 date: 2026-11-17
 amends:
   - 0001-build-a-static-site-with-astro-and-daisyui.md
+amended-by:
+  - 0003-save-the-waldstatt-in-indexeddb.md
 sources:
   - src/waldstatt/Game.astro
   - src/waldstatt/game/main.ts
@@ -17,6 +19,11 @@ sources:
 ---
 
 # 0002 — Make the Waldstatt a browser game that gates its content
+
+**Amended by [ADR 0003](0003-save-the-waldstatt-in-indexeddb.md):** the
+game state moved from `localStorage` to an IndexedDB database of its own,
+`waldstatt-games`. The rules below for storage (untrusted input, a reset that
+touches only the Waldstatt's data) apply to it unchanged.
 
 ## Context
 
@@ -98,9 +105,9 @@ handles keys only inside focused widgets or the focused map, and honours
 
 ## The tell
 
-- `rg -n "localStorage|sessionStorage|serviceWorker" src` finds matches only in
-  `src/waldstatt/`, and every
-  Waldstatt key starts with `waldstatt-games/`.
+- `rg -n "localStorage|sessionStorage|indexedDB|serviceWorker" src` finds
+  matches only in `src/waldstatt/`; every Waldstatt key starts with
+  `waldstatt-games/`, and its only database is `waldstatt-games`.
 - `rg -n "from \"pixi.js\"" src` finds imports only in
   `src/waldstatt/`.
 - `ls src/pages/` shows `index.astro` and the manifest and

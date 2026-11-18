@@ -203,9 +203,33 @@
   font-weight: 700;
   white-space: nowrap;
 }
+.wg-fresh {
+  width: 0.6rem;
+  height: 0.6rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 50%;
+  background: #e8503a;
+}
+
+/* --- Resources: a bar on top on wide screens, in the menu on phones -------------- */
+
+.wg-resources {
+  position: absolute;
+  top: max(0.75rem, env(safe-area-inset-top));
+  left: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: fit-content;
+  max-width: calc(100vw - 1.5rem);
+  margin: 0 auto;
+  padding: 0.35rem 0.75rem;
+}
 .wg-supplies {
   display: flex;
-  gap: 0.6rem;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 .wg-supplies li {
@@ -213,6 +237,12 @@
   align-items: center;
   gap: 0.25rem;
   min-width: 2.75rem;
+}
+.wg-supplies li[hidden] {
+  display: none;
+}
+.wg-menu .wg-menu-supplies {
+  display: none;
 }
 .wg-tools {
   display: flex;
@@ -250,28 +280,39 @@
   flex: 1;
 }
 .wg-build-group {
-  margin-top: 0.4rem;
+  margin-top: 0.5rem;
   font-family: var(--wg-serif);
   font-size: 1rem;
   font-weight: 700;
   color: var(--wg-amber);
 }
-.wg-build-items {
-  display: grid;
-  gap: 0.35rem;
+.wg-build-group[hidden],
+.wg-build-items li[hidden] {
+  display: none;
+}
+.wg-menu .wg-build-items {
+  grid-template-columns: repeat(auto-fill, minmax(5.75rem, 1fr));
+  gap: 0.4rem;
+}
+.wg-build-items li {
+  display: flex;
 }
 .wg-build-item {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.1rem 0.75rem;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
   width: 100%;
-  padding: 0.45rem 0.6rem;
+  padding: 0.35rem 0.25rem;
   border: 2px solid var(--wg-wood-edge);
   border-radius: 0.25rem;
   background: var(--wg-parchment);
   color: var(--wg-ink);
   font: inherit;
-  text-align: left;
+  font-size: 0.8rem;
+  line-height: 1.15;
+  text-align: center;
   cursor: pointer;
 }
 .wg-build-item:hover {
@@ -280,18 +321,17 @@
 .wg-build-item[aria-disabled="true"] {
   background: var(--wg-parchment-dark);
   color: #6a5843;
-  cursor: not-allowed;
+}
+.wg-build-item[aria-disabled="true"] canvas {
+  opacity: 0.6;
+}
+.wg-build-item canvas {
+  width: 4.5rem;
+  height: 3.5rem;
 }
 .wg-build-name {
   font-weight: 700;
-}
-.wg-build-cost {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.wg-build-about {
-  grid-column: 1 / -1;
-  font-size: 0.85rem;
+  overflow-wrap: anywhere;
 }
 
 .wg-back {
@@ -299,32 +339,6 @@
   top: max(1rem, env(safe-area-inset-top));
   left: 50%;
   transform: translateX(-50%);
-}
-
-.wg-hint {
-  position: absolute;
-  top: max(1rem, env(safe-area-inset-top));
-  left: 1rem;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: start;
-  gap: 0.5rem 0.75rem;
-  max-width: min(24rem, calc(100vw - 2rem));
-  padding: 0.75rem;
-  border: 3px solid var(--wg-wood-edge);
-  border-radius: 0.375rem;
-  background: var(--wg-parchment);
-  color: var(--wg-ink);
-  box-shadow: 0 6px 0 rgb(0 0 0 / 0.35);
-}
-.wg-hint .wg-button {
-  grid-column: 2;
-  justify-self: start;
-}
-.wg-portrait {
-  width: 3.5rem;
-  height: 3.5rem;
-  border: 2px solid var(--wg-wood-edge);
 }
 
 .wg-placing {
@@ -347,9 +361,12 @@
   font-size: 0.85rem;
   color: #8c2b33;
 }
-/* While placing, the hint makes room for the placing bar. */
-.wg-placing:not([hidden]) ~ .wg-hint {
-  display: none;
+/* Below the resource bar on wide screens. */
+@media (min-width: 40.01rem) {
+  .wg-placing,
+  .wg-back {
+    top: max(4.25rem, env(safe-area-inset-top));
+  }
 }
 
 /* --- Dialogs ---------------------------------------------------------------------- */
@@ -548,12 +565,18 @@
     border-radius: 0;
     border-width: 3px 0 0;
   }
-  .wg-name {
+  .wg-resources {
     display: none;
   }
-  .wg-supplies {
-    width: 100%;
-    justify-content: space-around;
+  .wg-menu .wg-menu-supplies {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .wg-supply-name {
+    font-size: 0.8rem;
+    opacity: 0.85;
   }
   .wg-tools {
     width: 100%;
@@ -569,16 +592,17 @@
   .wg-menu {
     left: 0.5rem;
     right: 0.5rem;
-    bottom: 7rem;
+    bottom: 4.75rem;
     width: auto;
     transform: none;
   }
   .wg-menu {
-    max-height: calc(100dvh - 9rem);
+    max-height: calc(100dvh - 6.5rem);
   }
-  .wg-hint {
-    left: 0.5rem;
-    right: 0.5rem;
-    max-width: none;
-  }
+}
+.wg-supply-name {
+  display: none;
+}
+.wg-menu-supplies .wg-supply-name {
+  display: inline;
 }

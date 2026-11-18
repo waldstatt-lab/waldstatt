@@ -4,7 +4,7 @@
  * tile. The light comes from the upper left, as in the isometric art; shadows
  * fall to the lower right.
  */
-import { STAGE, type Kind } from "./config";
+import { iseColours, STAGE, type Kind } from "./config";
 import { crowd, standBands } from "./art";
 
 /** Canvas pixels per tile. */
@@ -356,6 +356,8 @@ export function planPicture(
   game?: string,
   /** The axis a bridge spans along. */
   axis: "x" | "y" = "x",
+  /** Graves in a graveyard. */
+  graves = 0,
 ): HTMLCanvasElement {
   const { element, ctx } = canvas(w, h);
   switch (kind) {
@@ -512,7 +514,162 @@ export function planPicture(
       rect(ctx, 0, 0.2, w, h - 0.4, "#c4c2b8", "#6d6b64");
       rect(ctx, 0, 0.2, w, 0.3, "#e0ded4");
       break;
+    case "steinhaus":
+      roof(ctx, 0.3, 0.3, 2.4, 2.4, "x", ...tiles);
+      rect(ctx, 0.7, 0.6, 0.3, 0.3, "#4a443c", "#2a2420");
+      break;
+    case "getreidehof":
+      for (const [x, y, fw, fh] of [
+        [0.1, 1.9, w - 0.2, h - 2.0],
+        [2.3, 0.1, w - 2.4, 1.7],
+      ]) {
+        rect(ctx, x, y, fw, fh, "#c9a94a");
+        ctx.strokeStyle = "#8a6a2c";
+        ctx.lineWidth = 0.04;
+        for (let k = x + 0.15; k < x + fw; k += 0.28) {
+          ctx.beginPath();
+          ctx.moveTo(k, y + 0.05);
+          ctx.lineTo(k, y + fh - 0.05);
+          ctx.stroke();
+        }
+      }
+      roof(ctx, 0.2, 0.2, 1.8, 1.4, "x", ...thatch);
+      break;
+    case "viehhof": {
+      rect(ctx, 0.1, 0.1, w - 0.2, h - 0.2, "#7fa84c");
+      rect(ctx, 0.1, 0.1, 2.3, 1.8, "#9c8a62");
+      roof(ctx, 0.2, 0.2, 2.1, 1.5, "x", ...tiles);
+      ctx.strokeStyle = "#7a5230";
+      ctx.lineWidth = 0.08;
+      ctx.strokeRect(0.1, 0.1, w - 0.2, h - 0.2);
+      const animal = (x: number, y: number, fill: string, r: number) => {
+        ctx.fillStyle = "rgba(0,0,0,0.25)";
+        ctx.beginPath();
+        ctx.ellipse(x + 0.05, y + 0.05, r, r * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        ctx.ellipse(x, y, r, r * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+      };
+      animal(3.2, 1.4, "#8a5a32", 0.28);
+      animal(4.2, 2.2, "#f2ece0", 0.28);
+      animal(2.9, 2.7, "#f0b3ac", 0.2);
+      animal(3.6, 3.2, "#f0b3ac", 0.2);
+      for (const [x, y] of [
+        [1.0, 2.6],
+        [1.4, 3.0],
+        [0.7, 3.2],
+        [1.8, 2.5],
+      ])
+        animal(x, y, "#fbf6e9", 0.08);
+      break;
+    }
+    case "muehle":
+      roof(ctx, 0.3, 0.3, 2.1, 2.3, "y", ...tiles);
+      rect(ctx, 2.45, 0.9, 0.2, 1.1, "#5a3a22", "#3a2614");
+      break;
+    case "baeckerei":
+      roof(ctx, 0.3, 0.3, 2.0, 2.3, "x", ...tiles);
+      ctx.fillStyle = "#b9ae94";
+      ctx.beginPath();
+      ctx.arc(2.65, 1.55, 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      rect(ctx, 0.45, 2.75, 0.95, 0.2, "#b98a52", "#4a3320");
+      break;
+    case "brauerei":
+      roof(ctx, 0.3, 0.3, 2.1, 2.1, "y", ...slate);
+      pyramid(ctx, 1.15, 1.15, 0.45, 0.45, slate);
+      for (const [x, y] of [
+        [2.6, 0.6],
+        [2.65, 1.0],
+        [2.6, 1.4],
+        [0.7, 2.7],
+      ]) {
+        ctx.fillStyle = "#9a6a3c";
+        ctx.beginPath();
+        ctx.arc(x, y, 0.13, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    case "kirche":
+      roof(ctx, 0.6, 1.7, 2.8, h - 2.0, "y", ...tiles);
+      shadow(ctx, 1.3, 0.3, 1.4, 1.4, 0.6);
+      pyramid(ctx, 1.3, 0.3, 1.4, 1.4, slate);
+      break;
+    case "friedhof": {
+      rect(ctx, 0.1, 0.1, w - 0.2, h - 0.2, "#6f9a48");
+      ctx.strokeStyle = "#cfc7b4";
+      ctx.lineWidth = 0.15;
+      ctx.strokeRect(0.15, 0.15, w - 0.3, h - 0.3);
+      ctx.fillStyle = "#24502c";
+      ctx.beginPath();
+      ctx.arc(0.6, 0.6, 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      const spots: [number, number][] = [];
+      for (let v = 0.75; v < h - 0.3; v += 0.65)
+        for (let u = 0.75; u < w - 0.3; u += 0.55)
+          if (!(u < 1.1 && v < 1.1)) spots.push([u, v]);
+      for (const [x, y] of spots.slice(0, graves))
+        rect(ctx, x - 0.12, y - 0.06, 0.24, 0.12, "#a9a497", "#6f6a60");
+      break;
+    }
+    case "ise":
+      roof(ctx, 0.3, 0.3, 2.4, 2.4, "x", ...slate);
+      rect(ctx, 0.6, 0.6, 0.4, 0.4, "#2a2420");
+      rect(ctx, 0.5, 2.62, 2.0, 0.12, iseColours.board, "#2a2420");
+      break;
+    case "brot": {
+      shadow(ctx, 0.2, 0.2, w - 0.4, h - 0.4, 0.1);
+      rect(ctx, 0.2, 0.2, w - 0.4, h - 0.4, "#b98a52", "#4a3320");
+      const colours = ["#c23b2a", "#f4d24a", "#2a62b8", "#f2f2f2"];
+      for (let k = 0; k < 8; k++)
+        rect(ctx, 0.3 + ((w - 0.6) * k) / 8, 0.25, 0.25, 0.1, colours[k % 4]);
+      for (const x of [0.8, 1.6, 2.3]) {
+        ctx.fillStyle = "#8a5a32";
+        ctx.beginPath();
+        ctx.arc(x, 0.85, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#c47a3a";
+        ctx.beginPath();
+        ctx.arc(x, 0.85, 0.12, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
   }
+  return element;
+}
+
+/** A tombstone from above. */
+export function planTomb(): HTMLCanvasElement {
+  const { element, ctx } = canvas(0.5, 0.5);
+  rect(ctx, 0.15, 0.2, 0.26, 0.16, "rgba(10, 25, 12, 0.3)");
+  rect(ctx, 0.1, 0.15, 0.26, 0.14, "#a9a497", "#6f6a60");
+  return element;
+}
+
+/** The fire in the first clearing, from above. */
+export function planFire(): HTMLCanvasElement {
+  const { element, ctx } = canvas(1, 1);
+  ctx.fillStyle = "#3a2a1e";
+  ctx.beginPath();
+  ctx.arc(0.5, 0.5, 0.3, 0, Math.PI * 2);
+  ctx.fill();
+  for (let k = 0; k < 9; k++) {
+    const a = (k / 9) * Math.PI * 2;
+    ctx.fillStyle = "#9a958a";
+    ctx.beginPath();
+    ctx.arc(0.5 + Math.cos(a) * 0.3, 0.5 + Math.sin(a) * 0.3, 0.06, 0, 7);
+    ctx.fill();
+  }
+  const g = ctx.createRadialGradient(0.5, 0.5, 0, 0.5, 0.5, 0.25);
+  g.addColorStop(0, "rgba(255, 240, 170, 1)");
+  g.addColorStop(1, "rgba(230, 100, 30, 0)");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0.5, 0.5, 0.25, 0, Math.PI * 2);
+  ctx.fill();
   return element;
 }
 
@@ -595,8 +752,8 @@ export function planTreeAtlas(): HTMLCanvasElement {
 
 export const planWorkerSize = 0.6;
 
-/** A Waldmensch from above: hat, shoulders and the axe. */
-export function planWorker(): HTMLCanvasElement {
+/** A Waldmensch from above: hat or kerchief, shoulders and the axe. */
+export function planWorker(woman = false): HTMLCanvasElement {
   const s = planWorkerSize;
   const { element, ctx } = canvas(s, s);
   const c = s / 2;
@@ -604,7 +761,7 @@ export function planWorker(): HTMLCanvasElement {
   ctx.beginPath();
   ctx.ellipse(c + 0.05, c + 0.05, 0.2, 0.12, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#a8432f";
+  ctx.fillStyle = woman ? "#3e6690" : "#a8432f";
   ctx.beginPath();
   ctx.ellipse(c, c, 0.18, 0.1, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -617,8 +774,8 @@ export function planWorker(): HTMLCanvasElement {
   ctx.fillStyle = "#c9ced6";
   ctx.fillRect(c + 0.22, c - 0.18, 0.06, 0.08);
   const g = ctx.createRadialGradient(c - 0.03, c - 0.03, 0.01, c, c, 0.11);
-  g.addColorStop(0, "#4d8a52");
-  g.addColorStop(1, "#2f5a32");
+  g.addColorStop(0, woman ? "#f0c060" : "#4d8a52");
+  g.addColorStop(1, woman ? "#c8902e" : "#2f5a32");
   ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(c, c, 0.1, 0, Math.PI * 2);

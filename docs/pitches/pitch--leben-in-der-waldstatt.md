@@ -57,6 +57,26 @@ shows the resource bar on a desktop and the build menu on a phone.
 Editable sources: [breadboard](pitch--leben-in-der-waldstatt.breadboard.excalidraw)
 and [fat-marker sketch](pitch--leben-in-der-waldstatt.fat-marker.excalidraw).
 
+**Amended during implementation.** The game follows the elements below with
+these differences, recorded in the
+[architecture documentation](../architecture/README.md#waldstatt-games):
+
+- Saves from version 2 are not converted, by the studio's decision: the
+  game was not published yet (see the rabbit hole «Saves from version 2»
+  and [ADR 0003](../architecture/decisions/0003-save-the-waldstatt-in-indexeddb.md)).
+- Whether food reaches a Waldmensch is measured against the few places food is
+  served, not kept as a grid; that is cheap enough at 300 Waldleute.
+- Waldleute do not gather in front of the Brot auswerfen; each loaf goes to
+  the hungriest Waldmensch within eight tiles of the stage.
+- No test runner was added yet. The balance was played through by driving the
+  rules in a browser; a headless balance run remains open.
+- The ISE AG's logo and colours are not in the game yet: its website could not
+  be reached to take them from. The forge carries the name «ISE AG» on a
+  board, and its colours sit in one place (`iseColours` in `config.ts`) to be
+  replaced with the ISE AG's own.
+- Tearing the dam down needs the usual second tap and asks nothing more.
+- The fire lies on dry ground in the first clearing, which the Alp crosses.
+
 ## Decisions taken while shaping
 
 The studio settled these when shaping challenged the first request:

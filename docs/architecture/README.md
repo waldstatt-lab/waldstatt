@@ -33,8 +33,13 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/config.ts` | The balance table: costs, footprints, build times, speeds, stock limits, the hidden texts and where they lie |
 | `game/world.ts` | The world: the forest from a fixed seed, and the water pages, loaded as they come into view and rasterized into tiles: water, lakes by number, the palisade and the land abroad |
 | `game/iso.ts` | The projections between tiles and the screen: the isometric view, the top-down plan, and the blend between them |
-| `game/state.ts` | The save in `localStorage`: versioned JSON, validated on load, reset by key prefix |
-| `game/sim.ts` | The rules: the tools on the ground, marking and felling, the hidden texts, Waldleute and their tasks, bridges, ports and ships, building sites, sheep, the crews of quarries and the printing house, the ravens, the flood, the Waldmensch's hints |
+| `game/state.ts` | The save in IndexedDB ([ADR 0003](decisions/0003-save-the-waldstatt-in-indexeddb.md)): the settlement, the people and one record per chunk, validated on load, written in part, reset by deleting the database |
+| `game/sim.ts` | The rules: the tools on the ground, marking and felling, the hidden texts, Waldleute and their tasks (walking back to eat included), bridges, ports and ships, building sites, placing rules, what the build menu shows, ruins and repair, the ravens; it steps the systems below in turn |
+| `game/economy.ts` | The goods: the shared stock and its limits, the crews and recipes of the producing buildings, beer for the Spielhäuser and the theatre, the upkeep of the Klause, the churches and the Kloster, the Brot auswerfen |
+| `game/people.ts` | The Waldleute's lives: ages, meals and where food reaches, children, deaths, graves and tombstones, beds, the fire and the first pair |
+| `game/mood.ts` | Motivation: where it tends with what stands, passing events, and the work speed it sets |
+| `game/growth.ts` | The forest growing back: seedlings on felled ground beside forest, kept down where Waldleute walk |
+| `game/flood.ts` | The Sihlsee filling and draining tile by tile, buildings sinking, and the flood wave down the Sihl |
 | `game/nav.ts` | Finding ways: the Waldleute's search over open ground and crossings by ship, straightening ways, and ships' routes over their lake |
 | `game/texts.ts` | Reads the templates and splits each text into sections at its `<h2>` headings |
 | `game/art.ts` | The painted art for the isometric view on canvases at twice the resolution: trees, Waldleute, ravens, the axe and the saw, buildings (a house of its own for each game, with the game's name painted on its front), the amphitheatre in two parts, ground textures |
@@ -137,32 +142,83 @@ the lake comes, takes everyone waiting for the same crossing, sails over the
 lake's water to the other port and returns to its own. Ships under way are not
 saved; after a reload they lie at their ports.
 
-A **Steinbruch** gives stones, the **Druckerei** books. Tapping a finished
-quarry or printing house shows a bar with − and + to put Waldleute in, up to
-four; the idle and the nearest go first, walk there and work: in a quarry they
-break stones at its rock face, one every five seconds each, up to a stock of
-300; in the printing house they print books at its door, one every eight
-seconds each, from one parchment and two wood, up to a stock of 20. They do no
-other work until they are taken out again. Once a
-quarry stands, the tool **Pflastern** plans cobbles like the saw marks trees:
-tap a tile, or drag over an area, of cleared, dry ground that is not built on,
-texts included. Waldleute lay one stone per planned tile, as long as there
-are stones, and walk half again as fast on cobbles. Planned tiles show a pale
-frame until they are paved.
-Buildings stand only on cleared ground: a footprint with trees shows red,
-«Zuerst die Bäume fällen». Each finished hut adds a Waldmensch, up to 16. Sheep
-pastures grow parchment, quarries and the printing house work while the page
-is open; nothing happens while it is closed or hidden. The first buildings
-take wood, and parchment for the Spielhaus; the larger ones also stones and
-books: the printing house, the libraries, the theatre, the Kloster, whose
-library takes the most books, the dam and the ports (`config.ts`). The build
-menu lists every building with its costs; those that cannot be built yet stay
-listed with the reason, and the menu updates in place, so it keeps its scroll
-position. Content buildings are one of a kind (per game for a game's
-buildings). Nothing on the map opens a panel or dialog: a tap on a building
-either turns the view to its text (below) or shows a short status label over it
-for a few seconds. Choosing the dam names the buildings that will drown in the
-placing bar; only «Neu beginnen» in the menu asks for confirmation.
+**Goods and crews.** Holz, Steine, Pergament, Bücher, Getreide, Mehl, Brot,
+Fleisch and Bier are one shared stock with a limit each; nothing is carried,
+and what a building makes is in stock at once (`economy.ts`). The producing
+buildings take a crew of up to four: the Schafweide (parchment), Getreidehof
+(grain), Viehhof (meat), Mühle (grain to flour, only on a river bank),
+Bäckerei (flour to bread), Brauerei (grain to beer), Steinbruch (stones) and
+Druckerei (parchment and wood to books). A new one asks for a full crew;
+tapping a finished one shows a bar with − and + to change it. Crews are filled
+from the idle and the nearest adults, always leaving one free to fell and
+build, and work only once there; each works faster with motivation. Once
+there are stones, the tool **Pflastern** plans cobbles like the saw marks
+trees: tap a tile, or drag over an area, of cleared, dry ground that is not
+built on, texts included. Waldleute lay one stone per planned tile, as long as
+there are stones, and walk half again as fast on cobbles. Planned tiles show a
+pale frame until they are paved.
+
+**The Waldleute live** (`people.ts`). Each is a person with a position, an
+age, a sex, hunger and work; children (under 14) do not work, and a year
+passes in 30 seconds of play. The game starts with a woman and a man by a fire
+in the first clearing, with some meat. Waldleute eat a meal every 90 seconds:
+within 1 km of a Viehhof or a Bäckerei, or of the fire until the first of
+them stands, food reaches them where they are; farther out, a hungry
+Waldmensch leaves their work and walks back. Five minutes hungry, or old enough
+(60 to 80 years), they die. A woman and a man of the right age have children
+now and then while food is plenty, sooner with beer in stock, born by the
+nearest house. Huts give four beds, the Steinhaus twelve, the fire two; more
+Waldleute than beds lowers motivation and makes the years pass faster. Who dies
+within 1 km of a church or the Kloster whose graveyard has room is buried
+there; elsewhere a tombstone stays, and motivation drops for a while. A
+settlement can die out; nothing brings new Waldleute but children. Children are
+drawn smaller, the old greyer and the hungry paler.
+
+**Motivation** («Stimmung», `mood.ts`) sets how fast everybody fells, builds,
+paves and produces, from half to one and a half times. It drifts towards a
+level raised by working churches and the Kloster, the ISE AG and Spielhäuser
+with beer, and lowered by Spielhäuser without beer, overcrowding and hunger;
+opening a game from a Spielhaus, the Brot auswerfen and lonely deaths move it
+for a while. The Klause, the churches and the Kloster use food and books every
+minute, but only goods the settlement can already make; without them they
+decay, lose their effect below half (the raven leaves), and fall into ruins,
+which a tap repairs for half the costs. A Spielhaus and the theatre drink beer;
+without it they are shut, and their play link and stage do not open. The
+Brot auswerfen waits for 100 loaves, then throws them one by one to the
+hungriest nearby and takes itself down.
+
+**The forest grows back** (`growth.ts`): felled ground beside forest grows
+seedlings, drawn small and light, which become trees after four minutes. They
+never grow on cobbles, water, buildings, tombstones, by the fire, or where a
+Waldmensch walked in the last two minutes, so ways stay open. Over a text they
+cover it again unless it is cobbled; a game whose scroll once lay free stays
+explored.
+
+**Building.** Buildings stand only on cleared ground: a footprint with trees
+shows red, «Zuerst die Bäume fällen». Some have rules of their own: a church
+stands more than 1 km from every other church and Kloster not under water, a
+graveyard right beside a church or the Kloster, the ISE AG in the first
+clearing, the Mühle on a river bank. The build menu shows each building as a
+small picture, painted by the same code as the map, and its name; costs show
+only while placing. It shows only what has appeared, and what appeared stays:
+the Mühle with a Getreidehof, the Bäckerei with a Getreidehof and 10 Waldleute,
+the Brauerei with a Getreidehof and 20, a game's Spielhaus once its scroll lay
+free and a Brauerei stands, its Bibliothek with its Spielhaus, the theatre with
+a Brauerei and a Spielhaus, churches with a Druckerei and 20 Waldleute, the
+graveyard with a church or the Kloster, the Kloster with a Druckerei and 50,
+the ISE AG with a Druckerei, the Brot auswerfen with a Bäckerei, the dam once
+every tree on its site is felled, and the Steinhaus at 100 Waldleute. A dot on
+«Bauen» marks that something appeared, until the menu is opened. Content
+buildings are one of a kind (per game for a game's buildings). Nothing on the
+map opens a panel or dialog: a tap on a building turns the view to its text or
+stage, opens its game or source, sets its crew, repairs it, or shows a short
+status label for a few seconds. Nothing explains the game: there are no hints,
+and announcements tell only what happened. Only «Neu beginnen» in the menu asks
+for confirmation.
+
+**Resources.** On wide screens a bar along the top shows the goods the
+settlement has had, the Waldleute and beds, and motivation; on phones the same
+list is in the menu, and only the toolbox stays at the bottom.
 
 **Content on the map.** The texts are not built; they lie hidden under the
 forest and are explored by felling it. The Ortstafel (the name) and the
@@ -234,26 +290,39 @@ reading zoom, it turns back to the isometric view where and as high as it is,
 and the button «Zurück zur Karte» or Escape turns it back to where it was. On the stage, taps on its signs press
 them (held while the pointer stays down), the keys from the controls table
 play, and the long sign opens the real game in a new tab. The monastery and
-Meinrads Klause are drawn without religious symbols. The dam can only stand where the Sihl leaves
-the basin; choosing it shows the future Sihlsee. When it is finished, the basin
-floods for good: trees in it disappear, and drowned buildings stay as ruins
-under the water.
+Meinrads Klause, the churches and the graveyards are drawn without religious
+symbols; graves are tombstones. The dam can only stand where the Sihl leaves
+the basin; choosing it shows nothing of the lake to come. While it stands, the
+water spreads from the Sihl through the basin in a fixed order, tile by tile,
+until the Sihlsee is full after 15 minutes (`flood.ts`): trees in it die,
+buildings it reaches sink over a minute and a half, and Waldleute step back
+from it. In the full lake only the towers of drowned churches and of the
+Kloster rise above the water; drowned buildings no longer count, so a new
+church or Kloster may be built. Tearing the dam down sends a wave down the Sihl
+towards the Zürichsee: its band, two and a half tiles each side of the river
+from the dam on, is found from the water pages, which load for it; the wave
+runs five tiles a second, destroys the buildings it reaches and stays a minute
+and a half on each tile. The lake drains in three minutes; churches and the
+Kloster that lay in it come back as ruins, the rest is gone.
 
-**State and offline.** The save is one versioned JSON document under
-`waldstatt-games/save`: supplies, felled trees as a bitset per chunk, marks,
-buildings with the crew of a quarry or the printing house, the flood, the camera, the dismissed hint,
-the tools picked up, where the saw lies, the seed and positions of the hidden
-texts, stones, and cobbled and planned tiles (cobbles as a bitset per chunk).
-Saves from before stones and cobbles load without them, and a save's prints,
-from before the printing house made books, load as books. A save
-from before the move to Holzrüti (version 1) starts a new forest with a
-notice. A text's length follows its current text on load, so changed texts
-need no migration. The game
-saves two seconds after a change and when the page is hidden. The
-organization's Pages sites share one origin and its `localStorage` (the games
-save under `moto-devil/` and `car-drive/`), so the save is validated on load, a
-broken save starts a new forest with a notice, and «Neu beginnen» removes only
-keys starting with `waldstatt-games/`. The manifest's start URL and scope and
+**State and offline.** The save is in the IndexedDB database
+`waldstatt-games` ([ADR 0003](decisions/0003-save-the-waldstatt-in-indexeddb.md)):
+a record with the settlement (stock, marks and planned cobbles, buildings with
+their crew, condition, graves and how far they sank, the flood's level and the
+wave, the camera, the tools, where the saw lies, the seed and positions of the
+hidden texts, the explored texts, what appeared in the build menu, the goods
+seen, motivation and its passing events, and the tombstones), a record with
+the people, where they stand and how they are, and one record per chunk with
+its felled trees and cobbles as bitsets and its seedlings as bytes. What a
+Waldmensch is doing is not saved; they look for work anew. A text's length
+follows its current text on load, so changed texts need no migration. The game
+saves two seconds after a change, every ten seconds while the page shows, and
+when it is hidden; only chunks that changed are written. The organization's
+Pages sites share one origin (the games save under `moto-devil/` and
+`car-drive/` in `localStorage`), so the save is validated on load, a broken
+save starts a new forest with a notice, and «Neu beginnen» deletes the
+database and any old keys starting with `waldstatt-games/`. The installed app
+asks the browser to keep its storage. The manifest's start URL and scope and
 the service worker's scope are the base path. The
 worker's cache is named after the build; it fetches the page network-first and
 serves files under the base path and Astro's `_astro/` assets cache-first,
@@ -266,8 +335,8 @@ cursor tile, Shift and arrows pan, + and − zoom, Enter or Space applies the to
 or opens a building, Escape cancels. While the view is turned onto the stage,
 the keys from the game's controls play it instead. Every tool, menu item and
 link is a real button or link with a German name; status, finished buildings,
-the stage's status while somebody plays and the Waldmensch's hints are
-announced politely,
+the stage's status while somebody plays, and events such as births, deaths
+and stocks running out are announced politely,
 and the texts on the map are in the page as a region «Im Wald». With reduced
 motion Waldleute do not walk or swing their tools, ships do not sail visibly,
 and the previews play no demonstration. Screen-reader users and search engines can hardly reach the

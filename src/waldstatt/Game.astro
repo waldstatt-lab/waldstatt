@@ -9,9 +9,18 @@
  */
 import { render } from "astro:content";
 import { getGames } from "../lib/games";
+import { goods } from "./game/config";
 import Forest from "./Forest.astro";
 import Icon from "./Icon.astro";
+import type { IconName } from "./icons";
 import meta from "./meta";
+
+/** The supplies, the Waldleute and motivation, as the resource bar shows them. */
+const resources: { key: string; name: string; icon: IconName }[] = [
+  ...goods.map((g) => ({ key: g.key, name: g.name, icon: g.key as IconName })),
+  { key: "people", name: "Waldleute / Betten", icon: "workers" },
+  { key: "mood", name: "Stimmung", icon: "mood" },
+];
 
 const games = await getGames();
 const rendered = await Promise.all(
@@ -55,18 +64,22 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
   ></div>
   <p id="wg-map-help" hidden>
     Pfeiltasten bewegen die Auswahl, Umschalt mit Pfeiltasten verschiebt die
-    Karte, Plus und Minus zoomen. Die Eingabetaste wendet das Werkzeug an, hebt
-    ein Werkzeug auf, liest eine gefundene Schrift oder öffnet ein Gebäude.
-    Escape bricht ab.
+    Karte, Plus und Minus zoomen. Die Eingabetaste wendet das Werkzeug an oder
+    tippt an, was unter der Auswahl liegt. Escape bricht ab.
   </p>
 
-  <aside class="wg-hint" data-hint hidden aria-label="Der Waldmensch">
-    <Icon name="waldmensch" class="wg-portrait" />
-    <p data-hint-text></p>
-    <button type="button" class="wg-button" data-hint-close>
-      Verstanden
-    </button>
-  </aside>
+  <div class="wg-panel wg-resources" data-resources data-ready-show hidden>
+    <p class="wg-name">{meta.name}</p>
+    <ul class="wg-supplies" aria-label="Vorrat">
+      {resources.map((r) => (
+        <li title={r.name} data-resource={r.key} hidden>
+          <Icon name={r.icon} />
+          <span data-value={r.key}>0</span>
+          <span class="sr-only"> {r.name}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
 
   <div class="wg-placing" data-placing hidden>
     <p>
@@ -121,11 +134,20 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
     hidden
   >
     <h2>Bauen</h2>
-    <ul class="wg-build-list" data-build-list></ul>
+    <div class="wg-build-list" data-build-list></div>
   </div>
 
   <div class="wg-panel wg-menu wg-main" id="wg-main-menu" data-main-menu hidden>
     <h2>Menü</h2>
+    <ul class="wg-supplies wg-menu-supplies" aria-label="Vorrat">
+      {resources.map((r) => (
+        <li title={r.name} data-resource={r.key} hidden>
+          <Icon name={r.icon} />
+          <span data-value={r.key}>0</span>
+          <span class="wg-supply-name">{r.name}</span>
+        </li>
+      ))}
+    </ul>
     <ul>
       <li>
         <button type="button" class="wg-button" data-act="home">
@@ -160,34 +182,6 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
     data-ready-show
     hidden
   >
-    <p class="wg-name">{meta.name}</p>
-    <ul class="wg-supplies" aria-label="Vorrat">
-      <li title="Holz">
-        <Icon name="wood" />
-        <span data-supply="wood">0</span>
-        <span class="sr-only"> Holz</span>
-      </li>
-      <li title="Pergament">
-        <Icon name="parchment" />
-        <span data-supply="parchment">0</span>
-        <span class="sr-only"> Pergament</span>
-      </li>
-      <li title="Steine" data-stones hidden>
-        <Icon name="stones" />
-        <span data-supply="stones">0</span>
-        <span class="sr-only"> Steine</span>
-      </li>
-      <li title="Bücher" data-books hidden>
-        <Icon name="books" />
-        <span data-supply="books">0</span>
-        <span class="sr-only"> Bücher</span>
-      </li>
-      <li title="Waldleute">
-        <Icon name="workers" />
-        <span data-supply="workers">1</span>
-        <span class="sr-only"> Waldleute</span>
-      </li>
-    </ul>
     <div class="wg-tools">
       <button
         type="button"
@@ -232,6 +226,9 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
         aria-controls="wg-build-menu"
       >
         <Icon name="build" /> Bauen
+        <span class="wg-fresh" data-fresh hidden>
+          <span class="sr-only"> (neu)</span>
+        </span>
       </button>
       <button
         type="button"

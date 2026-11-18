@@ -1,22 +1,29 @@
 /**
- * The HTML interface over the map: the toolbox with supplies and tools
- * (axe, saw, tearing down), the build menu, placing buildings, the
- * Waldmensch's hints and the announcements for screen readers. Things on the
- * map react directly, without panels or dialogs: a found text or the stage
- * turns the view top-down onto it, a Spielhaus opens its game in a new tab,
- * the axe and the saw are picked up, other buildings show a short status
- * label, and tearing down takes a second tap. Only «Neu beginnen» in
- * the menu asks first. Nodes are created with the DOM API, never from HTML
- * strings.
+ * The HTML interface over the map: the resource bar (in the menu on phones),
+ * the toolbox with the tools (axe, saw, paving, tearing down), the build menu
+ * with a picture and the name of each building it shows, placing buildings,
+ * the crews of producing buildings, and the announcements for screen
+ * readers. Nothing explains the game: buildings show their state, and events
+ * are announced. Things on the map react directly, without panels or
+ * dialogs: a found text or the stage turns the view top-down onto it, a
+ * Spielhaus with beer opens its game in a new tab, a ruin is repaired, other
+ * buildings show a short status label, and tearing down takes a second tap.
+ * Only «Neu beginnen» in the menu asks first. Nodes are created with the DOM
+ * API, never from HTML strings.
  */
+import { buildingPicture } from "./art";
 import {
   balance,
   crewKinds,
+  goodKeys,
+  goodMax,
+  goodName,
   groups,
   kinds,
+  recipes,
   STAGE,
-  supplies,
   type Cost,
+  type Good,
   type Kind,
 } from "./config";
 import type { MapHandlers, Tile } from "./input";
@@ -25,7 +32,6 @@ import type { WorldLayer } from "./overlay";
 import type { Renderer } from "./render";
 import {
   compass,
-  hintCount,
   isExplored,
   isFound,
   type Game,
@@ -100,9 +106,8 @@ export class Ui {
   private mainMenu: HTMLElement;
   private placingBar: HTMLElement;
   private backBar: HTMLElement;
-  private hint: HTMLElement;
   private crewBar: HTMLElement;
-  /** The quarry or printing house whose crew the crew bar sets. */
+  /** The producing building whose crew the crew bar sets. */
   private crewFor: Building | null = null;
   private live: HTMLElement;
   private confirmDialog: HTMLDialogElement;
@@ -110,8 +115,11 @@ export class Ui {
     kind: Kind;
     game?: string;
     button: HTMLButtonElement;
-    about: HTMLElement;
+    item: HTMLElement;
+    picture: HTMLCanvasElement;
+    drawn: boolean;
   }[] = [];
+  private menuGroups: { element: HTMLElement; kinds: Kind[] }[] = [];
 
   constructor(private o: UiOptions) {
     const root = o.root;
@@ -120,7 +128,6 @@ export class Ui {
     this.mainMenu = need(root, "[data-main-menu]");
     this.placingBar = need(root, "[data-placing]");
     this.backBar = need(root, "[data-back]");
-    this.hint = need(root, "[data-hint]");
     this.live = need(root, "[data-live]");
     this.confirmDialog = need(root, "[data-confirm]");
     this.crewBar = need(root, "[data-crew]");
@@ -162,13 +169,6 @@ export class Ui {
       if (action !== "zoom-in" && action !== "zoom-out") this.closeMenus();
       this.menuAction(action);
     });
-    need(this.hint, "[data-hint-close]").addEventListener("click", () => {
-      o.game.state.hint = o.game.currentHint() + 1;
-      this.hintSeen = "";
-      this.hint.hidden = true;
-      o.moved();
-      this.mapHost().focus();
-    });
     need(this.placingBar, "[data-place-here]").addEventListener("click", () => {
       if (this.placing?.at) this.tryPlace(this.placing.at);
     });
@@ -204,25 +204,24 @@ export class Ui {
     });
     this.renderBuildMenu();
     this.items();
-    this.updateHint();
+    this.unlocked();
   }
 
-  /**
-   * Shows the tools picked up so far, paving and the stones once a quarry
-   * stands, and the books once the printing house stands.
-   */
+  /** Something appeared in the build menu: the Bauen button shows it. */
+  unlocked() {
+    need(this.toolbox, "[data-fresh]").hidden = !this.o.game.state.fresh;
+    if (!this.buildMenu.hidden) this.updateBuildMenu();
+  }
+
+  /** Shows the tools picked up so far, and paving once there are stones. */
   items() {
     for (const tool of ["axe", "saw"] as const) {
       const button = need(this.toolbox, `[data-tool=${tool}]`);
       button.hidden = !this.o.game.state.tools[tool];
     }
     const g = this.o.game;
-    const stones = g.done("steinbruch") || g.state.stones > 0;
-    need(this.toolbox, "[data-tool=pave]").hidden = !stones;
-    need(this.toolbox, "[data-stones]").hidden = !stones;
-    need(this.toolbox, "[data-books]").hidden = !(
-      g.done("druckerei") || g.state.books > 0
-    );
+    need(this.toolbox, "[data-tool=pave]").hidden = !g.state.seen.has("stones");
+    this.suppliesDirty = true;
   }
 
   // --- The crews of quarries and the printing house ---------------------------
@@ -242,32 +241,33 @@ export class Ui {
   }
 
   /**
-   * Shows how many Waldleute a quarry or the printing house asks for, how
-   * many are there, and what the printing house lacks.
+   * Shows how many Waldleute a producing building asks for, how many are
+   * there, what it takes and what is in stock.
    */
   private updateCrew(announce = false) {
     const b = this.crewFor;
     if (!b) return;
     const g = this.o.game;
-    const s = g.state;
+    const recipe = recipes[b.kind];
+    if (!recipe) return;
     const want = b.crew ?? 0;
     const there = g.crewOf(b);
-    const press = b.kind === "druckerei";
-    const [one, many, what] = press
-      ? ["druckt", "drucken", "Bücher"]
-      : ["bricht", "brechen", "Steine"];
-    let text =
+    let text = `${kinds[b.kind].name}: ${
       want === 0
-        ? `${kinds[b.kind].name}: niemand ${one} ${what}. Schick Waldleute hinein.`
-        : `${kinds[b.kind].name}: ${want === 1 ? `ein Waldmensch ${one}` : `${want} Waldleute ${many}`} ${what}.`;
+        ? "niemand arbeitet hier."
+        : want === 1
+          ? "ein Waldmensch arbeitet hier."
+          : `${want} Waldleute arbeiten hier.`
+    }`;
     if (there < want)
       text += ` ${there === 0 ? "Niemand ist" : `Erst ${there} sind`} frei.`;
-    if (press) {
-      text += ` Ein Buch braucht ${balance.bookParchment} Pergament und ${balance.bookWood} Holz.`;
-      if (s.parchment < balance.bookParchment) text += " Es fehlt Pergament.";
-      else if (s.wood < balance.bookWood) text += " Es fehlt Holz.";
-      text += ` Vorrat: ${s.books} von ${balance.maxBooks} Büchern.`;
-    } else text += ` Vorrat: ${s.stones} Steine.`;
+    const lacking = (Object.keys(recipe.takes) as Good[]).filter(
+      (key) => g.state.stock[key] < (recipe.takes[key] ?? 0),
+    );
+    if (lacking.length)
+      text += ` Es fehlt ${lacking.map((key) => goodName(key)).join(" und ")}.`;
+    for (const key of Object.keys(recipe.makes) as Good[])
+      text += ` ${goodName(key)}: ${g.state.stock[key]} von ${goodMax(key)}.`;
     const p = need(this.crewBar, "[data-crew-text]");
     if (p.textContent !== text) p.textContent = text;
     need<HTMLButtonElement>(this.crewBar, "[data-crew-step='-1']").disabled =
@@ -302,23 +302,34 @@ export class Ui {
       if (r.camera.zoom < this.reading.zoom * leaveBelow)
         this.leaveReading(true);
     }
-    if (!this.suppliesDirty) return;
+    // Motivation and the Waldleute change all the time; a few times a second
+    // is enough for them.
+    this.clock = (this.clock + 1) % 15;
+    if (!this.suppliesDirty && this.clock) return;
     this.suppliesDirty = false;
-    const s = this.o.game.state;
+    const g = this.o.game;
+    const s = g.state;
     const values: Record<string, string> = {
-      wood: String(s.wood),
-      parchment: String(s.parchment),
-      books: String(s.books),
-      workers: String(this.o.game.workers.length),
-      stones: String(s.stones),
+      people: `${g.workers.length} / ${g.people.beds()}`,
+      mood: `${Math.round(s.mood)} %`,
     };
-    for (const element of this.toolbox.querySelectorAll<HTMLElement>(
-      "[data-supply]",
-    ))
-      element.textContent = values[element.dataset.supply ?? ""] ?? "";
+    for (const key of goodKeys) values[key] = String(s.stock[key]);
+    const shown = (key: string) =>
+      key === "people" || key === "mood" || s.seen.has(key as Good);
+    for (const element of this.o.root.querySelectorAll<HTMLElement>(
+      "[data-resource]",
+    )) {
+      const key = element.dataset.resource ?? "";
+      element.hidden = !shown(key);
+      const value = element.querySelector<HTMLElement>("[data-value]");
+      if (value && value.textContent !== values[key])
+        value.textContent = values[key] ?? "";
+    }
     if (!this.buildMenu.hidden) this.updateBuildMenu();
     this.updateCrew();
   }
+
+  private clock = 0;
 
   // --- Tools and menus ------------------------------------------------------
 
@@ -338,25 +349,26 @@ export class Ui {
         String(button.dataset.tool === this.tool),
       );
     this.mapHost().dataset.mode = this.tool;
-    if (this.tool === "axe")
-      this.announce("Axt: Bäume antippen, die fallen sollen.");
-    if (this.tool === "saw")
-      this.announce("Säge: über die Bäume ziehen, die fallen sollen.");
-    if (this.tool === "demolish")
-      this.announce(
-        "Abreissen: ein Gebäude zweimal antippen. Die Hälfte der Baustoffe kommt zurück.",
-      );
-    if (this.tool === "pave")
-      this.announce(
-        "Pflastern: freien Boden antippen oder darüber ziehen. Jedes Feld braucht einen Stein.",
-      );
+    const names: Record<Tool, string> = {
+      none: "Kein Werkzeug.",
+      axe: "Axt.",
+      saw: "Säge.",
+      pave: "Pflastern.",
+      demolish: "Abreissen.",
+    };
+    this.announce(names[this.tool]);
   }
 
   private toggleMenu(menu: HTMLElement, button: HTMLButtonElement) {
     const open = menu.hidden;
     this.closeMenus();
     if (!open) return;
-    if (menu === this.buildMenu) this.updateBuildMenu();
+    if (menu === this.buildMenu) {
+      this.o.game.state.fresh = false;
+      this.unlocked();
+      this.updateBuildMenu();
+    }
+    if (menu === this.mainMenu) this.suppliesDirty = true;
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
     menu.querySelector<HTMLElement>("button, a")?.focus();
@@ -395,7 +407,9 @@ export class Ui {
         title: "Neu beginnen?",
         text: "Der Wald wächst nach, alle Gebäude und Vorräte gehen verloren. Die Spielstände der Spiele bleiben.",
         yes: "Alles löschen",
-      }).then((yes) => yes && this.o.reset());
+      }).then((yes) => {
+        if (yes) this.o.reset();
+      });
     }
   }
 
@@ -411,66 +425,115 @@ export class Ui {
 
   /** Supplies as text, such as «20 Holz, 12 Steine»; empty parts are left out. */
   private costText(c: Cost): string {
-    return supplies
-      .filter(({ key }) => c[key] > 0)
-      .map(({ key, name }) => `${c[key]} ${name}`)
+    return goodKeys
+      .filter((key) => (c[key] ?? 0) > 0)
+      .map((key) => `${c[key]} ${goodName(key)}`)
       .join(", ");
   }
 
-  /** Builds the menu once; updateBuildMenu() keeps it current in place. */
+  /**
+   * Builds the menu once, as a grid of pictures and names per group;
+   * updateBuildMenu() shows what is available and keeps it current in place.
+   */
   private renderBuildMenu() {
     const list = need(this.buildMenu, "[data-build-list]");
     list.replaceChildren();
     this.menuItems = [];
+    this.menuGroups = [];
     for (const group of groups) {
       const items = el("ul", { className: "wg-build-items" });
+      const kindsHere: Kind[] = [];
       for (const [kind, info] of Object.entries(kinds) as [
         Kind,
         (typeof kinds)[Kind],
       ][]) {
         if (info.group !== group) continue;
+        kindsHere.push(kind);
         const games =
           info.limit === "game" ? this.o.games.map((g) => g.id) : [undefined];
         for (const game of games) {
-          const about = el("span", { className: "wg-build-about" });
+          const picture = el("canvas", { width: 144, height: 112 });
+          picture.setAttribute("aria-hidden", "true");
           const button = el(
             "button",
             { type: "button", className: "wg-build-item" },
+            picture,
             el("span", { className: "wg-build-name" }, this.label(kind, game)),
-            el(
-              "span",
-              { className: "wg-build-cost" },
-              this.costText(kinds[kind].cost),
-            ),
-            about,
           );
           button.dataset.build = `${kind}:${game ?? ""}`;
           button.addEventListener("click", () => {
             const why = this.o.game.unavailable(kind, game);
-            if (why) return this.announce(why);
+            if (why) return this.announce(`${this.label(kind, game)}: ${why}`);
             this.closeMenus();
             this.startPlacing(kind, game);
           });
-          items.append(el("li", {}, button));
-          this.menuItems.push({ kind, game, button, about });
+          const item = el("li", {}, button);
+          items.append(item);
+          this.menuItems.push({
+            kind,
+            game,
+            button,
+            item,
+            picture,
+            drawn: false,
+          });
         }
       }
-      list.append(
-        el("li", {}, el("h3", { className: "wg-build-group" }, group), items),
+      const element = el(
+        "section",
+        {},
+        el("h3", { className: "wg-build-group" }, group),
+        items,
       );
+      list.append(element);
+      this.menuGroups.push({ element, kinds: kindsHere });
     }
     this.updateBuildMenu();
   }
 
-  /** Updates availability and reasons without touching scroll or focus. */
+  /** Paints a building's picture small for its place in the menu. */
+  private drawPicture(entry: (typeof this.menuItems)[number]) {
+    if (entry.drawn) return;
+    entry.drawn = true;
+    const info = kinds[entry.kind];
+    const w = entry.kind === "bruecke" ? 3 : info.w;
+    const { canvas } = buildingPicture(
+      entry.kind,
+      w,
+      info.h,
+      entry.game,
+      "x",
+      this.gameTitle(entry.game),
+    );
+    const ctx = entry.picture.getContext("2d");
+    if (!ctx) return;
+    const { width, height } = entry.picture;
+    const k = Math.min(width / canvas.width, height / canvas.height);
+    ctx.drawImage(
+      canvas,
+      (width - canvas.width * k) / 2,
+      (height - canvas.height * k) / 2,
+      canvas.width * k,
+      canvas.height * k,
+    );
+  }
+
+  /** Shows what is available and marks what cannot be built now. */
   private updateBuildMenu() {
-    for (const item of this.menuItems) {
-      const reason = this.o.game.unavailable(item.kind, item.game);
-      const text = reason ?? kinds[item.kind].about;
-      if (item.about.textContent !== text) item.about.textContent = text;
-      if (reason) item.button.setAttribute("aria-disabled", "true");
-      else item.button.removeAttribute("aria-disabled");
+    const g = this.o.game;
+    const shown = new Set<Kind>();
+    for (const entry of this.menuItems) {
+      const visible = g.shown(entry.kind, entry.game);
+      entry.item.hidden = !visible;
+      if (!visible) continue;
+      shown.add(entry.kind);
+      this.drawPicture(entry);
+      if (g.unavailable(entry.kind, entry.game))
+        entry.button.setAttribute("aria-disabled", "true");
+      else entry.button.removeAttribute("aria-disabled");
     }
+    for (const group of this.menuGroups)
+      group.element.hidden = !group.kinds.some((k) => shown.has(k));
   }
 
   // --- Placing ----------------------------------------------------------------
@@ -481,27 +544,15 @@ export class Ui {
     this.placing = { kind, game };
     this.mapHost().dataset.mode = "place";
     const name = this.label(kind, game);
-    let text = `${name} platzieren: auf freien Boden tippen oder klicken.`;
-    if (kind === "bruecke")
-      text = `${name}: auf einen Fluss tippen. Sie reicht von Ufer zu Ufer.`;
-    if (kind === "hafen") text = `${name}: an das Ufer eines Sees setzen.`;
-    if (kind === "schiff")
-      text = `${name}: aufs Wasser neben einen fertigen Hafen setzen.`;
-    if (kind === "damm") {
-      const drowned = this.o.game.wouldDrown();
-      text = `${name}: nur dort, wo die Sihl das Tal verlässt. Blau wird der Sihlsee`;
-      text += drowned.length
-        ? ` – darin gehen unter: ${drowned.map((b) => this.label(b.kind, b.game)).join(", ")}.`
-        : ".";
-    }
+    const cost = this.costText(kinds[kind].cost);
+    const text = cost ? `${name}: ${cost}.` : `${name}.`;
     need(this.placingBar, "[data-placing-text]").textContent = text;
     this.placingBar.hidden = false;
     const r = this.o.renderer;
     if (kind === "damm") {
-      // Far enough out to see the dam and most of the future lake.
-      r.setLakePreview(true);
-      r.camera.zoom = r.clampZoom(Math.min(r.camera.zoom, 1.25));
-      r.centerOn(damSite.x + damSite.w / 2 + 6, damSite.y + 9);
+      // The dam has its one site.
+      r.camera.zoom = r.clampZoom(Math.min(r.camera.zoom, 1.6));
+      r.centerOn(damSite.x + damSite.w / 2, damSite.y + damSite.h / 2);
       this.o.moved();
       this.ghostAt({ x: damSite.x, y: damSite.y });
     } else {
@@ -509,9 +560,7 @@ export class Ui {
       const centre = r.screenToTile(box.width / 2, box.height / 2);
       this.ghostAt({ x: Math.floor(centre.x), y: Math.floor(centre.y) });
     }
-    this.announce(
-      `${text} Mit Pfeiltasten verschieben, Eingabetaste baut, Escape bricht ab.`,
-    );
+    this.announce(text);
     this.mapHost().focus();
   }
 
@@ -557,7 +606,6 @@ export class Ui {
     this.placing = null;
     this.placingBar.hidden = true;
     this.o.renderer.setGhost(null);
-    this.o.renderer.setLakePreview(false);
     this.mapHost().dataset.mode = this.tool;
   }
 
@@ -679,9 +727,7 @@ export class Ui {
     if (item) {
       this.setTool(item);
       return this.announce(
-        item === "axe"
-          ? "Du hast die Axt. Tipp Bäume an, die fallen sollen."
-          : "Du hast die Säge. Zieh über die Bäume, die fallen sollen.",
+        item === "axe" ? "Du hast die Axt." : "Du hast die Säge.",
       );
     }
     const b = g.buildingAt(tile.x, tile.y);
@@ -715,78 +761,105 @@ export class Ui {
       const result = g.toggleMark(tile.x, tile.y);
       if (result === "marked") this.announce("Baum markiert.");
       else if (result === "unmarked") this.announce("Markierung entfernt.");
-      return;
     }
-    if (this.tool === "none" && g.isTree(tile.x, tile.y))
-      this.announce(
-        g.state.tools.axe
-          ? "Nimm die Axt oder die Säge, um Bäume zu markieren."
-          : "Ohne Axt fällt hier kein Baum. Sie liegt in der ersten Lichtung.",
-      );
   }
 
   // --- Buildings react directly ---------------------------------------------------
 
-  /** A tap on a building: play on the stage, open the game, or show how it is doing. */
+  /**
+   * A tap on a building: play on the stage, open the game or its source,
+   * set a crew, repair a ruin, or show how it is doing.
+   */
   private react(b: Building) {
-    if (b.state === "done" && b.kind === "theater") return this.readStage(b);
+    const g = this.o.game;
+    const name = this.label(b.kind, b.game);
+    const say = (text: string) => {
+      this.o.world.toast(b, text);
+      this.announce(text);
+    };
+    if (b.state === "ruin") {
+      const missing = g.repair(b);
+      return say(missing ? `${name}: ${missing}` : `${name} wird repariert.`);
+    }
+    if (b.state === "done" && b.kind === "theater") {
+      if (!g.economy.open(b)) return say(`${name}: geschlossen, kein Bier.`);
+      return this.readStage(b);
+    }
     if (b.state === "done" && crewKinds.includes(b.kind))
       return this.openCrew(b);
-    const game = this.o.games.find((g) => g.id === b.game);
+    const game = this.o.games.find((x) => x.id === b.game);
     if (b.state === "done" && game && b.kind === "spielhaus") {
+      if (!g.economy.open(b)) return say(`${name}: geschlossen, kein Bier.`);
+      g.mood.event("play");
       this.openGame(game.playUrl);
-      const text = `${game.title} öffnet sich in einem neuen Tab.`;
-      this.o.world.toast(b, text);
-      return this.announce(text);
+      return say(`${game.title} öffnet sich in einem neuen Tab.`);
     }
     if (b.state === "done" && game && b.kind === "bibliothek") {
       this.openGame(game.sourceUrl);
-      const text = `Der Quellcode von ${game.title} öffnet sich in einem neuen Tab.`;
-      this.o.world.toast(b, text);
-      return this.announce(text);
+      return say(
+        `Der Quellcode von ${game.title} öffnet sich in einem neuen Tab.`,
+      );
     }
-    const text = this.stateText(b);
-    this.o.world.toast(b, `${this.label(b.kind, b.game)}: ${text}`);
-    this.announce(`${this.label(b.kind, b.game)}: ${text}`);
+    say(`${name}: ${this.stateText(b)}`);
   }
 
-  /** Called when something on a building changes; nothing to refresh here. */
+  /** Called when something on a building changes. */
   building(b: Building, removed: boolean) {
     if (removed && this.doomed?.id === b.id) this.setDoomed(null);
     if (removed && this.reading?.id === b.id) this.leaveReading();
     if (removed && this.crewFor?.id === b.id) this.closeCrew();
-    if (crewKinds.includes(b.kind)) this.items();
     if (!this.buildMenu.hidden) this.updateBuildMenu();
   }
 
   private stateText(b: Building): string {
-    const info = kinds[b.kind];
+    const g = this.o.game;
+    const s = g.state;
     if (b.state === "drowned") return "überflutet.";
     if (b.state === "site") {
-      const percent = Math.round(this.o.game.progress(b) * 100);
+      const percent = Math.round(g.progress(b) * 100);
       return percent === 0 ? "Baustelle." : `im Bau, ${percent} %.`;
     }
-    const texts: Partial<Record<Kind, string>> = {
-      huette: "hier wohnt ein Waldmensch.",
-      schafweide: `Pergament ${this.o.game.state.parchment} von ${balance.maxParchment}.`,
-      druckerei: `Bücher ${this.o.game.state.books} von ${balance.maxBooks}.`,
-      kloster: "der Stolz der Waldstatt. Ein Rabe wohnt im Turm.",
-      steinbruch: "hier brechen Waldleute Steine.",
-      klause:
-        "hier lebte einst der Einsiedler Meinrad. Sein Rabe zeigt den Weg.",
-      theater: "die Bühne öffnet sich, sobald ein Spielhaus steht.",
-      damm: "staut die Sihl zum Sihlsee.",
-      bruecke: "hier kommen die Waldleute über den Fluss.",
-      hafen: this.portText(b),
-      schiff: "fährt die Waldleute zu den anderen Häfen am See.",
-    };
-    return texts[b.kind] ?? info.about;
+    const condition =
+      (b.condition ?? 1) < balance.working ? " Es verfällt." : "";
+    switch (b.kind) {
+      case "huette":
+      case "steinhaus":
+        return `${kinds[b.kind].beds} Betten. In der Waldstatt leben ${g.workers.length}, Betten gibt es ${g.people.beds()}.`;
+      case "klause":
+        return `hier lebte einst der Einsiedler Meinrad.${condition}`;
+      case "kirche":
+        return `die Glocken läuten.${condition}`;
+      case "kloster":
+        return `der Stolz der Waldstatt.${condition}`;
+      case "friedhof":
+        return `${b.graves ?? 0} von ${balance.graves} Gräbern.`;
+      case "brot": {
+        const thrown = b.thrown ?? 0;
+        return thrown
+          ? `${thrown} von ${balance.brotLoaves} Broten ausgeworfen.`
+          : `wartet auf ${balance.brotLoaves} Brote. Vorrat: ${s.stock.bread}.`;
+      }
+      case "ise":
+        return "in der Schmiede glüht das Feuer.";
+      case "spielhaus":
+        return g.economy.open(b) ? "offen." : "geschlossen, kein Bier.";
+      case "damm":
+        return `der Sihlsee ist zu ${Math.round(s.flood.level * 100)} % voll.`;
+      case "bruecke":
+        return "hier kommen die Waldleute über den Fluss.";
+      case "hafen":
+        return this.portText(b);
+      case "schiff":
+        return "fährt die Waldleute zu den anderen Häfen am See.";
+      default:
+        return "steht.";
+    }
   }
 
   private portText(b: Building): string {
     const { ports, ships } = this.o.game.harbour(b);
-    if (!ships) return "noch liegt kein Schiff hier. Bau eines.";
-    if (ports < 2) return "die Schiffe brauchen einen zweiten Hafen am See.";
+    if (!ships) return "noch liegt kein Schiff hier.";
+    if (ports < 2) return "kein zweiter Hafen am See.";
     return ships === 1
       ? "ein Schiff fährt über diesen See."
       : `${ships} Schiffe fahren über diesen See.`;
@@ -796,11 +869,7 @@ export class Ui {
   private demolish(b: Building) {
     if (!this.o.game.canDemolish(b)) {
       this.setDoomed(null);
-      return this.announce(
-        b.state === "drowned"
-          ? "Das liegt unter Wasser."
-          : "Der Damm bleibt stehen.",
-      );
+      return this.announce("Das liegt unter Wasser.");
     }
     const name = this.label(b.kind, b.game);
     if (this.doomed?.id !== b.id) {
@@ -910,16 +979,8 @@ export class Ui {
   /** Something more of a hidden text lies free, or it was just found. */
   text(t: HiddenText, found: boolean) {
     const title = this.o.world.title(t);
-    if (found)
-      this.announce(
-        `Unter den Bäumen liegt etwas: ${title}. Fällt weiter, dann liegt es ganz frei.`,
-      );
-    else if (isExplored(t))
-      this.announce(
-        t.game
-          ? `${title} liegt ganz frei. Jetzt lässt sich das Spielhaus bauen.`
-          : `${title} liegt ganz frei. Tipp sie an zum Lesen.`,
-      );
+    if (found) this.announce(`Unter den Bäumen liegt etwas: ${title}.`);
+    else if (isExplored(t)) this.announce(`${title} liegt ganz frei.`);
     if (!this.buildMenu.hidden) this.updateBuildMenu();
   }
 
@@ -930,9 +991,7 @@ export class Ui {
       { x: start.x + 0.5, y: start.y + 0.5 },
       { x: t.x + t.w / 2, y: t.y + t.h / 2 },
     );
-    this.announce(
-      `Der Rabe fliegt los, nach ${where}. Wo er kreist, fällt der Wald als Nächstes.`,
-    );
+    this.announce(`Ein Rabe fliegt los, nach ${where}.`);
   }
 
   // --- Confirmations ------------------------------------------------------------------
@@ -953,25 +1012,5 @@ export class Ui {
         once: true,
       });
     });
-  }
-
-  // --- The Waldmensch's hints ------------------------------------------------------------
-
-  private hintSeen = "";
-
-  updateHint() {
-    const g = this.o.game;
-    const current = g.currentHint();
-    const show = current < hintCount && current >= g.state.hint;
-    if (show) {
-      const text = g.hintText();
-      const p = need(this.hint, "[data-hint-text]");
-      if (p.textContent !== text) p.textContent = text;
-      if (this.hintSeen !== text) {
-        this.hintSeen = text;
-        this.announce(`Der Waldmensch sagt: ${text}`);
-      }
-    }
-    this.hint.hidden = !show;
   }
 }

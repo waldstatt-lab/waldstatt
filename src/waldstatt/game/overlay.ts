@@ -219,13 +219,13 @@ export class WorldLayer {
     const pin = { element, x: water.x, y: water.y, lift: 0, basin };
     this.waterPins.push(pin);
     this.place(pin);
-    if (basin) element.hidden = !this.game.state.flooded;
+    if (basin) element.hidden = !this.game.flood.full;
   }
 
   /** The Sihlsee's name appears with the lake. */
   flooded() {
     for (const pin of this.waterPins)
-      if (pin.basin) pin.element.hidden = !this.game.state.flooded;
+      if (pin.basin) pin.element.hidden = !this.game.flood.full;
   }
 
   private gameInfo(id?: string) {

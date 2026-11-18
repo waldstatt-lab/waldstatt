@@ -1,27 +1,34 @@
 /**
- * The game's rules: Waldleute fell marked trees and build building sites,
- * sheep grow parchment, Waldleute break stones in quarries and print books
- * from parchment and wood in the printing house, and the finished dam floods
- * the Sihlsee. The site's texts lie hidden under the forest and are found by
- * felling it; the axe and the saw lie on the ground to be picked up, and
- * ravens show the way to the games' scrolls. Waldleute walk only on open ground (nav.ts): they fell their
- * way into the forest from its edge, cross rivers on bridges and the dam, and
- * cross a lake by ship between its ports. Felled wood counts at once. No
- * rendering and no DOM here.
+ * The game's rules: Waldleute fell marked trees, build building sites, pave,
+ * work in the producing buildings and walk back to eat. The site's texts lie
+ * hidden under the forest and are found by felling it; the axe and the saw
+ * lie on the ground to be picked up, and ravens show the way to the games'
+ * scrolls. Waldleute walk only on open ground (nav.ts): they fell their way
+ * into the forest from its edge, cross rivers on bridges and the dam, and
+ * cross a lake by ship between its ports. Felled wood counts at once. The
+ * goods, the people's lives, motivation, the forest growing back and the
+ * flood are systems of their own (economy.ts, people.ts, mood.ts, growth.ts,
+ * flood.ts), stepped here in turn. No rendering and no DOM here.
  */
 import {
   balance,
   CHUNK,
   crewKinds,
+  goodKeys,
   kinds,
   placing,
   ravenKinds,
-  supplies,
   texts,
   type Cost,
   type Kind,
+  type KindInfo,
   type TextKind,
 } from "./config";
+import { Economy } from "./economy";
+import { Flood } from "./flood";
+import { Growth } from "./growth";
+import { Mood } from "./mood";
+import { fire, lifespan, People, placeFire } from "./people";
 import {
   clearLine,
   search,
@@ -33,7 +40,7 @@ import {
   type Ferry,
   type Point,
 } from "./nav";
-import type { Building, Saved } from "./state";
+import type { Building, Person, Saved } from "./state";
 import {
   damSite,
   hasBaseTree,
@@ -44,7 +51,6 @@ import {
   isRiver,
   isWall,
   lakeAt,
-  lakeTiles,
   start,
   town,
 } from "./world";
@@ -54,20 +60,16 @@ export interface Step extends Point {
   sail?: { from: number; to: number };
 }
 
-export interface Worker {
-  id: number;
-  /** Position in tiles (fractional). */
-  x: number;
-  y: number;
+/** A Waldmensch: the saved person, and what they are doing now. */
+export interface Worker extends Person {
   /** "wait": at a quay for a ship; "sail": on board. */
   phase: "idle" | "walk" | "wait" | "sail" | "work";
   task?:
     | { type: "fell"; x: number; y: number }
     | { type: "build"; id: number }
     | { type: "pave"; x: number; y: number }
-    | { type: "workshop"; id: number };
-  /** The quarry or printing house this Waldmensch was put in, if any. */
-  job?: number;
+    | { type: "workshop"; id: number }
+    | { type: "eat" };
   /** The way still ahead. */
   route: Step[];
   /** The ways as they were when the route was found (Game.ways). */
@@ -146,7 +148,6 @@ export interface Events {
   /** A building was added, changed or removed. */
   building(b: Building, removed?: boolean): void;
   supplies(): void;
-  flooded(drowned: Building[]): void;
   /** A hidden text was found, or more of it lies free. */
   text(t: HiddenText, found: boolean): void;
   /** A tile was cobbled, or planned for cobbles or no longer. */
@@ -155,8 +156,16 @@ export interface Events {
   items(): void;
   /** A raven took up a new text to lead to, or came. */
   raven(r: Raven, text: HiddenText | undefined): void;
-  /** The Waldmensch has something new to say. */
-  hint(): void;
+  /** The Sihlsee rose or fell, or the flood wave moved on. */
+  flood(): void;
+  /** A tombstone was laid. */
+  tomb(x: number, y: number): void;
+  /** A good was had for the first time. */
+  goods(): void;
+  /** Something appeared in the build menu. */
+  unlocked(): void;
+  /** Something happened worth telling. */
+  news(text: string): void;
   /** Something worth saving changed. */
   dirty(): void;
 }
@@ -224,16 +233,17 @@ const neighbours: [number, number][] = [
   [-1, -1],
 ];
 
-/** The Waldmensch's hints, one per milestone, in the order they are reached. */
-export const hintCount = 16;
-
 export class Game {
-  readonly workers: Worker[] = [];
   readonly ships = new Map<number, Ship>();
+  readonly economy: Economy;
+  readonly people: People;
+  readonly mood: Mood;
+  readonly growth: Growth;
+  readonly flood: Flood;
   /** Footprint tiles of every building, site and ruin, by tile id. */
   private occupancy = new Map<number, Building>();
-  /** The Sihlsee's basin. */
-  private lake = new Set<number>();
+  /** Tiles with a tombstone. */
+  private tombs = new Set<number>();
   /** The marked trees, by tile id. */
   private marked = new Set<number>();
   /** Trees a Waldmensch is on the way to fell. */
@@ -241,7 +251,6 @@ export class Game {
   /** Tiles planned for cobbles, and those a Waldmensch is on the way to pave. */
   private paveSet = new Set<number>();
   private paveClaimed = new Set<number>();
-  private stoneClock = 0;
   /** Whether a tile is open ground, as far as asked. */
   private openCache = new Map<number, boolean>();
   private portCache: Map<number, Port> | null = null;
@@ -262,18 +271,17 @@ export class Game {
   /** Trees felled so far, and the last one, for the saw. */
   private felledCount = 0;
   private lastFelled: Point | null = null;
-  private pastureClock = 0;
-  private pressClock = 0;
-  private nextWorker = 1;
 
   constructor(
     readonly state: Saved,
     readonly gameIds: string[],
     /** The texts to hide in the forest, with their sizes. */
     specs: TextSpec[],
-    private events: Events,
+    readonly events: Events,
   ) {
-    for (const [x, y] of lakeTiles()) this.lake.add(tileId(x, y));
+    placeFire();
+    for (const p of state.people) this.decorate(p);
+    for (const t of state.tombs) this.tombs.add(tileId(t.x, t.y));
     for (const bits of state.felled.values())
       for (const byte of bits) {
         let b = byte;
@@ -291,11 +299,102 @@ export class Game {
       this.paveSet.add(tileId(x, y));
     }
     for (const b of state.buildings) this.occupy(b);
+    this.economy = new Economy(this);
+    this.mood = new Mood(this);
+    this.flood = new Flood(this);
+    this.growth = new Growth(this);
+    this.people = new People(this);
     this.hideTexts(specs);
-    this.syncWorkers();
+    this.economy.syncCrews();
     this.syncRavens();
     this.syncShips();
+    this.checkUnlocks(true);
   }
+
+  /** The Waldleute: the saved people, with what they are doing now. */
+  get workers(): Worker[] {
+    return this.state.people as Worker[];
+  }
+
+  private decorate(p: Person): Worker {
+    return Object.assign(p, {
+      phase: "idle",
+      route: [],
+      ways: this.ways,
+      t: 0,
+      facing: 1,
+    } satisfies Partial<Worker>) as Worker;
+  }
+
+  /** A new Waldmensch, at the start or born. */
+  addPerson(o: { sex: "f" | "m"; age: number; x: number; y: number }): Worker {
+    const p: Person = {
+      id: this.state.nextPerson++,
+      sex: o.sex,
+      age: o.age,
+      life: lifespan(),
+      hunger: 0,
+      lastChild: -1,
+      x: o.x,
+      y: o.y,
+    };
+    this.state.people.push(p);
+    return this.decorate(p);
+  }
+
+  /** A Waldmensch died: off the map, the ship and the crew. */
+  removePerson(w: Worker) {
+    this.idle(w);
+    this.state.people = this.state.people.filter((p) => p !== w);
+    for (const s of this.ships.values())
+      s.passengers = s.passengers.filter((p) => p !== w);
+  }
+
+  /** Lays a tombstone on a tile, or the nearest free one. */
+  addTomb(x: number, y: number) {
+    for (let r = 0; r < 4; r++)
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          const tx = x + dx;
+          const ty = y + dy;
+          const id = tileId(tx, ty);
+          if (
+            this.tombs.has(id) ||
+            this.occupancy.has(id) ||
+            this.isWater(tx, ty) ||
+            this.isTree(tx, ty)
+          )
+            continue;
+          this.tombs.add(id);
+          this.state.tombs.push({ x: tx, y: ty });
+          this.growth.clear(tx, ty);
+          this.events.tomb(tx, ty);
+          return;
+        }
+  }
+
+  hasTomb(x: number, y: number): boolean {
+    return this.tombs.has(tileId(x, y));
+  }
+
+  /** Something changed that may bring new work within reach. */
+  opened() {
+    this.chances++;
+  }
+
+  info(b: Pick<Building, "kind">): KindInfo {
+    return kinds[b.kind];
+  }
+
+  /** A building's name, with its game's title if it has one. */
+  nameOf(b: Pick<Building, "kind" | "game">): string {
+    return b.game
+      ? `${kinds[b.kind].name} ${this.titleOf(b.game)}`
+      : kinds[b.kind].name;
+  }
+
+  /** A game's title, set by the page. */
+  titleOf: (game: string) => string = (game) => game;
 
   // --- The forest -------------------------------------------------------
 
@@ -318,6 +417,7 @@ export class Game {
       !isWall(x, y) &&
       !isAbroad(x, y) &&
       !this.occupancy.has(tileId(x, y)) &&
+      !this.tombs.has(tileId(x, y)) &&
       !this.isPaved(x, y)
     );
   }
@@ -363,11 +463,11 @@ export class Game {
   private layStone(x: number, y: number) {
     const id = tileId(x, y);
     this.paveClaimed.delete(id);
-    if (!this.paveSet.has(id) || this.state.stones < 1) return;
+    if (!this.paveSet.has(id) || this.state.stock.stones < 1) return;
     this.paveSet.delete(id);
     this.state.paving.delete(key(x, y));
     if (!this.canPave(x, y)) return this.events.paving(x, y);
-    this.state.stones--;
+    this.state.stock.stones--;
     const { chunk, index } = chunkOf(x, y);
     let bits = this.state.paved.get(chunk);
     if (!bits) {
@@ -375,66 +475,27 @@ export class Game {
       this.state.paved.set(chunk, bits);
     }
     bits[index >> 3] |= 1 << (index & 7);
+    this.state.dirtyChunks.add(chunk);
+    this.growth.clear(x, y);
     this.events.paving(x, y);
     this.events.supplies();
     this.events.dirty();
-    this.checkHint();
   }
 
-  // --- The crews of quarries and the printing house -------------------------
+  // --- Crews --------------------------------------------------------------
 
-  /** How many Waldleute work in a quarry or the printing house now. */
+  /** How many Waldleute work in a producing building now. */
   crewOf(b: Building): number {
-    return this.workers.filter((w) => w.job === b.id).length;
+    return this.economy.crewOf(b);
   }
 
-  /** Puts Waldleute into a quarry or the printing house, or takes them out. */
+  /** Puts Waldleute into a producing building, or takes them out. */
   setCrew(b: Building, crew: number) {
     if (!crewKinds.includes(b.kind) || b.state !== "done") return;
     b.crew = clamp(crew, 0, balance.maxCrew);
-    this.syncCrews();
+    this.economy.syncCrews();
     this.events.building(b);
     this.events.dirty();
-  }
-
-  /**
-   * Gives every finished quarry and printing house the Waldleute it asks
-   * for, as far as there are any: idle ones and those nearest first. The
-   * others go back to work.
-   */
-  private syncCrews() {
-    const workshops = this.state.buildings.filter(
-      (b) => crewKinds.includes(b.kind) && b.state === "done",
-    );
-    for (const w of this.workers)
-      if (w.job && !workshops.some((q) => q.id === w.job)) {
-        w.job = undefined;
-        this.idle(w);
-      }
-    for (const q of workshops) {
-      const crew = this.workers.filter((w) => w.job === q.id);
-      const want = Math.min(q.crew ?? 0, balance.maxCrew);
-      while (crew.length > want) {
-        const w = crew.pop() as Worker;
-        w.job = undefined;
-        this.idle(w);
-      }
-      while (crew.length < want) {
-        const free = this.workers.filter((w) => !w.job && w.phase !== "sail");
-        if (!free.length) break;
-        const cx = q.x + q.w / 2;
-        const cy = q.y + q.h / 2;
-        free.sort(
-          (a, b) =>
-            Number(!!a.task) - Number(!!b.task) ||
-            Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy),
-        );
-        const w = free[0];
-        w.job = q.id;
-        this.idle(w);
-        crew.push(w);
-      }
-    }
   }
 
   isFelled(x: number, y: number): boolean {
@@ -451,23 +512,75 @@ export class Game {
       this.state.felled.set(chunk, bits);
     }
     bits[index >> 3] |= 1 << (index & 7);
+    this.state.dirtyChunks.add(chunk);
+  }
+
+  /** The Sihlsee rose over a tile: its tree dies, its marks go. */
+  drown(x: number, y: number) {
+    if (this.isTree(x, y) || hasBaseTree(x, y)) this.setFelled(x, y);
+    this.growth.clear(x, y);
+    if (this.unmark(x, y)) this.claimed.delete(tileId(x, y));
+    this.openCache.delete(tileId(x, y));
+  }
+
+  /** Whether a seedling may grow on felled ground. */
+  canGrow(x: number, y: number): boolean {
+    const id = tileId(x, y);
+    return (
+      !this.occupancy.has(id) &&
+      !this.tombs.has(id) &&
+      !this.isPaved(x, y) &&
+      !this.paveSet.has(id) &&
+      !this.isWater(x, y) &&
+      Math.hypot(x + 0.5 - fire.x, y + 0.5 - fire.y) > 2
+    );
+  }
+
+  /** Whether a Waldmensch stands on a tile. */
+  someoneOn(x: number, y: number): boolean {
+    return this.workers.some(
+      (w) => Math.floor(w.x) === x && Math.floor(w.y) === y,
+    );
+  }
+
+  /** A seedling grew into a tree: the tile is forest again. */
+  regrow(x: number, y: number) {
+    const { chunk, index } = chunkOf(x, y);
+    const bits = this.state.felled.get(chunk);
+    if (!bits) return;
+    bits[index >> 3] &= ~(1 << (index & 7));
+    this.state.dirtyChunks.add(chunk);
+    this.felledCount--;
+    this.openCache.delete(tileId(x, y));
+    this.chances++;
+    this.events.tree(x, y);
+    const t = this.textAt(x, y);
+    if (t) {
+      t.cleared--;
+      this.events.text(t, false);
+    }
+  }
+
+  /** How far a seedling on a tile has grown, 0 to 1; 0 if none. */
+  seedling(x: number, y: number): number {
+    return this.growth.stage(x, y);
   }
 
   isLake(x: number, y: number): boolean {
-    return this.lake.has(tileId(x, y));
+    return this.flood.flooded(x, y);
   }
 
   isWater(x: number, y: number): boolean {
-    return isRiver(x, y) || (this.state.flooded && this.isLake(x, y));
+    return isRiver(x, y) || this.flood.flooded(x, y) || this.flood.waved(x, y);
   }
 
   /** Which lake's water a tile is, natural or the dammed Sihlsee; 0 for none. */
   lakeAt(x: number, y: number): number {
-    return lakeAt(x, y, this.state.flooded);
+    return lakeAt(x, y, this.flood.flooded(x, y));
   }
 
   private lakeOf(x: number, y: number): number {
-    return lakeAt(x, y, this.state.flooded);
+    return this.lakeAt(x, y);
   }
 
   /** A page of water arrived: ways and work there are new. */
@@ -481,7 +594,7 @@ export class Game {
       // Hidden texts lie under unbroken forest.
       (hasBaseTree(x, y) || this.textTiles.has(tileId(x, y))) &&
       !this.isFelled(x, y) &&
-      !(this.state.flooded && this.isLake(x, y))
+      !this.flood.flooded(x, y)
     );
   }
 
@@ -545,10 +658,10 @@ export class Game {
     return this.hidden.find((t) => t.key === key);
   }
 
-  /** Whether the game's scroll lies wholly free of trees. */
+  /** Whether the game's scroll once lay wholly free of trees. */
   explored(game: string): boolean {
     const t = this.text(`game:${game}`);
-    return !!t && isExplored(t);
+    return this.state.explored.has(`game:${game}`) || (!!t && isExplored(t));
   }
 
   /**
@@ -651,7 +764,6 @@ export class Game {
     if (item === "saw") this.state.sawAt = null;
     this.events.items();
     this.events.dirty();
-    this.checkHint();
     return item;
   }
 
@@ -661,11 +773,10 @@ export class Game {
     if (s.tools.saw || s.sawAt || this.felledCount < balance.sawAfterTrees)
       return;
     if (!this.done("huette")) return;
-    const at = this.lastFelled ?? this.home();
+    const at = this.lastFelled ?? fire;
     s.sawAt = { x: Math.floor(at.x), y: Math.floor(at.y) };
     this.events.items();
     this.events.dirty();
-    this.checkHint();
   }
 
   // --- Ways -------------------------------------------------------------
@@ -690,7 +801,7 @@ export class Game {
   }
 
   /** Forgets what it knew about ways; `closed` if a way may have gone. */
-  private waysChanged(closed: boolean) {
+  waysChanged(closed: boolean) {
     this.chances++;
     this.openCache.clear();
     this.portCache = null;
@@ -841,13 +952,6 @@ export class Game {
 
   // --- Buildings --------------------------------------------------------
 
-  workerCap(): number {
-    const huts = this.state.buildings.filter(
-      (b) => b.kind === "huette" && b.state === "done",
-    ).length;
-    return Math.min(balance.maxWorkers, balance.startWorkers + huts);
-  }
-
   standing(kind: Kind, game?: string): Building | undefined {
     return this.state.buildings.find(
       (b) =>
@@ -870,37 +974,81 @@ export class Game {
     return { w: kinds[kind].w, h: kinds[kind].h };
   }
 
+  /** Whether two footprints touch, side by side or at a corner. */
+  touching(
+    a: Pick<Building, "x" | "y" | "w" | "h">,
+    b: Pick<Building, "x" | "y" | "w" | "h">,
+  ): boolean {
+    return (
+      a.x <= b.x + b.w &&
+      b.x <= a.x + a.w &&
+      a.y <= b.y + b.h &&
+      b.y <= a.y + a.h
+    );
+  }
+
+  /** Whether a building's condition to appear in the build menu is met. */
+  private meets(kind: Kind): boolean {
+    if (kind === "damm") return this.damSiteClear();
+    const a = kinds[kind].appears;
+    if (!a) return true;
+    if (a.people && this.workers.length < a.people) return false;
+    if (a.all && !a.all.every((k) => this.done(k))) return false;
+    if (a.any && !a.any.some((k) => this.done(k))) return false;
+    return true;
+  }
+
+  /** Whether every tree on the dam's site is felled. */
+  private damSiteClear(): boolean {
+    for (let y = damSite.y; y < damSite.y + damSite.h; y++)
+      for (let x = damSite.x; x < damSite.x + damSite.w; x++)
+        if (!isKnown(x, y) || this.isTree(x, y)) return false;
+    return true;
+  }
+
+  /** Records what newly appears in the build menu; it stays from then on. */
+  checkUnlocks(quiet = false) {
+    let added = false;
+    for (const kind of Object.keys(kinds) as Kind[]) {
+      if (this.state.unlocked.has(kind) || !this.meets(kind)) continue;
+      this.state.unlocked.add(kind);
+      // What is there from the start is not news.
+      if (!quiet && (kinds[kind].appears || kind === "damm")) added = true;
+    }
+    if (!added) return;
+    this.state.fresh = true;
+    this.events.unlocked();
+    this.events.dirty();
+  }
+
+  /** Whether the build menu shows a building. */
+  shown(kind: Kind, game?: string): boolean {
+    if (!this.state.unlocked.has(kind)) return false;
+    if (kind === "spielhaus") return !!game && this.explored(game);
+    if (kind === "bibliothek") return !!game && this.done("spielhaus", game);
+    return true;
+  }
+
   /** Why a building cannot be chosen now, or undefined if it can. */
   unavailable(kind: Kind, game?: string): string | undefined {
     const info = kinds[kind];
+    if (!this.shown(kind, game)) return "Das gibt es noch nicht.";
     if (info.limit !== "many") {
       const existing = this.standing(
         kind,
         info.limit === "game" ? game : undefined,
       );
       if (existing)
-        return existing.state === "site" ? "Ist schon im Bau." : "Steht schon.";
+        return existing.state === "site"
+          ? "Ist schon im Bau."
+          : existing.state === "ruin"
+            ? "Steht als Ruine."
+            : "Steht schon.";
     }
-    if (kind === "spielhaus" && game && !this.explored(game)) {
-      const scroll = this.text(`game:${game}`);
-      return scroll && isFound(scroll)
-        ? "Erst wenn die ganze Schriftrolle frei liegt."
-        : "Zuerst die Schriftrolle des Spiels im Wald finden.";
-    }
-    if (kind === "bibliothek" && game && !this.done("spielhaus", game))
-      return "Braucht das fertige Spielhaus des Spiels.";
-    if (kind === "theater" && !this.done("spielhaus"))
-      return "Braucht ein fertiges Spielhaus.";
     if (kind === "schiff" && !this.done("hafen"))
       return "Braucht einen fertigen Hafen.";
-    if (kind === "damm" && this.state.flooded)
-      return "Der Sihlsee ist gestaut.";
-    const missing: string[] = [];
-    for (const { key, name } of supplies) {
-      const lack = info.cost[key] - this.state[key];
-      if (lack > 0) missing.push(`${lack} ${name}`);
-    }
-    if (missing.length) return `Es fehlen ${missing.join(", ")}.`;
+    const missing = this.economy.missing(info.cost);
+    if (missing) return `Es fehlen ${missing}.`;
     return undefined;
   }
 
@@ -926,7 +1074,6 @@ export class Game {
       ({ x, y, w, h } = span);
     }
     const tiles: Placement["tiles"] = [];
-    const damPlanned = !!this.standing("damm") && !this.state.flooded;
     let reason: string | undefined;
     for (let ty = y; ty < y + h; ty++) {
       for (let tx = x; tx < x + w; tx++) {
@@ -940,22 +1087,19 @@ export class Game {
         } else if (this.textTiles.has(tileId(tx, ty))) {
           tile = "blocked";
           reason ??= "Hier liegt eine Schrift im Boden.";
+        } else if (this.tombs.has(tileId(tx, ty))) {
+          tile = "blocked";
+          reason ??= "Hier liegt ein Grab.";
         } else if (kind === "schiff") {
           if (!this.lakeAt(tx, ty)) {
             tile = "blocked";
             reason ??= "Ein Schiff gehört aufs Wasser eines Sees.";
           }
         } else if (kind === "bruecke") {
-          if (damPlanned && this.isLake(tx, ty)) {
-            tile = "blocked";
-            reason ??= "Hier wird der Sihlsee entstehen.";
-          }
+          // The span was checked above.
         } else if (kind !== "damm" && this.isWater(tx, ty)) {
           tile = "blocked";
           reason ??= "Nicht im Wasser.";
-        } else if (kind !== "damm" && damPlanned && this.isLake(tx, ty)) {
-          tile = "blocked";
-          reason ??= "Hier wird der Sihlsee entstehen.";
         } else if (this.isTree(tx, ty)) {
           // Buildings stand only on cleared ground.
           tile = "tree";
@@ -964,35 +1108,68 @@ export class Game {
         tiles.push(tile);
       }
     }
+    const spot = { x, y, w, h };
+    if (!reason) reason = this.siteRule(kind, spot);
+    return { ok: !reason, reason, x, y, w, h, tiles };
+  }
+
+  /** What a building needs round its site, beyond free ground. */
+  private siteRule(
+    kind: Kind,
+    spot: Pick<Building, "x" | "y" | "w" | "h">,
+  ): string | undefined {
+    const { x, y, w, h } = spot;
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const near = (b: Building) =>
+      Math.hypot(b.x + b.w / 2 - cx, b.y + b.h / 2 - cy);
     if (
-      !reason &&
       kind === "hafen" &&
       !this.beside(x, y, w, h, (tx, ty) => !!this.lakeAt(tx, ty))
     )
-      reason = "Ein Hafen gehört ans Ufer eines Sees.";
+      return "Ein Hafen gehört ans Ufer eines Sees.";
     if (
-      !reason &&
       kind === "schiff" &&
       !this.beside(x, y, w, h, (tx, ty) => {
         const b = this.buildingAt(tx, ty);
         return b?.kind === "hafen" && b.state === "done";
       })
     )
-      reason = "Ein Schiff legt an einem fertigen Hafen an.";
-    return { ok: !reason, reason, x, y, w, h, tiles };
-  }
-
-  /** Buildings the dam would drown. */
-  wouldDrown(): Building[] {
-    return this.state.buildings.filter(
-      (b) => b.kind !== "damm" && b.state !== "drowned" && this.inLake(b),
-    );
-  }
-
-  private inLake(b: Building): boolean {
-    for (let y = b.y; y < b.y + b.h; y++)
-      for (let x = b.x; x < b.x + b.w; x++) if (this.isLake(x, y)) return true;
-    return false;
+      return "Ein Schiff legt an einem fertigen Hafen an.";
+    if (
+      kind === "muehle" &&
+      !this.beside(
+        x,
+        y,
+        w,
+        h,
+        (tx, ty) => isRiver(tx, ty) && !isNaturalLake(tx, ty),
+      )
+    )
+      return "Eine Wassermühle gehört an einen Fluss.";
+    if (kind === "ise" && Math.hypot(cx - fire.x, cy - fire.y) > 5)
+      return "Die ISE AG steht an der Holzrüti 2, in der ersten Lichtung.";
+    if (
+      kind === "kirche" &&
+      this.state.buildings.some(
+        (b) =>
+          (b.kind === "kirche" || b.kind === "kloster") &&
+          b.state !== "drowned" &&
+          near(b) < balance.reach,
+      )
+    )
+      return "Zu nah an einer anderen Kirche oder am Kloster.";
+    if (
+      kind === "friedhof" &&
+      !this.state.buildings.some(
+        (b) =>
+          (b.kind === "kirche" || b.kind === "kloster") &&
+          b.state !== "drowned" &&
+          this.touching(b, spot),
+      )
+    )
+      return "Ein Friedhof gehört direkt neben eine Kirche oder das Kloster.";
+    return undefined;
   }
 
   place(
@@ -1005,7 +1182,7 @@ export class Game {
     const spot = this.placement(kind, x, y);
     if (!spot.ok) return undefined;
     const info = kinds[kind];
-    for (const { key } of supplies) this.state[key] -= info.cost[key];
+    this.economy.pay(info.cost);
     const b: Building = {
       id: this.state.nextId++,
       kind,
@@ -1019,32 +1196,67 @@ export class Game {
     };
     this.state.buildings.push(b);
     this.occupy(b);
+    for (let ty = b.y; ty < b.y + b.h; ty++)
+      for (let tx = b.x; tx < b.x + b.w; tx++) this.growth.clear(tx, ty);
     this.waysChanged(false);
     this.events.building(b);
-    this.events.supplies();
     this.events.dirty();
-    this.checkHint();
     return b;
   }
 
   /** What tearing a building down gives back: half its costs, rounded down. */
   refund(b: Building): Cost {
-    const cost = kinds[b.kind].cost;
-    const back = (n: number) => Math.floor(n * balance.refund);
-    return {
-      wood: back(cost.wood),
-      parchment: back(cost.parchment),
-      stones: back(cost.stones),
-      books: back(cost.books),
-    };
+    if (b.state === "ruin") return {};
+    return this.share(kinds[b.kind].cost, balance.refund);
+  }
+
+  /** What repairing a ruin takes. */
+  repairCost(b: Building): Cost {
+    return this.share(kinds[b.kind].cost, balance.repair);
+  }
+
+  private share(cost: Cost, k: number): Cost {
+    const out: Cost = {};
+    for (const key of goodKeys) {
+      const n = Math.floor((cost[key] ?? 0) * k);
+      if (n > 0) out[key] = n;
+    }
+    return out;
   }
 
   canDemolish(b: Building): boolean {
-    return b.state !== "drowned" && !(b.kind === "damm" && b.state === "done");
+    return b.state !== "drowned";
   }
 
+  /** Tears a building down and gives back part of its costs. */
   demolish(b: Building) {
     if (!this.canDemolish(b)) return;
+    const refund = this.refund(b);
+    const dam = b.kind === "damm" && b.state === "done";
+    this.removeBuilding(b);
+    for (const key of goodKeys)
+      if (refund[key]) this.economy.gain(key, refund[key] ?? 0);
+    if (dam) this.flood.breakDam();
+  }
+
+  /** Repairs a ruin: it becomes a building site again. */
+  repair(b: Building): string | undefined {
+    if (b.state !== "ruin") return undefined;
+    const cost = this.repairCost(b);
+    const missing = this.economy.missing(cost);
+    if (missing) return `Für die Reparatur fehlen ${missing}.`;
+    this.economy.pay(cost);
+    b.state = "site";
+    b.work = 0;
+    b.condition = 1;
+    this.chances++;
+    this.events.building(b);
+    this.events.dirty();
+    return undefined;
+  }
+
+  /** Takes a building off the map, without giving anything back. */
+  removeBuilding(b: Building) {
     this.state.buildings = this.state.buildings.filter((other) => other !== b);
     for (let y = b.y; y < b.y + b.h; y++) {
       for (let x = b.x; x < b.x + b.w; x++) {
@@ -1053,17 +1265,30 @@ export class Game {
         if (this.unmark(x, y)) this.events.tree(x, y);
       }
     }
-    const refund = this.refund(b);
-    for (const { key } of supplies) this.state[key] += refund[key];
     for (const w of this.workers)
       if (w.task?.type === "build" && w.task.id === b.id) this.idle(w);
     this.waysChanged(true);
     this.syncShips();
-    this.syncWorkers();
-    this.syncCrews();
+    this.economy.syncCrews();
     this.syncRavens();
     this.events.building(b, true);
     this.events.supplies();
+    this.events.dirty();
+  }
+
+  /** A building drowned or fell into ruin: nobody works on or in it any more. */
+  lost(b: Building) {
+    for (const w of this.workers)
+      if (
+        (w.task?.type === "build" && w.task.id === b.id) ||
+        (w.task?.type === "workshop" && w.task.id === b.id)
+      )
+        this.idle(w);
+    this.waysChanged(true);
+    this.syncShips();
+    this.economy.syncCrews();
+    this.syncRavens();
+    this.events.building(b);
     this.events.dirty();
   }
 
@@ -1078,42 +1303,7 @@ export class Game {
 
   // --- Waldleute and production ------------------------------------------
 
-  /** Where Waldleute appear: by the newest hut, or in the first clearing. */
-  private home(): Point {
-    const hut = [...this.state.buildings]
-      .reverse()
-      .find((b) => b.kind === "huette" && b.state === "done");
-    return hut
-      ? { x: hut.x + hut.w / 2, y: hut.y + hut.h + 0.2 }
-      : { x: start.x + 0.5, y: start.y + 0.6 };
-  }
-
-  private syncWorkers() {
-    const cap = this.workerCap();
-    while (this.workers.length < cap) {
-      const { x, y } = this.home();
-      this.workers.push({
-        id: this.nextWorker++,
-        x: x + (this.workers.length % 3) * 0.4 - 0.4,
-        y,
-        phase: "idle",
-        route: [],
-        ways: this.ways,
-        t: 0,
-        facing: 1,
-      });
-    }
-    while (this.workers.length > cap) {
-      const w = this.workers.pop();
-      if (!w) break;
-      this.idle(w);
-      for (const s of this.ships.values())
-        s.passengers = s.passengers.filter((p) => p !== w);
-    }
-    this.syncCrews();
-  }
-
-  private idle(w: Worker) {
+  idle(w: Worker) {
     // A freed tree or place in a crew is work for somebody else.
     if (w.task) this.chances++;
     if (w.task?.type === "fell")
@@ -1134,6 +1324,8 @@ export class Game {
    * a few tiles nearer, so they come first.
    */
   private findWork(w: Worker): boolean | "later" {
+    // Children do not work.
+    if (w.age < balance.workingAge) return false;
     const crew = new Map<number, number>();
     for (const other of this.workers)
       if (other.task?.type === "build")
@@ -1145,9 +1337,8 @@ export class Game {
     const trees = this.marked.size > this.claimed.size;
     const paves =
       this.paveSet.size > this.paveClaimed.size &&
-      this.state.stones > this.paveClaimed.size;
-    // A Waldmensch put in a quarry or the printing house looks only for the
-    // way there.
+      this.state.stock.stones > this.paveClaimed.size;
+    // A Waldmensch put in a producing building looks only for the way there.
     const workshop = w.job
       ? this.state.buildings.find((b) => b.id === w.job && b.state === "done")
       : undefined;
@@ -1249,8 +1440,17 @@ export class Game {
         q.kind === "steinbruch"
           ? // At the rock face, somewhere along the quarry's back.
             { x: q.x + 0.4 + Math.random() * (q.w - 0.8), y: q.y + 0.6 }
-          : // At the printing house's door, by the sheets drying.
-            { x: q.x + 1.1 + Math.random() * 0.9, y: q.y + q.h - 0.3 };
+          : q.kind === "druckerei" ||
+              q.kind === "muehle" ||
+              q.kind === "baeckerei" ||
+              q.kind === "brauerei"
+            ? // At the door.
+              { x: q.x + 1.1 + Math.random() * 0.9, y: q.y + q.h - 0.3 }
+            : // Out in the fields and pens.
+              {
+                x: q.x + 0.5 + Math.random() * (q.w - 1),
+                y: q.y + 0.5 + Math.random() * (q.h - 1),
+              };
       w.task = { type: "workshop", id: q.id };
     } else {
       const b = v.b;
@@ -1305,13 +1505,71 @@ export class Game {
     return steps;
   }
 
+  /** A hungry Waldmensch far from food looks for the way back to it. */
+  private findFood(w: Worker): boolean | "later" {
+    const p = this.people.nearestFood(w.x, w.y);
+    if (!p) return false;
+    if (this.searches <= 0) return "later";
+    this.searches--;
+    const found = search(
+      {
+        open: (x, y) => this.open(x, y),
+        ferries: (id) => this.ferries().get(id),
+      },
+      Math.floor(w.x),
+      Math.floor(w.y),
+      (x, y) =>
+        Math.hypot(x + 0.5 - p.x, y + 0.5 - p.y) <= balance.reach - 1
+          ? { bias: 0, value: "eat" as const }
+          : undefined,
+      0,
+      balance.searchTiles,
+      new Set<number>(),
+    );
+    if (!found) return false;
+    const last = found.path[found.path.length - 1];
+    w.task = { type: "eat" };
+    w.route = this.route(w, found.path, found.via, {
+      x: tileX(last) + 0.5,
+      y: tileY(last) + 0.5,
+    });
+    w.ways = this.ways;
+    w.phase = "walk";
+    w.t = 0;
+    return true;
+  }
+
   /** Advances the game by dt seconds; `instant` skips walking and sailing. */
   step(dt: number, instant: boolean) {
     this.searches = 2;
-    for (const w of this.workers) this.stepWorker(w, dt, instant);
+    for (const w of [...this.workers]) this.stepWorker(w, dt, instant);
     this.stepShips(dt, instant);
     this.stepRavens(dt, instant);
-    this.produce(dt);
+    this.people.step(dt);
+    this.economy.step(dt);
+    this.mood.step(dt);
+    this.growth.step(dt);
+    this.flood.step(dt);
+    this.unlockClock -= dt;
+    if (this.unlockClock <= 0) {
+      this.unlockClock = 1;
+      this.checkUnlocks();
+    }
+  }
+
+  private unlockClock = 0;
+  /** Seconds before a Waldmensch who found no way to food looks again, by id. */
+  private foodRetry = new Map<number, number>();
+
+  /** Whether a hungry Waldmensch should leave their work to eat. */
+  private goesToEat(w: Worker, dt: number): boolean {
+    const wait = (this.foodRetry.get(w.id) ?? 0) - dt;
+    if (wait > 0) {
+      this.foodRetry.set(w.id, wait);
+      return false;
+    }
+    this.foodRetry.delete(w.id);
+    return this.people.needsWalk(w);
   }
 
   private face(w: Worker, x: number, y: number) {
@@ -1323,10 +1581,18 @@ export class Game {
 
   private stepWorker(w: Worker, dt: number, instant: boolean) {
     w.t += dt;
+    if (w.phase !== "sail") this.growth.trod(Math.floor(w.x), Math.floor(w.y));
+    const hungry = w.task?.type !== "eat" && this.goesToEat(w, dt);
     if (w.phase === "idle") {
       // Look for work a few times a second, not every frame, and less often
       // while there is none within reach.
       if (w.t > 0.25) {
+        if (hungry) {
+          const found = this.findFood(w);
+          if (found === "later") return;
+          if (found) return;
+          this.foodRetry.set(w.id, 10);
+        }
         const found = this.findWork(w);
         if (found === "later") return;
         w.t = found ? 0 : -0.75 - Math.random() * 0.5;
@@ -1337,6 +1603,8 @@ export class Game {
     if (w.phase === "sail") return;
     const task = w.task;
     if (!task || w.ways !== this.ways) return this.idle(w);
+    // Hungry and far from food: off to eat.
+    if (hungry && w.phase !== "wait") return this.idle(w);
     if (task.type === "fell" && !this.isMarked(task.x, task.y))
       return this.idle(w);
     if (task.type === "pave" && !this.isPlannedPaving(task.x, task.y))
@@ -1353,7 +1621,7 @@ export class Game {
     if (w.phase === "wait") return;
 
     if (w.phase === "walk") {
-      if (instant) {
+      if (instant && task.type !== "eat") {
         const last = w.route[w.route.length - 1];
         if (last) {
           w.x = last.x;
@@ -1385,6 +1653,10 @@ export class Game {
         }
       }
       if (!w.route.length) {
+        if (task.type === "eat") {
+          this.people.eat(w);
+          return this.idle(w);
+        }
         w.phase = "work";
         w.t = 0;
         if (task.type === "fell") this.face(w, task.x + 0.5, task.y + 0.5);
@@ -1394,23 +1666,23 @@ export class Game {
       return;
     }
 
+    const speed = this.mood.speed();
     if (task.type === "fell") {
-      if (w.t < balance.fellSeconds) return;
+      if (w.t * speed < balance.fellSeconds) return;
       this.fell(task.x, task.y);
       this.idle(w);
       return;
     }
     if (task.type === "pave") {
-      if (w.t < balance.paveSeconds) return;
+      if (w.t * speed < balance.paveSeconds) return;
       this.layStone(task.x, task.y);
       this.idle(w);
       return;
     }
-    // In a quarry or the printing house, the work goes on; produce() counts
-    // the stones and books.
-    if (task.type === "workshop") return;
+    // In a producing building, the work goes on; the economy counts it.
+    if (task.type === "workshop" || task.type === "eat") return;
     if (site) {
-      site.work += dt;
+      site.work += dt * speed;
       if (site.work >= kinds[site.kind].work) this.finish(site);
     }
   }
@@ -1429,7 +1701,7 @@ export class Game {
       const job = s.job;
       const quay =
         (job && ports.get(job.phase === "carry" ? job.to : job.from)?.quay) ??
-        this.home();
+        fire;
       this.land(s, quay, false);
       this.ships.delete(id);
     }
@@ -1554,7 +1826,7 @@ export class Game {
       return;
     }
     const to = ports.get(job.to);
-    this.land(s, to?.quay ?? ports.get(job.from)?.quay ?? this.home(), !!to);
+    this.land(s, to?.quay ?? ports.get(job.from)?.quay ?? fire, !!to);
     this.goHome(s);
   }
 
@@ -1584,8 +1856,9 @@ export class Game {
     this.claimed.delete(tileId(x, y));
     if (!this.isTree(x, y)) return;
     this.setFelled(x, y);
+    this.growth.clear(x, y);
     this.openCache.delete(tileId(x, y));
-    this.state.wood += balance.woodPerTree;
+    this.economy.gain("wood", balance.woodPerTree);
     this.felledCount++;
     this.lastFelled = { x, y };
     this.events.tree(x, y);
@@ -1593,13 +1866,12 @@ export class Game {
     if (t) {
       t.cleared++;
       this.events.text(t, t.cleared === 1);
+      if (isExplored(t)) this.state.explored.add(t.key);
       // A found or freed text sends the raven on.
       if (t.cleared === 1 || isExplored(t)) this.ravenClock = 0;
     }
-    this.events.supplies();
     this.events.dirty();
     this.checkSaw();
-    this.checkHint();
   }
 
   private finish(b: Building) {
@@ -1608,113 +1880,29 @@ export class Game {
     for (const w of this.workers)
       if (w.task?.type === "build" && w.task.id === b.id) this.idle(w);
     this.waysChanged(false);
-    if (b.kind === "huette") this.syncWorkers();
     if (b.kind === "huette") this.checkSaw();
-    if (crewKinds.includes(b.kind)) this.syncCrews();
+    // A new producing building asks for a full crew.
+    if (crewKinds.includes(b.kind)) {
+      b.crew ??= balance.maxCrew;
+      this.economy.syncCrews();
+    }
+    if (kinds[b.kind].upkeep) b.condition = 1;
     if (ravenKinds.includes(b.kind)) this.syncRavens();
     if (b.kind === "schiff") this.syncShips();
-    if (b.kind === "damm") this.flood();
     this.events.building(b);
     this.events.dirty();
-    this.checkHint();
-  }
-
-  private shownHint = "";
-
-  /** Whether any of the town's texts or a game's scroll was found. */
-  private foundAny(where: "town" | "far"): boolean {
-    return this.hidden.some((t) => texts[t.kind].where === where && isFound(t));
-  }
-
-  /**
-   * The milestones in the order a visitor reaches them; the first not yet
-   * reached is the current hint.
-   */
-  private milestones(): (() => boolean)[] {
-    return [
-      () => this.state.tools.axe,
-      () => this.felledCount > 0,
-      () => this.done("huette"),
-      () => !!this.state.sawAt || this.state.tools.saw,
-      () => this.state.tools.saw,
-      () => this.foundAny("town"),
-      () => this.done("klause") || this.done("kloster"),
-      () => this.foundAny("far"),
-      () => this.gameIds.some((g) => this.explored(g)),
-      () => this.done("schafweide"),
-      () => this.done("spielhaus"),
-      () => this.done("steinbruch") || this.state.paved.size > 0,
-      () => this.done("druckerei"),
-      () => this.done("bibliothek") || this.done("theater"),
-      () => !!this.standing("damm") || this.state.flooded,
-      () => this.done("bruecke") || this.done("schiff"),
-    ];
-  }
-
-  /** The first milestone not yet reached; hintCount when all are. */
-  currentHint(): number {
-    const index = this.milestones().findIndex((reached) => !reached());
-    return index < 0 ? hintCount : Math.min(index, hintCount);
-  }
-
-  /** What the Waldmensch says for the current milestone. */
-  hintText(): string {
-    const scroll = this.hidden.find(
-      (t) => t.kind === "game" && isFound(t) && !isExplored(t),
-    );
-    switch (this.currentHint()) {
-      case 0:
-        return "Da liegt meine Axt im Gras. Tipp sie an und nimm sie mit.";
-      case 1:
-        return "Zeig mir mit der Axt, welche Bäume fallen sollen. Durch den Wald komme ich nur, wo er gefällt ist.";
-      case 2:
-        return "Gut! Mit 8 Holz bauen wir unter «Bauen» eine Hütte – aber nur auf freiem Boden.";
-      case 3:
-        return `Zu zweit geht’s schneller. Fällt weiter: Nach ${balance.sawAfterTrees} Bäumen findet sich bestimmt etwas Nützliches.`;
-      case 4:
-        return "Da liegt eine Säge, wo eben der Baum fiel! Tipp sie an: Mit ihr markierst du ganze Flächen.";
-      case 5:
-        return "Im Süden liegt Einsiedeln. Keinen Kilometer um das Kloster liegen alte Schriften unter den Bäumen. Wo der Waldboden hell schimmert, lohnt sich das Fällen.";
-      case 6:
-        return "Hier lebte einst der Einsiedler Meinrad, und zwei Raben leisteten ihm Gesellschaft. Bau unter «Bauen» seine Klause: Ein Rabe kennt den Weg zu unseren Spielen.";
-      case 7:
-        return "Folge dem Raben: Er kreist über dem Wald, den wir als Nächstes fällen müssen. Irgendwo dahinter liegt die Schriftrolle eines Spiels.";
-      case 8:
-        return scroll
-          ? "Eine Schriftrolle! Fällt alle Bäume darüber, dann liegt das Spiel frei."
-          : "Folge dem Raben weiter. Fällt alle Bäume über der Schriftrolle, dann liegt das Spiel frei.";
-      case 9:
-        return "Für das Spielhaus brauchen wir Pergament. Bau eine Schafweide.";
-      case 10:
-        return "Das Spiel liegt frei: Unter «Bauen» steht sein Spielhaus bereit.";
-      case 11:
-        return "Tipp ein Spielhaus an, und das Spiel öffnet sich in einem neuen Tab. Bau einen Steinbruch: Tippst du ihn an, schickst du Waldleute hinein, die Steine brechen.";
-      case 12:
-        return "Mit Steinen pflastern wir Wege und Plätze: Nimm «Pflastern» und zieh über freien Boden. Auf Pflaster gehen wir schneller, und Schriften bleiben lesbar. Bau auch eine Druckerei und schick Waldleute hinein: Aus Pergament und Holz drucken sie Bücher.";
-      case 13:
-        return "Mit Büchern bauen wir jedem Spiel eine Bibliothek: Tippst du sie an, öffnet sich sein Quellcode in einem neuen Tab. Im Theater spielst du die Spiele an.";
-      case 14:
-        return "Die Sihl liesse sich stauen. Aber was im Becken steht, geht unter.";
-      default:
-        return "Schwimmen können wir nicht. Über Flüsse führen Brücken; an einem See bauen wir Häfen, und Schiffe bringen uns hinüber.";
-    }
-  }
-
-  /** Tells the interface when the Waldmensch has something new to say. */
-  checkHint() {
-    const current = String(this.currentHint());
-    if (current !== this.shownHint) {
-      this.shownHint = current;
-      this.events.hint();
-    }
+    this.checkUnlocks();
   }
 
   // --- Ravens -------------------------------------------------------------
 
-  /** Keeps a raven for every finished Klause and Kloster. */
-  private syncRavens() {
+  /** Keeps a raven for every finished Klause and Kloster in good condition. */
+  syncRavens() {
     const homes = this.state.buildings.filter(
-      (b) => ravenKinds.includes(b.kind) && b.state === "done",
+      (b) =>
+        ravenKinds.includes(b.kind) &&
+        b.state === "done" &&
+        (b.condition ?? 1) >= balance.working,
     );
     for (let i = this.ravens.length - 1; i >= 0; i--)
       if (!homes.some((b) => b.id === this.ravens[i].id))
@@ -1831,87 +2019,5 @@ export class Game {
         if (Math.abs(dx - dy) > 0.01) r.facing = dx - dy > 0 ? 1 : -1;
       }
     }
-  }
-
-  private flood() {
-    this.state.flooded = true;
-    const drowned = this.wouldDrown();
-    for (const b of drowned) {
-      b.state = "drowned";
-      for (const w of this.workers)
-        if (w.task?.type === "build" && w.task.id === b.id) this.idle(w);
-    }
-    for (const k of [...this.state.marks]) {
-      const [x, y] = k.split(",").map(Number);
-      if (this.isLake(x, y)) {
-        this.unmark(x, y);
-        this.claimed.delete(tileId(x, y));
-      }
-    }
-    for (const w of this.workers) {
-      if (this.isLake(Math.floor(w.x), Math.floor(w.y))) {
-        this.idle(w);
-        w.x = damSite.x - 1;
-        w.y = damSite.y + 1;
-      }
-    }
-    this.waysChanged(true);
-    this.syncShips();
-    if (this.workerCap() < this.workers.length) this.syncWorkers();
-    this.events.flooded(drowned);
-    this.events.supplies();
-  }
-
-  private produce(dt: number) {
-    const s = this.state;
-    // Waldleute at work in a quarry or the printing house, by its kind.
-    let breaking = 0;
-    let printing = 0;
-    for (const w of this.workers) {
-      if (w.task?.type !== "workshop" || w.phase !== "work") continue;
-      const id = w.task.id;
-      const kind = s.buildings.find((b) => b.id === id)?.kind;
-      if (kind === "steinbruch") breaking++;
-      else if (kind === "druckerei") printing++;
-    }
-    if (breaking && s.stones < balance.maxStones) {
-      this.stoneClock += dt * breaking;
-      if (this.stoneClock >= balance.stoneSeconds) {
-        this.stoneClock -= balance.stoneSeconds;
-        s.stones++;
-        // New stones may let paving go on.
-        this.chances++;
-        this.events.supplies();
-        this.events.dirty();
-      }
-    } else this.stoneClock = 0;
-    const pastures = s.buildings.filter(
-      (b) => b.kind === "schafweide" && b.state === "done",
-    ).length;
-    if (pastures && s.parchment < balance.maxParchment) {
-      this.pastureClock += dt * pastures;
-      if (this.pastureClock >= balance.parchmentSeconds) {
-        this.pastureClock -= balance.parchmentSeconds;
-        s.parchment++;
-        this.events.supplies();
-        this.events.dirty();
-      }
-    } else this.pastureClock = 0;
-    if (
-      printing &&
-      s.parchment >= balance.bookParchment &&
-      s.wood >= balance.bookWood &&
-      s.books < balance.maxBooks
-    ) {
-      this.pressClock += dt * printing;
-      if (this.pressClock >= balance.bookSeconds) {
-        this.pressClock -= balance.bookSeconds;
-        s.parchment -= balance.bookParchment;
-        s.wood -= balance.bookWood;
-        s.books++;
-        this.events.supplies();
-        this.events.dirty();
-      }
-    } else this.pressClock = 0;
   }
 }

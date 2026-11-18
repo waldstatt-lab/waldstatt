@@ -2,11 +2,13 @@
  * Draws the game with PixiJS. Two layers share one camera:
  *
  * - the ground, drawn in tile units under the view's projection (iso.ts):
- *   textured tiles in chunks of 16 × 16, rivers, lakes, the Sihlsee once it
- *   is dammed, and the overlays for placing, sawing and the cursor;
+ *   textured tiles in chunks of 16 × 16, rivers, lakes, the Sihlsee as it
+ *   rises tile by tile, the flood wave, and the overlays for placing, sawing
+ *   and the cursor;
  * - upright things, painted for the isometric view and positioned through
- *   the same projection: trees, buildings, ribbons, Waldleute and the tools
- *   lying on the ground, sorted back to front, and the ravens above them.
+ *   the same projection: trees and seedlings, buildings (sinking into the
+ *   Sihlsee), ribbons, Waldleute, tombstones, the fire and the tools lying
+ *   on the ground, sorted back to front, and the ravens above them.
  *
  * The view is usually isometric. To read a text or play on the stage it turns
  * into a top-down plan with north up: while it turns, the upright pictures
@@ -27,6 +29,7 @@ import {
 } from "pixi.js";
 import {
   buildingPicture,
+  firePicture,
   groundTexture,
   hill,
   itemPicture,
@@ -36,19 +39,23 @@ import {
   RES,
   ribbon,
   theaterParts,
+  tombPicture,
   treeAtlas,
   treeFrame,
   workerAtlas,
   workerFrame,
 } from "./art";
-import { STAGE } from "./config";
+import { balance, stoneKinds, STAGE } from "./config";
+import { fire } from "./people";
 import {
   PLAN_RES,
+  planFire,
   planItem,
   planPicture,
   planRaven,
   planTreeAtlas,
   planTreeSize,
+  planTomb,
   planWorker,
 } from "./plan";
 import { apply, invert, iso, projection, TH, type Linear } from "./iso";
@@ -72,7 +79,6 @@ import {
   needPages,
   onPage,
   sihlsee,
-  start,
   treeVariant,
   type LoadedPage,
 } from "./world";
@@ -107,6 +113,8 @@ interface ChunkView {
   cy: number;
   ground: Graphics;
   trees: Map<string, Upright>;
+  /** Young trees growing back on felled ground. */
+  seedlings: Map<string, Upright>;
   marks: Map<string, Upright>;
   /** The palisade's posts along the border. */
   walls: Upright[];
@@ -204,7 +212,7 @@ export class Renderer {
   private planTreeLayer = new Container();
   private planWorkerLayer = new Container();
   private planTrees: Texture[];
-  private planWorkerTexture: Texture;
+  private planWorkerTextures: Record<"f" | "m", Texture>;
   private planWorkers = new Map<number, Sprite>();
   private planArt = new Map<string, Texture>();
   /** The theatre's stage, painted on the ground (stage.ts). */
@@ -216,6 +224,12 @@ export class Renderer {
   private stageSlot: { slot: Container; b: Building } | null = null;
   /** The tools lying on the ground, upright and from above. */
   private itemViews: { upright: Upright; plan: Sprite }[] = [];
+  /** Tombstones and the fire, upright and from above. */
+  private propViews: { upright: Upright; plan: Sprite }[] = [];
+  private tombArt: { art: Art; plan: Texture };
+  private fireArt: { art: Art; plan: Texture };
+  /** The flood wave on the Sihl. */
+  private wave = new Graphics();
   private itemArt: Record<"axe" | "saw", { art: Art; plan: Texture }>;
   private ravenTextures: Texture[];
   private planRavenTexture: Texture;
@@ -256,7 +270,7 @@ export class Renderer {
   private workerSprites = new Map<number, Sprite>();
   private trees: Texture[];
   private ribbonArt: Art;
-  private workerTextures: Texture[];
+  private workerTextures: Record<"f" | "m", Texture[]>;
   private art = new Map<string, Art>();
   private patterns: Record<GroundKind, FillPattern>;
   private time = 0;
@@ -291,12 +305,15 @@ export class Renderer {
           }),
       );
     this.trees = frames(Texture.from(treeAtlas()), treeFrame.w, treeFrame.h, 6);
-    this.workerTextures = frames(
-      Texture.from(workerAtlas()),
-      workerFrame.w,
-      workerFrame.h,
-      5,
-    );
+    this.workerTextures = {
+      m: frames(Texture.from(workerAtlas()), workerFrame.w, workerFrame.h, 5),
+      f: frames(
+        Texture.from(workerAtlas(true)),
+        workerFrame.w,
+        workerFrame.h,
+        5,
+      ),
+    };
     const crowns = Texture.from(planTreeAtlas()).source;
     this.planTrees = Array.from(
       { length: 6 },
@@ -311,7 +328,23 @@ export class Renderer {
           ),
         }),
     );
-    this.planWorkerTexture = Texture.from(planWorker());
+    this.planWorkerTextures = {
+      m: Texture.from(planWorker()),
+      f: Texture.from(planWorker(true)),
+    };
+    const prop = (
+      picture: ReturnType<typeof tombPicture>,
+      plan: HTMLCanvasElement,
+    ) => ({
+      art: {
+        texture: Texture.from(picture.canvas),
+        ax: picture.ax,
+        ay: picture.ay,
+      },
+      plan: Texture.from(plan),
+    });
+    this.tombArt = prop(tombPicture(), planTomb());
+    this.fireArt = prop(firePicture(), planFire());
     const item = (name: "axe" | "saw") => {
       const picture = itemPicture(name);
       return {
@@ -379,6 +412,7 @@ export class Renderer {
       this.riverLayer,
       this.lakeLayer,
       this.lake,
+      this.wave,
       this.planLayer,
       this.stageLayer,
       this.ravenShadows,
@@ -410,8 +444,10 @@ export class Renderer {
     for (const page of loadedPages()) this.page(page);
     onPage((page) => this.page(page));
     this.drawLake();
+    this.drawWave();
     for (const b of game.state.buildings) this.building(b);
     this.items();
+    this.props();
   }
 
   get camera(): Camera {
@@ -663,6 +699,7 @@ export class Renderer {
       cy,
       ground: new Graphics(),
       trees: new Map(),
+      seedlings: new Map(),
       marks: new Map(),
       walls: [],
       planTrees: null,
@@ -672,6 +709,7 @@ export class Renderer {
     for (let y = cy * RCHUNK; y < (cy + 1) * RCHUNK; y++) {
       for (let x = cx * RCHUNK; x < (cx + 1) * RCHUNK; x++) {
         if (this.game.isTree(x, y)) this.addTree(chunk, x, y);
+        else if (this.game.seedling(x, y) > 0) this.addSeedling(chunk, x, y);
         if (this.game.isMarked(x, y)) this.addMark(chunk, x, y);
         if (isWall(x, y)) this.addPost(chunk, x, y);
       }
@@ -683,6 +721,7 @@ export class Renderer {
   private destroyChunk(chunk: ChunkView) {
     chunk.ground.destroy();
     for (const u of chunk.trees.values()) u.object.destroy();
+    for (const u of chunk.seedlings.values()) u.object.destroy();
     for (const u of chunk.marks.values()) u.object.destroy();
     for (const u of chunk.walls) u.object.destroy();
     if (chunk.planTrees)
@@ -708,11 +747,13 @@ export class Renderer {
   private relayout() {
     for (const chunk of this.chunks.values()) {
       for (const u of chunk.trees.values()) this.put(u);
+      for (const u of chunk.seedlings.values()) this.put(u);
       for (const u of chunk.marks.values()) this.put(u);
       for (const u of chunk.walls) this.put(u);
     }
     for (const view of this.buildings.values()) this.put(view.upright);
     for (const view of this.itemViews) this.put(view.upright);
+    for (const view of this.propViews) this.put(view.upright);
     this.put(this.ghostAt);
   }
 
@@ -729,7 +770,11 @@ export class Renderer {
     const stumps: [number, number][] = [];
     for (let y = chunk.cy * RCHUNK; y < (chunk.cy + 1) * RCHUNK; y++) {
       for (let x = chunk.cx * RCHUNK; x < (chunk.cx + 1) * RCHUNK; x++) {
-        if (game.state.flooded && game.isLake(x, y)) continue;
+        if (game.isLake(x, y)) {
+          // The Sihlsee, rising tile by tile.
+          g.rect(x, y, 1, 1).fill(0x3586d4);
+          continue;
+        }
         // A gap in the ground: the found text lies here (overlay.ts).
         const text = game.textAt(x, y);
         if (text && isFound(text) && !game.isTree(x, y)) {
@@ -764,8 +809,9 @@ export class Renderer {
         else if (game.isWater(x, y)) kind = "bank";
         else if (built || game.isFelled(x, y)) kind = "meadow";
         else if (!hasBaseTree(x, y)) {
-          const nearStart = Math.hypot(x - start.x, y - start.y) < 4;
-          kind = nearStart ? "meadow" : "floor";
+          const nearStart = Math.hypot(x + 0.5 - fire.x, y + 0.5 - fire.y) < 4;
+          // The drained Sihlsee leaves open ground behind.
+          kind = nearStart || game.flood.isBasin(x, y) ? "meadow" : "floor";
         }
         g.rect(x, y, 1, 1).fill({
           fill: this.patterns[kind],
@@ -777,7 +823,12 @@ export class Renderer {
             color: 0xf0dfa8,
             alpha: 0.22 + hash(x, y, 83) * 0.12,
           });
-        if (!built && game.isFelled(x, y) && !game.isPaved(x, y))
+        if (
+          !built &&
+          game.isFelled(x, y) &&
+          !game.isPaved(x, y) &&
+          !game.flood.isBasin(x, y)
+        )
           stumps.push([x, y]);
         // Planned cobbles: a pale frame until a Waldmensch lays the stones.
         if (game.isPlannedPaving(x, y))
@@ -851,10 +902,18 @@ export class Renderer {
     }
   }
 
-  /** The Sihlsee, once the dam stands: water over the basin. */
+  /** The Sihlsee, once full: water over the whole basin, with its shores. */
   private drawLake() {
     this.lake.clear();
-    if (this.game.state.flooded) drawLakeShape(this.lake, sihlsee, 0x3586d4);
+    if (this.game.flood.full) drawLakeShape(this.lake, sihlsee, 0x3586d4);
+  }
+
+  /** The flood wave, where it runs down the Sihl now. */
+  private drawWave() {
+    this.wave.clear();
+    for (const [x, y] of this.game.flood.waveTiles())
+      this.wave.rect(x, y, 1, 1);
+    this.wave.fill({ color: 0x5c9fd8, alpha: 0.85 });
   }
 
   private addTree(chunk: ChunkView, x: number, y: number) {
@@ -874,6 +933,28 @@ export class Renderer {
     this.put(u);
     this.objects.addChild(sprite);
     chunk.trees.set(key(x, y), u);
+  }
+
+  /** A young tree growing back: small and light, larger as it grows. */
+  private addSeedling(chunk: ChunkView, x: number, y: number) {
+    const k = key(x, y);
+    chunk.seedlings.get(k)?.object.destroy();
+    const stage = Math.ceil(this.game.seedling(x, y) * 4) / 4;
+    const sprite = new Sprite(this.trees[treeVariant(x, y)]);
+    const size = ((0.2 + 0.55 * stage) * (0.68 + hash(x, y, 12) * 0.24)) / RES;
+    sprite.anchor.set(treeFrame.ax / treeFrame.w, treeFrame.ay / treeFrame.h);
+    sprite.scale.set(hash(x, y, 13) < 0.5 ? -size : size, size);
+    sprite.tint = 0xd8f0b0;
+    const u: Upright = {
+      object: sprite,
+      x: x + 0.5 + (hash(x, y, 8) - 0.5) * 0.3,
+      y: y + 0.5 + (hash(x, y, 9) - 0.5) * 0.3,
+      lift: 0,
+      depth: 0,
+    };
+    this.put(u);
+    this.objects.addChild(sprite);
+    chunk.seedlings.set(k, u);
   }
 
   /** A tile of the palisade along the border. */
@@ -936,18 +1017,34 @@ export class Renderer {
     }
   }
 
-  /** A tree was felled, marked or unmarked. */
+  /** A tree was felled, marked, unmarked, grew back, or a seedling grew. */
   tree(x: number, y: number) {
     const chunk = this.chunkAt(x, y);
     if (!chunk) return;
     const k = key(x, y);
     const tree = chunk.trees.get(k);
-    if (tree && !this.game.isTree(x, y)) {
+    const standing = this.game.isTree(x, y);
+    if (tree && !standing) {
       tree.object.destroy();
       chunk.trees.delete(k);
       chunk.dirty = true;
       chunk.planTrees?.get(k)?.destroy();
       chunk.planTrees?.delete(k);
+    } else if (!tree && standing) {
+      // Grown back.
+      this.addTree(chunk, x, y);
+      chunk.dirty = true;
+      if (chunk.planTrees) {
+        chunk.planTrees.forEach((sprite) => sprite.destroy());
+        chunk.planTrees = null;
+      }
+    }
+    const seedling = chunk.seedlings.get(k);
+    if (!standing && this.game.seedling(x, y) > 0)
+      this.addSeedling(chunk, x, y);
+    else if (seedling) {
+      seedling.object.destroy();
+      chunk.seedlings.delete(k);
     }
     const crown = chunk.planTrees?.get(k);
     if (crown) crown.tint = this.game.isMarked(x, y) ? 0xff9c88 : 0xffffff;
@@ -1010,6 +1107,39 @@ export class Renderer {
       top.position.set(at.x, at.y);
       this.planBuildings.addChild(top);
       this.itemViews.push({ upright, plan: top });
+    }
+  }
+
+  /** Lays the tombstones and the fire in the first clearing. */
+  props() {
+    for (const view of this.propViews) {
+      view.upright.object.destroy();
+      view.plan.destroy();
+    }
+    this.propViews = [];
+    const lying: [{ art: Art; plan: Texture }, number, number, number][] = [
+      [this.fireArt, fire.x, fire.y, 1],
+      ...this.game.state.tombs.map(
+        (t) =>
+          [this.tombArt, t.x + 0.5, t.y + 0.5, 0.5] as [
+            { art: Art; plan: Texture },
+            number,
+            number,
+            number,
+          ],
+      ),
+    ];
+    for (const [{ art, plan }, x, y, size] of lying) {
+      const sprite = new Sprite();
+      this.dress(sprite, art);
+      const upright: Upright = { object: sprite, x, y, lift: 0, depth: 0.2 };
+      this.put(upright);
+      this.objects.addChild(sprite);
+      const top = new Sprite(plan);
+      top.scale.set(1 / PLAN_RES);
+      top.position.set(x - size / 2, y - size / 2);
+      this.planBuildings.addChild(top);
+      this.propViews.push({ upright, plan: top });
     }
   }
 
@@ -1106,17 +1236,19 @@ export class Renderer {
     }
   }
 
-  /** Redraws what the flood changed. */
+  /** Redraws what the Sihlsee or the flood wave changed. */
   flooded() {
     this.drawLake();
+    this.drawWave();
     for (const chunk of this.chunks.values()) {
-      for (const k of [...chunk.trees.keys()]) {
-        const [x, y] = k.split(",").map(Number);
-        this.tree(x, y);
-      }
-      chunk.dirty = true;
+      const x0 = chunk.cx * RCHUNK;
+      const y0 = chunk.cy * RCHUNK;
+      let basin = false;
+      for (let y = y0; y < y0 + RCHUNK && !basin; y += 4)
+        for (let x = x0; x < x0 + RCHUNK && !basin; x += 4)
+          basin = this.game.flood.isBasin(x, y);
+      if (basin) chunk.dirty = true;
     }
-    this.rebuildAll();
   }
 
   // --- Buildings -------------------------------------------------------------
@@ -1127,10 +1259,10 @@ export class Renderer {
   }
 
   private picture(
-    b: Pick<Building, "kind" | "w" | "h" | "game">,
+    b: Pick<Building, "kind" | "w" | "h" | "game" | "graves">,
     axis: "x" | "y",
   ): Art {
-    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}`;
+    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}:${b.graves ?? 0}`;
     let art = this.art.get(name);
     if (!art) {
       const picture = buildingPicture(
@@ -1140,6 +1272,7 @@ export class Renderer {
         b.game,
         axis,
         this.titleOf(b.game),
+        b.graves ?? 0,
       );
       art = {
         texture: Texture.from(picture.canvas),
@@ -1152,13 +1285,15 @@ export class Renderer {
   }
 
   private planTexture(
-    b: Pick<Building, "kind" | "w" | "h" | "game">,
+    b: Pick<Building, "kind" | "w" | "h" | "game" | "graves">,
     axis: "x" | "y",
   ): Texture {
-    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}`;
+    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}:${b.graves ?? 0}`;
     let texture = this.planArt.get(name);
     if (!texture) {
-      texture = Texture.from(planPicture(b.kind, b.w, b.h, b.game, axis));
+      texture = Texture.from(
+        planPicture(b.kind, b.w, b.h, b.game, axis, b.graves ?? 0),
+      );
       this.planArt.set(name, texture);
     }
     return texture;
@@ -1176,7 +1311,7 @@ export class Renderer {
   /** Adds, updates or removes a building's picture. */
   building(b: Building, removed = false) {
     const existing = this.buildings.get(b.id);
-    const signature = `${b.state}:${b.w}x${b.h}`;
+    const signature = `${b.state}:${b.w}x${b.h}:${b.graves ?? 0}:${Math.floor((b.sunk ?? 0) * 20)}:${b.beer ? 1 : 0}:${Math.round((b.condition ?? 1) * 10)}`;
     if (existing && !removed && existing.signature === signature) return;
     if (existing) {
       if (this.stageSlot?.b.id === b.id) {
@@ -1232,10 +1367,30 @@ export class Renderer {
     this.planBuildings.addChild(plan);
     const view: BuildingView = { upright, plan, signature };
     if (b.state === "drowned") {
-      container.alpha = 0.32;
-      sprite.tint = 0x7fb0e0;
+      // Under water a pale shape; above the water line the rest, which for
+      // a church or the Kloster are its towers once the lake is full.
+      const sunk = b.sunk ?? 0;
+      const reach = stoneKinds.includes(b.kind) ? balance.waterline : 400;
+      const cut = sunk * reach;
+      const under = new Sprite(sprite.texture);
+      under.anchor.copyFrom(sprite.anchor);
+      under.scale.copyFrom(sprite.scale);
+      under.tint = 0x7fb0e0;
+      under.alpha = 0.35 * (1 - sunk * 0.5);
+      const mask = new Graphics()
+        .rect(-2000, -2000, 4000, 2000 - cut)
+        .fill(0xffffff);
+      container.addChildAt(under, 0);
+      container.addChild(mask);
+      sprite.mask = mask;
       plan.alpha = 0.32;
       top.tint = 0x7fb0e0;
+    } else if (b.state === "ruin") {
+      sprite.tint = 0x8a8478;
+      top.tint = 0x8a8478;
+    } else if (b.state === "done" && (b.condition ?? 1) < balance.working) {
+      sprite.tint = 0xb8b0a0;
+      top.tint = 0xb8b0a0;
     } else if (b.state === "site") {
       sprite.alpha = 0.4;
       top.alpha = 0.4;
@@ -1325,8 +1480,9 @@ export class Renderer {
     for (const w of this.game.workers) {
       seen.add(w.id);
       let sprite = this.workerSprites.get(w.id);
+      const textures = this.workerTextures[w.sex];
       if (!sprite) {
-        sprite = new Sprite(this.workerTextures[0]);
+        sprite = new Sprite(textures[0]);
         sprite.anchor.set(
           workerFrame.ax / workerFrame.w,
           workerFrame.ay / workerFrame.h,
@@ -1341,8 +1497,16 @@ export class Renderer {
         frame = 1 + (Math.floor(this.time * 7) % 2);
       if (!still && w.phase === "work")
         frame = 3 + (Math.floor(this.time * 4 + w.id) % 2);
-      sprite.texture = this.workerTextures[frame];
-      sprite.scale.set(w.facing / RES, 1 / RES);
+      sprite.texture = textures[frame];
+      // Children are small; the old grey; the hungry pale.
+      const grown = Math.min(1, 0.55 + (0.45 * w.age) / balance.workingAge);
+      sprite.scale.set((w.facing * grown) / RES, grown / RES);
+      sprite.tint =
+        w.hunger >= balance.mealSeconds
+          ? 0xe8d8a8
+          : w.age >= 55
+            ? 0xc8c4bc
+            : 0xffffff;
       const p = apply(this.L, w.x, w.y);
       sprite.position.set(p.x, p.y - lift * (1 - ease(this.plan)));
       sprite.zIndex = p.y;
@@ -1357,13 +1521,15 @@ export class Renderer {
     for (const w of this.game.workers) {
       let top = this.planWorkers.get(w.id);
       if (!top) {
-        top = new Sprite(this.planWorkerTexture);
+        top = new Sprite(this.planWorkerTextures[w.sex]);
         top.anchor.set(0.5);
         top.scale.set(1 / PLAN_RES);
         this.planWorkerLayer.addChild(top);
         this.planWorkers.set(w.id, top);
       }
       top.position.set(w.x, w.y - 0.15);
+      const grown = Math.min(1, 0.55 + (0.45 * w.age) / balance.workingAge);
+      top.scale.set(grown / PLAN_RES);
       top.rotation = w.facing > 0 ? 0 : Math.PI;
     }
     for (const [id, top] of this.planWorkers) {

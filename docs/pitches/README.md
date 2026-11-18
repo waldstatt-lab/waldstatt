@@ -43,4 +43,4 @@ What this pitch explicitly does not include.
 | Pitch | Status |
 | --- | --- |
 | [Ein Aufbauspiel im Wald](pitch--aufbauspiel-im-wald.md) | implemented |
-| [Leben in der Waldstatt – food, people, faith and a forest that grows back](pitch--leben-in-der-waldstatt.md) | proposed |
+| [Leben in der Waldstatt – food, people, faith and a forest that grows back](pitch--leben-in-der-waldstatt.md) | implemented |

@@ -1,6 +1,6 @@
 ---
 tags: [adr]
-status: proposed
+status: accepted
 date: 2026-11-18
 amends:
   - 0002-make-the-waldstatt-a-browser-game.md
@@ -56,19 +56,18 @@ Alternatives considered:
 
 ## Decision
 
-Once the pitch is built:
-
-- The save lives in one IndexedDB database named `waldstatt-games`. It holds a
-  `meta` record (version, supplies, buildings, unlocks, the flood, camera and
-  seed), one record for the people, and one record per chunk with its growth
-  per tile and cobbles as `Uint8Array`s.
+- The save lives in one IndexedDB database named `waldstatt-games`, in
+  [`state.ts`](../../../src/waldstatt/game/state.ts). Its
+  `meta` store holds the settlement (version, stock, buildings, unlocks, the
+  flood, camera, seed and more) and the people; its `chunks` store holds one
+  record per chunk with its felled trees, cobbles and seedlings as
+  `Uint8Array`s.
 - Writes are batched in one transaction a few seconds after a change and when
   the page is hidden, and cover only the records that changed.
 - A small wrapper over the raw IndexedDB API in the game's folder opens,
   reads, writes and deletes the database. No library is added.
-- On the first start after the change, a version 2 save in `localStorage` under
-  `waldstatt-games/save` is read, validated and converted into the database,
-  then its key is removed.
+- Version 2 saves in `localStorage` are not converted: the game was not
+  published yet. They are ignored, and «Neu beginnen» removes their key.
 - Everything read from the database is untrusted input, as in ADR 0002: each
   record is checked against its schema version and limits, and a broken save
   starts a new forest with a notice. Nothing from it is set as HTML.
@@ -77,8 +76,8 @@ Once the pitch is built:
 - The installed app asks for persistent storage with
   `navigator.storage.persist()`; the game works the same if it is refused.
 
-Every other part of ADR 0002 stays. When this record is accepted, ADR 0002 gets
-an `amended-by` entry, a note below its title, and an updated tell.
+Every other part of ADR 0002 stays; ADR 0002 notes this amendment below its
+title.
 
 ## Consequences
 
@@ -88,8 +87,8 @@ an `amended-by` entry, a note below its title, and an updated tell.
   quota, and a database of its own is simpler to delete than a set of keys.
 - Loading becomes asynchronous. The page already waits for the water pages
   before it starts, so the visitor sees no difference.
-- About a hundred lines of wrapper and migration code to keep, and the
-  migration from version 2 to test once with a real old save.
+- About a hundred lines of wrapper code to keep. Forests saved before this
+  change are lost, which is acceptable before the game is published.
 - IndexedDB is evicted under the same rules as `localStorage`: browsers may
   clear a rarely visited site's storage, and Safari limits script-written
   storage for sites that are not installed. Persistent storage helps the
@@ -101,11 +100,10 @@ an `amended-by` entry, a note below its title, and an updated tell.
 
 - `rg -n "indexedDB" src` finds matches only in `src/waldstatt/`,
   and the only database name is `waldstatt-games`.
-- `rg -n "localStorage" src/waldstatt` finds only the migration
-  of the version 2 save and the reset of keys starting with `waldstatt-games/`.
+- `rg -n "localStorage" src/waldstatt` finds only the reset of
+  old keys starting with `waldstatt-games/` and comments.
 - `rg -n "localStorage.clear|deleteDatabase" src` finds no `localStorage.clear`,
   and `deleteDatabase` only for `waldstatt-games`.
 
-A search cannot show that a reset leaves the games' saves alone or that the
-migration keeps a version 2 forest. Check both by hand in the browser's
-application panel: play a game, load an old save, then reset the forest.
+A search cannot show that a reset leaves the games' saves alone. Check it by
+hand in the browser's application panel: play a game, then reset the forest.

@@ -5,7 +5,7 @@
  * look borrows the genre's isometric view, not any game's pictures: nothing is
  * traced or copied.
  */
-import { STAGE, type Kind } from "./config";
+import { iseColours, STAGE, type Kind } from "./config";
 import { TH, TW } from "./iso";
 import { hash } from "./world";
 
@@ -424,8 +424,11 @@ export function ravenAtlas(): HTMLCanvasElement {
 
 export const workerFrame = { w: 30, h: 44, ax: 15, ay: 41 };
 
-/** A Waldmensch facing right: stand, two walking frames, two chopping frames. */
-export function workerAtlas(): HTMLCanvasElement {
+/**
+ * A Waldmensch facing right: stand, two walking frames, two chopping frames.
+ * A Waldfrau wears a long dress and a kerchief instead of tunic and hat.
+ */
+export function workerAtlas(woman = false): HTMLCanvasElement {
   const { element, ctx } = canvas(workerFrame.w * 5, workerFrame.h);
   for (let f = 0; f < 5; f++) {
     const o = f * workerFrame.w;
@@ -441,20 +444,21 @@ export function workerAtlas(): HTMLCanvasElement {
     ctx.moveTo(x + 1.8, y - 13);
     ctx.lineTo(x + 1.8 - stride, y - 1);
     ctx.stroke();
-    // Tunic with a belt.
+    // Tunic with a belt, or a long dress with an apron.
     const tunic = ctx.createLinearGradient(x - 6, 0, x + 6, 0);
-    tunic.addColorStop(0, "#c55a3a");
-    tunic.addColorStop(1, "#7d2f1e");
+    tunic.addColorStop(0, woman ? "#4f7aa8" : "#c55a3a");
+    tunic.addColorStop(1, woman ? "#2c4a6e" : "#7d2f1e");
     ctx.fillStyle = tunic;
     ctx.beginPath();
     ctx.moveTo(x - 5.5, y - 25);
     ctx.lineTo(x + 5.5, y - 25);
-    ctx.lineTo(x + 6.5, y - 11);
-    ctx.lineTo(x - 6.5, y - 11);
+    ctx.lineTo(x + (woman ? 7.5 : 6.5), y - (woman ? 4 : 11));
+    ctx.lineTo(x - (woman ? 7.5 : 6.5), y - (woman ? 4 : 11));
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = "#4a3320";
-    ctx.fillRect(x - 6, y - 16, 12, 2);
+    ctx.fillStyle = woman ? "#efe6d2" : "#4a3320";
+    if (woman) ctx.fillRect(x - 3, y - 19, 6, 13);
+    else ctx.fillRect(x - 6, y - 16, 12, 2);
     // Head and hat.
     const head = ctx.createRadialGradient(x - 1.5, y - 30, 1, x, y - 29, 5);
     head.addColorStop(0, "#f2cfa6");
@@ -463,15 +467,28 @@ export function workerAtlas(): HTMLCanvasElement {
     ctx.beginPath();
     ctx.arc(x, y - 29, 4.4, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = "#2f5a32";
-    ctx.beginPath();
-    ctx.ellipse(x, y - 32.5, 6.5, 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#3d7341";
-    ctx.beginPath();
-    ctx.moveTo(x - 4, y - 33);
-    ctx.quadraticCurveTo(x, y - 41, x + 4, y - 33);
-    ctx.fill();
+    if (woman) {
+      // A kerchief over the hair.
+      ctx.fillStyle = "#6b4423";
+      ctx.beginPath();
+      ctx.ellipse(x - 3.5, y - 27, 2, 4, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#d8a23a";
+      ctx.beginPath();
+      ctx.arc(x, y - 30, 4.8, Math.PI * 0.95, Math.PI * 2.05);
+      ctx.lineTo(x - 5, y - 27);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "#2f5a32";
+      ctx.beginPath();
+      ctx.ellipse(x, y - 32.5, 6.5, 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#3d7341";
+      ctx.beginPath();
+      ctx.moveTo(x - 4, y - 33);
+      ctx.quadraticCurveTo(x, y - 41, x + 4, y - 33);
+      ctx.fill();
+    }
     // The axe: on the shoulder, raised, or swung.
     ctx.save();
     ctx.translate(x + 4, y - 22);
@@ -830,6 +847,16 @@ const heights: Record<Kind, number> = {
   bruecke: 34,
   hafen: 80,
   schiff: 70,
+  steinhaus: 110,
+  getreidehof: 60,
+  viehhof: 70,
+  muehle: 90,
+  baeckerei: 90,
+  brauerei: 90,
+  kirche: 170,
+  friedhof: 50,
+  ise: 90,
+  brot: 70,
 };
 
 function painter(kind: Kind, w: number, d: number) {
@@ -2170,6 +2197,548 @@ function schiff(P: Painter, w: number, d: number) {
   ctx.fill();
 }
 
+// --- Living: farms, crafts, faith -------------------------------------------
+
+/** A stone house with two floors of windows and a tiled roof. */
+function steinhaus(P: Painter) {
+  P.shadow(0.2, 0.2, 2.8, 2.8, 1.3);
+  P.box(0.3, 0.3, 2.7, 2.7, 0, 40, stone);
+  for (let z = 8; z < 40; z += 7) {
+    P.line([0.3, 2.7, z], [2.7, 2.7, z], "#a89e88", 0.6);
+    P.line([2.7, 0.3, z], [2.7, 2.7, z], "#857b67", 0.6);
+  }
+  P.leftOpening(2.7, 1.25, 1.75, 0, 16, "#4a2f1c");
+  for (const u of [0.55, 2.05]) {
+    P.leftOpening(2.7, u, u + 0.35, 8, 16, glow);
+    P.leftOpening(2.7, u, u + 0.35, 24, 32, glass);
+  }
+  P.leftOpening(2.7, 1.3, 1.65, 24, 32, glow);
+  for (const v of [0.6, 1.3, 2.0]) {
+    P.rightOpening(2.7, v, v + 0.35, 8, 16, glass);
+    P.rightOpening(2.7, v, v + 0.35, 24, 32, glass);
+  }
+  P.box(0.7, 0.6, 1.0, 0.9, 40, 74, { ...stone, top: "#4a443c" });
+  P.gable(0.3, 0.3, 2.7, 2.7, 40, 26, "u", tiles, 0.18);
+}
+
+/** Rows of ripe grain on a field. */
+function field(P: Painter, u0: number, v0: number, u1: number, v1: number) {
+  P.poly(
+    [
+      [u0, v0, 0],
+      [u1, v0, 0],
+      [u1, v1, 0],
+      [u0, v1, 0],
+    ],
+    "#b8913e",
+  );
+  for (let u = u0 + 0.15; u < u1; u += 0.28) {
+    P.line([u, v0 + 0.1, 0], [u, v1 - 0.1, 0], "#7d6024", 1.6);
+    P.line([u + 0.04, v0 + 0.1, 5], [u + 0.04, v1 - 0.1, 5], "#e3c45a", 2.2);
+  }
+}
+
+function sheaf(P: Painter, u: number, v: number) {
+  const ctx = P.ctx;
+  const [x, y] = P.p(u, v, 0);
+  ellipse(ctx, x + 2, y, 6, 2.5, "rgba(0, 0, 0, 0.25)");
+  ctx.fillStyle = "#d9b34e";
+  ctx.beginPath();
+  ctx.moveTo(x - 5, y);
+  ctx.lineTo(x - 2, y - 16);
+  ctx.lineTo(x + 2, y - 16);
+  ctx.lineTo(x + 5, y);
+  ctx.fill();
+  ctx.fillStyle = "#8a6a2c";
+  ctx.fillRect(x - 3, y - 9, 6, 1.6);
+}
+
+/** A farm with a timbered house at the back and grain fields. */
+function getreidehof(P: Painter, w: number, d: number) {
+  field(P, 0.1, 1.9, w - 0.1, d - 0.1);
+  field(P, 2.3, 0.1, w - 0.1, 1.8);
+  P.shadow(0.2, 0.2, 2.0, 1.6, 0.9);
+  P.box(0.2, 0.2, 2.0, 1.6, 0, 18, plaster);
+  timber(P, 0.2, 0.2, 2.0, 1.6, 0, 18);
+  P.leftOpening(1.6, 0.9, 1.3, 0, 12, "#4a2f1c");
+  P.rightOpening(2.0, 0.6, 0.95, 7, 13, glass);
+  P.gable(0.2, 0.2, 2.0, 1.6, 18, 18, "u", thatch, 0.16);
+  sheaf(P, 2.6, 1.4);
+  sheaf(P, 3.2, 1.5);
+  sheaf(P, 3.8, 1.3);
+}
+
+function cow(P: Painter, u: number, v: number, spotted: boolean) {
+  const ctx = P.ctx;
+  const [x, y] = P.p(u, v, 0);
+  ellipse(ctx, x + 2, y + 1, 10, 3, "rgba(0, 0, 0, 0.25)");
+  ctx.fillStyle = "#3a2a20";
+  for (const dx of [-6, -3, 3, 6]) ctx.fillRect(x + dx, y - 6, 1.6, 6);
+  ellipse(ctx, x, y - 9, 9, 5, spotted ? "#f2ece0" : "#8a5a32");
+  if (spotted) {
+    ellipse(ctx, x - 3, y - 10, 3, 2, "#3a2a20");
+    ellipse(ctx, x + 3, y - 8, 2.5, 1.8, "#3a2a20");
+  }
+  ellipse(ctx, x + 9, y - 11, 3.5, 3, spotted ? "#f2ece0" : "#7a4e26");
+  ctx.fillStyle = "#e8b4a0";
+  ctx.fillRect(x + 10, y - 10, 2.6, 2);
+}
+
+function pig(P: Painter, u: number, v: number) {
+  const ctx = P.ctx;
+  const [x, y] = P.p(u, v, 0);
+  ellipse(ctx, x + 1, y + 1, 7, 2.5, "rgba(0, 0, 0, 0.25)");
+  ctx.fillStyle = "#c98a86";
+  for (const dx of [-4, 3]) ctx.fillRect(x + dx, y - 4, 1.6, 4);
+  ellipse(ctx, x, y - 6, 6.5, 4, "#f0b3ac");
+  ellipse(ctx, x + 6.5, y - 6.5, 2, 2, "#e89e98");
+}
+
+function chicken(P: Painter, u: number, v: number) {
+  const ctx = P.ctx;
+  const [x, y] = P.p(u, v, 0);
+  ellipse(ctx, x, y - 3, 2.6, 2, "#fbf6e9");
+  ellipse(ctx, x + 2, y - 5, 1.3, 1.3, "#fbf6e9");
+  ctx.fillStyle = "#c23b2a";
+  ctx.fillRect(x + 1.6, y - 6.8, 1.2, 1);
+}
+
+/** A farm with a barn, a fenced pasture, cows, pigs and chickens. */
+function viehhof(P: Painter, w: number, d: number) {
+  P.poly(
+    [
+      [0.1, 0.1, 0],
+      [w - 0.1, 0.1, 0],
+      [w - 0.1, d - 0.1, 0],
+      [0.1, d - 0.1, 0],
+    ],
+    "#7fa84c",
+  );
+  P.poly(
+    [
+      [0.1, 0.1, 0],
+      [2.4, 0.1, 0],
+      [2.4, 1.9, 0],
+      [0.1, 1.9, 0],
+    ],
+    "#9c8a62",
+  );
+  P.shadow(0.2, 0.2, 2.3, 1.7, 1.1);
+  P.box(0.2, 0.2, 2.3, 1.7, 0, 22, logs);
+  for (let z = 4; z < 22; z += 4) {
+    P.line([0.2, 1.7, z], [2.3, 1.7, z], "#5a3c22", 0.8);
+    P.line([2.3, 0.2, z], [2.3, 1.7, z], "#4a3018", 0.8);
+  }
+  P.leftOpening(1.7, 0.8, 1.6, 0, 16, "#3a2614");
+  P.line([0.8, 1.7, 0], [1.6, 1.7, 16], "#8a5a32", 1);
+  P.line([1.6, 1.7, 0], [0.8, 1.7, 16], "#8a5a32", 1);
+  P.gable(0.2, 0.2, 2.3, 1.7, 22, 20, "u", tiles, 0.16);
+  // A trough and the animals.
+  P.box(2.8, 0.5, 3.8, 0.8, 0, 4, logs);
+  const herd: [number, number, "cow" | "spot" | "pig" | "hen"][] = [
+    [3.2, 1.4, "cow"],
+    [4.2, 2.2, "spot"],
+    [2.9, 2.7, "pig"],
+    [3.6, 3.2, "pig"],
+    [1.0, 2.6, "hen"],
+    [1.4, 3.0, "hen"],
+    [0.7, 3.2, "hen"],
+    [1.8, 2.5, "hen"],
+  ];
+  herd.sort((a, b) => a[0] + a[1] - b[0] - b[1]);
+  for (const [u, v, kind] of herd) {
+    if (kind === "cow" || kind === "spot") cow(P, u, v, kind === "spot");
+    else if (kind === "pig") pig(P, u, v);
+    else chicken(P, u, v);
+  }
+  // Rails round the pasture.
+  const rails = (a: [number, number], b: [number, number]) => {
+    P.line([a[0], a[1], 7], [b[0], b[1], 7], "#7a5230", 1.2);
+    P.line([a[0], a[1], 3.5], [b[0], b[1], 3.5], "#7a5230", 1.2);
+  };
+  rails([0.1, d - 0.1], [w - 0.1, d - 0.1]);
+  rails([w - 0.1, 0.1], [w - 0.1, d - 0.1]);
+  for (let u = 0.1; u <= w; u += 0.5)
+    P.box(u - 0.04, d - 0.14, u + 0.04, d - 0.06, 0, 9, logs);
+  for (let v = 0.1; v <= d; v += 0.5)
+    P.box(w - 0.14, v - 0.04, w - 0.06, v + 0.04, 0, 9, logs);
+}
+
+/** A water mill: stone below, timber above, and a wheel on its side. */
+function muehle(P: Painter) {
+  P.shadow(0.3, 0.3, 2.5, 2.6, 1.2);
+  P.box(0.3, 0.3, 2.4, 2.6, 0, 14, stone);
+  P.box(0.3, 0.3, 2.4, 2.6, 14, 34, plaster);
+  timber(P, 0.3, 0.3, 2.4, 2.6, 14, 34);
+  P.leftOpening(2.6, 1.0, 1.45, 0, 13, "#4a2f1c");
+  P.leftOpening(2.6, 0.5, 0.85, 20, 28, glow);
+  P.gable(0.3, 0.3, 2.4, 2.6, 34, 24, "v", tiles, 0.16);
+  // The wheel turns in the water beside the right face.
+  const ctx = P.ctx;
+  const [x, y] = P.p(2.75, 1.45, 15);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.transform(1, -TH / TW, 0, 1, 0, 0);
+  ctx.strokeStyle = "#5a3a22";
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.arc(0, 0, 17, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 1.4;
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(a) * 17, Math.sin(a) * 17);
+    ctx.stroke();
+    ctx.fillStyle = "#8a5a32";
+    ctx.fillRect(Math.cos(a) * 17 - 2, Math.sin(a) * 17 - 2, 4, 4);
+  }
+  ctx.fillStyle = "#3a2614";
+  ctx.beginPath();
+  ctx.arc(0, 0, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  // Sacks of flour by the door.
+  for (const [u, v] of [
+    [1.7, 2.8],
+    [1.95, 2.85],
+  ]) {
+    const [sx, sy] = P.p(u, v, 0);
+    ellipse(ctx, sx, sy - 5, 4, 5.5, "#efe8d8");
+    ctx.fillStyle = "#b9ae94";
+    ctx.fillRect(sx - 1.5, sy - 11, 3, 2);
+  }
+}
+
+/** A timbered house with an oven at its side and loaves on a bench. */
+function baeckerei(P: Painter) {
+  P.shadow(0.2, 0.2, 2.6, 2.6, 1.2);
+  P.box(0.3, 0.3, 2.3, 2.6, 0, 30, plaster);
+  timber(P, 0.3, 0.3, 2.3, 2.6, 0, 30);
+  P.leftOpening(2.6, 0.9, 1.35, 0, 18, "#4a2f1c");
+  P.leftOpening(2.6, 1.6, 2.0, 10, 20, glow);
+  P.rightOpening(2.3, 0.6, 0.95, 10, 20, glass);
+  P.gable(0.3, 0.3, 2.3, 2.6, 30, 24, "u", tiles, 0.16);
+  // The oven: a dome of stone with a glowing mouth.
+  const ctx = P.ctx;
+  const [x, y] = P.p(2.65, 1.55, 0);
+  ellipse(ctx, x + 3, y + 1, 16, 6, "rgba(0, 0, 0, 0.25)");
+  const g = ctx.createRadialGradient(x - 4, y - 14, 2, x, y - 8, 16);
+  g.addColorStop(0, "#e0d6c2");
+  g.addColorStop(1, "#9a8f7a");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(x, y - 2, 14, 6, 0, Math.PI, 0);
+  ctx.bezierCurveTo(x + 14, y - 22, x - 14, y - 22, x - 14, y - 2);
+  ctx.fill();
+  ellipse(ctx, x - 2, y - 6, 4, 3.5, "#f0a040");
+  P.box(1.05, 0.8, 1.3, 1.05, 30, 62, { ...stone, top: "#4a443c" });
+  // Loaves on a bench.
+  P.box(0.45, 2.75, 1.4, 2.95, 0, 7, plankWood);
+  for (const u of [0.6, 0.85, 1.1]) {
+    const [bx, by] = P.p(u, 2.85, 7);
+    ellipse(ctx, bx, by - 2, 4, 2.6, "#c47a3a");
+    ellipse(ctx, bx - 1, by - 3, 2, 1, "#e0a060");
+  }
+}
+
+function barrel(P: Painter, u: number, v: number, z = 0) {
+  const ctx = P.ctx;
+  const [x, y] = P.p(u, v, z);
+  ctx.fillStyle = "#7a4a26";
+  ctx.fillRect(x - 4, y - 11, 8, 11);
+  ellipse(ctx, x, y - 11, 4, 1.8, "#9a6a3c");
+  ctx.fillStyle = "#3a2614";
+  ctx.fillRect(x - 4, y - 8, 8, 0.9);
+  ctx.fillRect(x - 4, y - 3, 8, 0.9);
+}
+
+/** A brewery: a stone house with a tall vent and barrels outside. */
+function brauerei(P: Painter) {
+  P.shadow(0.2, 0.2, 2.7, 2.6, 1.3);
+  P.box(0.3, 0.3, 2.4, 2.4, 0, 32, stone);
+  P.leftOpening(2.4, 0.9, 1.5, 0, 20, "#4a2f1c");
+  for (const v of [0.6, 1.4]) P.rightOpening(2.4, v, v + 0.4, 12, 24, glow);
+  P.gable(0.3, 0.3, 2.4, 2.4, 32, 22, "v", slate, 0.16);
+  // The vent of the brew house on the ridge.
+  P.box(1.15, 1.15, 1.6, 1.6, 44, 62, plaster);
+  P.pyramid(1.15, 1.15, 1.6, 1.6, 62, 10, slate);
+  for (const [u, v] of [
+    [2.6, 0.6],
+    [2.65, 1.0],
+    [2.6, 1.4],
+  ])
+    barrel(P, u, v);
+  barrel(P, 2.62, 0.8, 11);
+  barrel(P, 0.7, 2.7);
+}
+
+/**
+ * A church without religious symbols: a nave with tall windows and a tower
+ * with a pointed slate spire, high enough to stand out of the Sihlsee.
+ */
+function kirche(P: Painter, w: number, d: number) {
+  const wall = {
+    top: "#ece3cf",
+    left: "#e2d6bc",
+    right: "#b9aa8c",
+    line: "#8f8168",
+  };
+  P.shadow(0.4, 0.3, w - 0.4, d - 0.2, 2);
+  // The tower at the back, the nave in front of it.
+  P.box(1.3, 0.3, 2.7, 1.7, 0, 96, wall);
+  for (const z of [64, 80]) {
+    P.leftOpening(1.7, 1.75, 2.25, z, z + 10, "#3a2a1e", "#8f8168");
+    P.rightOpening(2.7, 0.75, 1.25, z, z + 10, "#3a2a1e", "#8f8168");
+  }
+  P.pyramid(1.3, 0.3, 2.7, 1.7, 96, 54, slate, 0.08);
+  P.box(0.6, 1.7, 3.4, d - 0.3, 0, 36, wall);
+  for (let v = 2.1; v < d - 0.6; v += 0.75)
+    leftArchRight(P, 3.4, v, v + 0.3, 8, 28, glass);
+  leftArch(P, d - 0.3, 1.65, 2.35, 0, 22, "#4a2f1c");
+  leftArch(P, d - 0.3, 1.8, 2.2, 26, 34, glass);
+  P.gable(0.6, 1.7, 3.4, d - 0.3, 36, 28, "v", tiles, 0.12);
+}
+
+/** An arched window on the right face (u = u) between v0..v1 and z0..z1. */
+function leftArchRight(
+  P: Painter,
+  u: number,
+  v0: number,
+  v1: number,
+  z0: number,
+  z1: number,
+  fill: string,
+) {
+  const ctx = P.ctx;
+  const vm = (v0 + v1) / 2;
+  const r = ((v1 - v0) * TW) / 4;
+  ctx.beginPath();
+  ctx.moveTo(...P.p(u, v0, z0));
+  ctx.lineTo(...P.p(u, v0, z1 - r));
+  const [mx, my] = P.p(u, vm, z1 - r);
+  ctx.ellipse(mx, my, r * 1.12, r, -Math.atan2(TH, TW), Math.PI, 0);
+  ctx.lineTo(...P.p(u, v1, z0));
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = "#6f6656";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+/** A plain rounded tombstone at (u, v), seen from the isometric angle. */
+function tombstone(ctx: Ctx, x: number, y: number, scale = 1) {
+  ellipse(ctx, x + 3 * scale, y, 6 * scale, 2.4 * scale, "rgba(0,0,0,0.3)");
+  ctx.fillStyle = "#9a958a";
+  ctx.beginPath();
+  ctx.moveTo(x - 4 * scale, y);
+  ctx.lineTo(x - 4 * scale, y - 9 * scale);
+  ctx.arc(x, y - 9 * scale, 4 * scale, Math.PI, 0);
+  ctx.lineTo(x + 4 * scale, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#c2bdb0";
+  ctx.beginPath();
+  ctx.moveTo(x - 4 * scale, y);
+  ctx.lineTo(x - 4 * scale, y - 9 * scale);
+  ctx.arc(x, y - 9 * scale, 4 * scale, Math.PI, Math.PI * 1.5);
+  ctx.lineTo(x - 1.5 * scale, y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** A graveyard: a low wall, grass, a yew, and its tombstones. */
+function friedhof(P: Painter, w: number, d: number, graves: number) {
+  P.poly(
+    [
+      [0.1, 0.1, 0],
+      [w - 0.1, 0.1, 0],
+      [w - 0.1, d - 0.1, 0],
+      [0.1, d - 0.1, 0],
+    ],
+    "#6f9a48",
+  );
+  const low = { ...stone, top: "#ddd6c4" };
+  P.box(0.1, 0.1, w - 0.1, 0.25, 0, 6, low);
+  P.box(0.1, 0.1, 0.25, d - 0.1, 0, 6, low);
+  // A yew in the back corner.
+  const ctx = P.ctx;
+  const [tx, ty] = P.p(0.6, 0.6, 0);
+  ellipse(ctx, tx + 4, ty + 1, 10, 4, "rgba(0, 0, 0, 0.3)");
+  ctx.fillStyle = "#4a3320";
+  ctx.fillRect(tx - 1.5, ty - 10, 3, 10);
+  ellipse(ctx, tx, ty - 20, 9, 13, "#24502c");
+  ellipse(ctx, tx - 2, ty - 24, 5, 7, "#326a3a");
+  const spots: [number, number][] = [];
+  for (let v = 0.75; v < d - 0.3; v += 0.65)
+    for (let u = 0.75; u < w - 0.3; u += 0.55) {
+      if (u < 1.1 && v < 1.1) continue;
+      spots.push([u, v]);
+    }
+  spots
+    .slice(0, graves)
+    .sort((a, b) => a[0] + a[1] - b[0] - b[1])
+    .forEach(([u, v]) => tombstone(ctx, ...P.p(u, v, 0)));
+  P.box(0.1, d - 0.25, w - 0.1, d - 0.1, 0, 6, low);
+  P.box(w - 0.25, 0.1, w - 0.1, d - 0.1, 0, 6, low);
+}
+
+/** The ISE AG's forge: an open smithy with anvil, hearth and its name. */
+function ise(P: Painter) {
+  const c = iseColours;
+  P.shadow(0.2, 0.2, 2.8, 2.8, 1.3);
+  P.box(0.3, 0.3, 2.7, 1.3, 0, 30, stone);
+  P.box(0.3, 1.3, 1.1, 2.7, 0, 30, stone);
+  // The open workshop under a roof on posts.
+  P.poly(
+    [
+      [1.1, 1.3, 0],
+      [2.7, 1.3, 0],
+      [2.7, 2.7, 0],
+      [1.1, 2.7, 0],
+    ],
+    "#5f5548",
+  );
+  P.box(1.5, 1.5, 2.0, 2.0, 0, 9, { ...stone, top: "#3a3028" });
+  const ctx = P.ctx;
+  const [hx, hy] = P.p(1.75, 1.75, 9);
+  const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, 12);
+  g.addColorStop(0, "rgba(255, 220, 120, 1)");
+  g.addColorStop(0.5, "rgba(240, 120, 40, 0.8)");
+  g.addColorStop(1, "rgba(200, 60, 20, 0)");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(hx, hy, 12, 0, Math.PI * 2);
+  ctx.fill();
+  // The anvil.
+  P.box(2.15, 2.1, 2.35, 2.25, 0, 6, {
+    top: "#3a3f46",
+    left: "#2a2e33",
+    right: "#1e2125",
+  });
+  P.box(2.05, 2.08, 2.45, 2.28, 6, 9, {
+    top: "#5a616a",
+    left: "#3a3f46",
+    right: "#2a2e33",
+  });
+  for (const [u, v] of [
+    [2.65, 2.65],
+    [2.65, 1.35],
+    [1.15, 2.65],
+  ])
+    P.box(u - 0.06, v - 0.06, u + 0.04, v + 0.04, 0, 30, logs);
+  P.box(0.3, 0.3, 2.7, 2.7, 30, 33, plankWood);
+  P.gable(0.3, 0.3, 2.7, 2.7, 33, 20, "u", slate, 0.16);
+  P.box(0.6, 0.6, 1.0, 1.0, 33, 70, { ...stone, top: "#2a2420" });
+  // The name on the beam over the open workshop.
+  P.box(1.1, 2.62, 2.7, 2.72, 24, 33, plankWood);
+  frontSign(P, 2.73, 1.2, 2.6, 24.5, 32.5, [{ text: "ISE AG", size: 9 }], {
+    board: c.board,
+    edge: "#2a2420",
+    ink: c.ink,
+  });
+  P.pennant(2.8, 2.8, 0, 58, [c.board, c.accent]);
+}
+
+/** The Brot auswerfen: a wooden stage with garlands and baskets of bread. */
+function brot(P: Painter, w: number, d: number) {
+  P.shadow(0.1, 0.1, w - 0.1, d - 0.1, 0.6);
+  P.box(0.2, 0.2, w - 0.2, d - 0.2, 0, 12, plankWood);
+  for (let u = 0.4; u < w - 0.2; u += 0.3)
+    P.line([u, 0.2, 12], [u, d - 0.2, 12], "#8a5a32", 0.6);
+  // Steps at the front.
+  P.box(1.2, d - 0.2, 1.8, d + 0.05, 0, 6, plankWood);
+  const posts: [number, number][] = [
+    [0.3, 0.3],
+    [w - 0.3, 0.3],
+    [0.3, d - 0.3],
+    [w - 0.3, d - 0.3],
+  ];
+  for (const [u, v] of posts.slice(0, 2))
+    P.box(u - 0.05, v - 0.05, u + 0.05, v + 0.05, 12, 50, logs);
+  // A garland between the back posts, with pennants.
+  const colours = ["#c23b2a", "#f4d24a", "#2a62b8", "#f2f2f2"];
+  for (let k = 0; k < 8; k++) {
+    const u0 = 0.3 + ((w - 0.6) * k) / 8;
+    const u1 = 0.3 + ((w - 0.6) * (k + 1)) / 8;
+    const sag = (t: number) => 46 - Math.sin(t * Math.PI) * 8;
+    P.poly(
+      [
+        [u0, 0.3, sag(k / 8)],
+        [u1, 0.3, sag((k + 1) / 8)],
+        [(u0 + u1) / 2, 0.3, sag((k + 0.5) / 8) - 7],
+      ],
+      colours[k % colours.length],
+    );
+  }
+  // Baskets of bread.
+  const ctx = P.ctx;
+  for (const [u, v] of [
+    [0.8, 0.8],
+    [1.6, 0.9],
+    [2.3, 0.8],
+  ]) {
+    const [x, y] = P.p(u, v, 12);
+    ctx.fillStyle = "#8a5a32";
+    ctx.beginPath();
+    ctx.ellipse(x, y - 3, 7, 3, 0, 0, Math.PI);
+    ctx.lineTo(x - 7, y - 3);
+    ctx.fill();
+    for (const dx of [-3, 0, 3])
+      ellipse(ctx, x + dx, y - 5, 2.6, 1.8, "#c47a3a");
+  }
+  for (const [u, v] of posts.slice(2))
+    P.box(u - 0.05, v - 0.05, u + 0.05, v + 0.05, 12, 50, logs);
+}
+
+/** A tombstone outside a graveyard. */
+export function tombPicture(): Picture {
+  const { element, ctx } = canvas(24, 28);
+  tombstone(ctx, 12, 24, 1.2);
+  return { canvas: element, ax: 12, ay: 24 };
+}
+
+/** The fire in the first clearing: a ring of stones, logs and flames. */
+export function firePicture(): Picture {
+  const { element, ctx } = canvas(48, 48);
+  const x = 24;
+  const y = 38;
+  ellipse(ctx, x + 2, y + 1, 16, 6, "rgba(0, 0, 0, 0.3)");
+  ellipse(ctx, x, y - 1, 13, 5.5, "#3a2a1e");
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * Math.PI * 2;
+    ellipse(
+      ctx,
+      x + Math.cos(a) * 13,
+      y - 1 + Math.sin(a) * 5.5,
+      3,
+      2.2,
+      "#9a958a",
+    );
+  }
+  ctx.strokeStyle = "#6b4423";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(x - 8, y);
+  ctx.lineTo(x + 6, y - 6);
+  ctx.moveTo(x + 8, y);
+  ctx.lineTo(x - 6, y - 6);
+  ctx.stroke();
+  const g = ctx.createRadialGradient(x, y - 10, 1, x, y - 8, 14);
+  g.addColorStop(0, "rgba(255, 245, 190, 1)");
+  g.addColorStop(0.4, "rgba(255, 170, 60, 0.9)");
+  g.addColorStop(1, "rgba(220, 80, 20, 0)");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(x - 7, y - 3);
+  ctx.quadraticCurveTo(x - 6, y - 16, x, y - 26);
+  ctx.quadraticCurveTo(x + 6, y - 16, x + 7, y - 3);
+  ctx.fill();
+  return { canvas: element, ax: x, ay: y };
+}
+
 /** A building's picture for its footprint, anchored at the footprint's top corner. */
 export function buildingPicture(
   kind: Kind,
@@ -2180,6 +2749,8 @@ export function buildingPicture(
   axis: "x" | "y" = "x",
   /** The game's title, written on its houses. */
   title = "",
+  /** Graves in a graveyard. */
+  graves = 0,
 ): Picture {
   const { element, P, ax, ay } = painter(kind, w, d);
   switch (kind) {
@@ -2233,6 +2804,36 @@ export function buildingPicture(
       break;
     case "schiff":
       schiff(P, w, d);
+      break;
+    case "steinhaus":
+      steinhaus(P);
+      break;
+    case "getreidehof":
+      getreidehof(P, w, d);
+      break;
+    case "viehhof":
+      viehhof(P, w, d);
+      break;
+    case "muehle":
+      muehle(P);
+      break;
+    case "baeckerei":
+      baeckerei(P);
+      break;
+    case "brauerei":
+      brauerei(P);
+      break;
+    case "kirche":
+      kirche(P, w, d);
+      break;
+    case "friedhof":
+      friedhof(P, w, d, graves);
+      break;
+    case "ise":
+      ise(P);
+      break;
+    case "brot":
+      brot(P, w, d);
       break;
   }
   return { canvas: element, ax, ay };

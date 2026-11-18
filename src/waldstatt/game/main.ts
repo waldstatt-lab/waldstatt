@@ -1,9 +1,9 @@
 /**
- * Starts the Waldstatt: reads the saved state, sets up PixiJS on the map,
- * wires the rules, the picture and the interface together, saves now and
- * then, and registers the service worker that makes the page installable and
- * playable offline (ADR 0002). Without WebGL the still picture and its note
- * stay.
+ * Starts the Waldstatt: reads the saved state from IndexedDB (ADR 0003), sets
+ * up PixiJS on the map, wires the rules, the picture and the interface
+ * together, saves now and then, and registers the service worker that makes
+ * the page installable and playable offline (ADR 0002). Without WebGL the
+ * still picture and its note stay.
  */
 import { Application } from "pixi.js";
 import { href } from "../../lib/url";
@@ -13,7 +13,7 @@ import { textLength, WorldLayer } from "./overlay";
 import { Renderer } from "./render";
 import { Stage } from "./stage";
 import { Game, type Events, type TextSpec } from "./sim";
-import { clearSaved, load, save } from "./state";
+import { clearSaved, keep, load, save } from "./state";
 import { readGames } from "./texts";
 import { Ui } from "./ui";
 import { loadPages, onPage, town } from "./world";
@@ -40,7 +40,7 @@ async function start(root: HTMLElement) {
   if (!host) return;
 
   const games = readGames();
-  const { state, problem } = load(new Set(games.map((g) => g.id)));
+  const { state, problem } = await load(new Set(games.map((g) => g.id)));
   // The water round Einsiedeln, where the texts lie hidden, and round the view.
   const reach = 130;
   const c = state.camera;
@@ -94,12 +94,13 @@ async function start(root: HTMLElement) {
     window.clearTimeout(saveTimer);
     saveTimer = 0;
     if (!saving) return;
-    if (!save(state) && !warned) {
+    void save(state).then((ok) => {
+      if (ok || warned) return;
       warned = true;
       ui?.announce(
         "Der Browser lässt nicht speichern. Der Wald bleibt nur, bis du die Seite schliesst.",
       );
-    }
+    });
   };
   const events: Events = {
     tree: (x, y) => renderer?.tree(x, y),
@@ -119,16 +120,14 @@ async function start(root: HTMLElement) {
       }
     },
     supplies: () => ui?.supplies(),
-    flooded: (drowned) => {
+    flood: () => {
       renderer?.flooded();
       world?.flooded();
-      ui?.announce(
-        drowned.length
-          ? `Der Damm steht, der Sihlsee entsteht. ${drowned.length === 1 ? "Ein Gebäude ging" : `${drowned.length} Gebäude gingen`} unter.`
-          : "Der Damm steht, der Sihlsee entsteht.",
-      );
     },
-    hint: () => ui?.updateHint(),
+    tomb: () => renderer?.props(),
+    goods: () => ui?.items(),
+    unlocked: () => ui?.unlocked(),
+    news: (text) => ui?.announce(text),
     paving: (x, y) => {
       renderer?.paving(x, y);
       // A text on cobbles changes its ink.
@@ -169,6 +168,8 @@ async function start(root: HTMLElement) {
     specs,
     events,
   );
+  game.titleOf = (id) => games.find((g) => g.id === id)?.title ?? id;
+
   // Pages arriving later bring new ways and work.
   onPage(() => game.pagesChanged());
 
@@ -213,8 +214,7 @@ async function start(root: HTMLElement) {
     reset: () => {
       saving = false;
       window.clearTimeout(saveTimer);
-      clearSaved();
-      window.location.reload();
+      void clearSaved().then(() => window.location.reload());
     },
     moved: scheduleSave,
   });
@@ -227,10 +227,6 @@ async function start(root: HTMLElement) {
     .querySelector<HTMLElement>("[data-fallback]")
     ?.setAttribute("hidden", "");
   root.dataset.ready = "true";
-  if (problem === "old")
-    ui.announce(
-      "Die Waldleute sind nach Holzrüti gezogen. Ein neuer Wald wächst, und die Schriften liegen darin verborgen.",
-    );
   if (problem === "invalid")
     ui.announce("Der gespeicherte Wald war beschädigt. Ein neuer Wald wächst.");
   if (problem === "storage")
@@ -238,7 +234,7 @@ async function start(root: HTMLElement) {
       "Der Browser lässt nicht speichern. Der Wald bleibt nur, bis du die Seite schliesst.",
     );
 
-  game.checkHint();
+  if (window.matchMedia("(display-mode: standalone)").matches) keep();
   app.ticker.add((ticker) => {
     const dt = Math.min(0.1, ticker.deltaMS / 1000);
     game.step(dt, still.matches);
@@ -256,6 +252,10 @@ async function start(root: HTMLElement) {
     ui?.frame();
   });
 
+  // The Waldleute move and age all the time: save now and then anyway.
+  window.setInterval(() => {
+    if (!document.hidden) saveNow();
+  }, 10_000);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) saveNow();
   });
