@@ -532,14 +532,14 @@ export const ravenKinds: Kind[] = ["klause", "kloster"];
 export const stoneKinds: Kind[] = ["kirche", "kloster"];
 
 /**
- * The ISE AG's colours for its forge. The ISE AG agreed to its logo and
- * design being shown; until its logo and colours are added here from its
- * own material, the forge carries its name on a neutral board.
+ * The ISE AG's colours, from its logo: the magenta of «ISE» and its first
+ * dot, a grey of its dots, and the grey of its tagline. The ISE AG agreed to
+ * its logo and design being shown; the logo itself is `ise-logo.png`.
  */
 export const iseColours = {
-  board: "#1d3a5f",
-  ink: "#f2f2f2",
-  accent: "#c9ced6",
+  magenta: "#b10058",
+  dot: "#bebebe",
+  tagline: "#646363",
 };
 
 /**

@@ -617,7 +617,9 @@ export function planPicture(
     case "ise":
       roof(ctx, 0.3, 0.3, 2.4, 2.4, "x", ...slate);
       rect(ctx, 0.6, 0.6, 0.4, 0.4, "#2a2420");
-      rect(ctx, 0.5, 2.62, 2.0, 0.12, iseColours.board, "#2a2420");
+      // The logo board seen from above: a white edge, its magenta first dot.
+      rect(ctx, 0.3, 2.9, 1.7, 0.1, "#ffffff", "#3a2614");
+      rect(ctx, 1.8, 2.9, 0.12, 0.1, iseColours.magenta);
       break;
     case "brot": {
       shadow(ctx, 0.2, 0.2, w - 0.4, h - 0.4, 0.1);

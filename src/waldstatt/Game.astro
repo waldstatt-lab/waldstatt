@@ -96,31 +96,6 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
     </div>
   </div>
 
-  <div class="wg-placing wg-crew" data-crew hidden>
-    <p data-crew-text></p>
-    <div class="wg-actions">
-      <button
-        type="button"
-        class="wg-button"
-        data-crew-step="-1"
-        aria-label="Einen Waldmenschen weniger"
-      >
-        −
-      </button>
-      <button
-        type="button"
-        class="wg-button"
-        data-crew-step="1"
-        aria-label="Einen Waldmenschen mehr"
-      >
-        +
-      </button>
-      <button type="button" class="wg-button wg-primary" data-crew-close>
-        Fertig
-      </button>
-    </div>
-  </div>
-
   <div class="wg-back" data-back hidden>
     <button type="button" class="wg-button wg-primary">
       Zurück zur Karte

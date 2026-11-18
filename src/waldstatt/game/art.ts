@@ -2586,6 +2586,17 @@ function friedhof(P: Painter, w: number, d: number, graves: number) {
 }
 
 /** The ISE AG's forge: an open smithy with anvil, hearth and its name. */
+/** The ISE AG's logo, as the ISE AG provides it; loaded by main.ts. */
+let iseLogo: HTMLImageElement | null = null;
+
+export function setIseLogo(image: HTMLImageElement) {
+  iseLogo = image;
+}
+
+/**
+ * The ISE AG's forge: an open smithy with hearth and anvil, and in front of
+ * it a white board on two posts with the ISE AG's logo, unaltered.
+ */
 function ise(P: Painter) {
   const c = iseColours;
   P.shadow(0.2, 0.2, 2.8, 2.8, 1.3);
@@ -2632,14 +2643,38 @@ function ise(P: Painter) {
   P.box(0.3, 0.3, 2.7, 2.7, 30, 33, plankWood);
   P.gable(0.3, 0.3, 2.7, 2.7, 33, 20, "u", slate, 0.16);
   P.box(0.6, 0.6, 1.0, 1.0, 33, 70, { ...stone, top: "#2a2420" });
-  // The name on the beam over the open workshop.
-  P.box(1.1, 2.62, 2.7, 2.72, 24, 33, plankWood);
-  frontSign(P, 2.73, 1.2, 2.6, 24.5, 32.5, [{ text: "ISE AG", size: 9 }], {
-    board: c.board,
-    edge: "#2a2420",
-    ink: c.ink,
-  });
-  P.pennant(2.8, 2.8, 0, 58, [c.board, c.accent]);
+  P.pennant(2.8, 2.8, 0, 58, [c.magenta, c.dot]);
+  // The board with the logo, in the plane of the front, on two posts.
+  const v = 2.95;
+  const [u0, u1, z0, z1] = [0.3, 2.0, 26, 60];
+  for (const u of [u0 + 0.08, u1 - 0.08])
+    P.box(u - 0.05, v - 0.05, u + 0.05, v + 0.05, 0, z1 + 2, logs);
+  P.leftOpening(v + 0.06, u0, u1, z0, z1, "#ffffff", "#3a2614");
+  const width = ((u1 - u0) * TW) / 2 - 4;
+  const height = z1 - z0 - 4;
+  const [x, y] = P.p((u0 + u1) / 2, v + 0.06, (z0 + z1) / 2);
+  const ctx2 = P.ctx;
+  ctx2.save();
+  ctx2.translate(x, y);
+  ctx2.transform(1, TH / TW, 0, 1, 0, 0);
+  if (iseLogo?.naturalWidth) {
+    const k = Math.min(
+      width / iseLogo.naturalWidth,
+      height / iseLogo.naturalHeight,
+    );
+    const w = iseLogo.naturalWidth * k;
+    const h = iseLogo.naturalHeight * k;
+    ctx2.imageSmoothingQuality = "high";
+    ctx2.drawImage(iseLogo, -w / 2, -h / 2, w, h);
+  } else {
+    // Without the picture, at least the name in its colours.
+    ctx2.font = `700 ${height * 0.5}px ${signFont}`;
+    ctx2.textAlign = "center";
+    ctx2.textBaseline = "middle";
+    ctx2.fillStyle = c.magenta;
+    ctx2.fillText("ISE AG", 0, 0);
+  }
+  ctx2.restore();
 }
 
 /** The Brot auswerfen: a wooden stage with garlands and baskets of bread. */

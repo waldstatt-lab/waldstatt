@@ -70,10 +70,9 @@ these differences, recorded in the
   the hungriest Waldmensch within eight tiles of the stage.
 - No test runner was added yet. The balance was played through by driving the
   rules in a browser; a headless balance run remains open.
-- The ISE AG's logo and colours are not in the game yet: its website could not
-  be reached to take them from. The forge carries the name «ISE AG» on a
-  board, and its colours sit in one place (`iseColours` in `config.ts`) to be
-  replaced with the ISE AG's own.
+- The ISE AG's logo, as the ISE AG provided it, stands on a white board on
+  two posts in front of its forge, scaled down but otherwise unchanged
+  (`ise-logo.png`); the forge's pennant takes its magenta and grey.
 - Tearing the dam down needs the usual second tap and asks nothing more.
 - The fire lies on dry ground in the first clearing, which the Alp crosses.
 

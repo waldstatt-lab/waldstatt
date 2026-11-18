@@ -24,6 +24,7 @@ export class Economy {
   /** Seconds of work towards each building's next round. */
   private clocks = new Map<number, number>();
   private upkeepClock = 0;
+  private crewClock = 0;
 
   constructor(private g: Game) {}
 
@@ -152,6 +153,12 @@ export class Economy {
 
   step(dt: number) {
     const g = this.g;
+    // Children come of age and Waldleute become free: crews fill up.
+    this.crewClock -= dt;
+    if (this.crewClock <= 0) {
+      this.crewClock = 1;
+      this.syncCrews();
+    }
     const speed = g.mood.speed();
     for (const b of g.state.buildings) {
       if (b.state !== "done") continue;

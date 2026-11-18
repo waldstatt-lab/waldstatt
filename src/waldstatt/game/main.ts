@@ -6,6 +6,8 @@
  * still picture and its note stay.
  */
 import { Application } from "pixi.js";
+import { setIseLogo } from "./art";
+import iseLogoUrl from "./ise-logo.png?url";
 import { href } from "../../lib/url";
 import { kinds, STAGE, textWidth } from "./config";
 import { attachInput } from "./input";
@@ -48,6 +50,13 @@ async function start(root: HTMLElement) {
     loadPages(town.x - reach, town.y - reach, town.x + reach, town.y + reach),
     loadPages(c.x - 40, c.y - 40, c.x + 40, c.y + 40),
   ]);
+  // The ISE AG's logo, for its forge, before anything is painted.
+  const logo = new Image();
+  logo.src = iseLogoUrl;
+  await logo
+    .decode()
+    .then(() => setIseLogo(logo))
+    .catch(() => undefined);
   const still = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   // The rules exist before the picture and interface; their events wait.

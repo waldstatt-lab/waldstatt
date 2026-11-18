@@ -106,9 +106,19 @@ export class Ui {
   private mainMenu: HTMLElement;
   private placingBar: HTMLElement;
   private backBar: HTMLElement;
-  private crewBar: HTMLElement;
-  /** The producing building whose crew the crew bar sets. */
-  private crewFor: Building | null = null;
+  /** The card over a tapped building, and the parts of it that change. */
+  private card: {
+    b: Building;
+    state: HTMLElement;
+    note: HTMLElement;
+    stock: HTMLElement;
+    crew?: {
+      count: HTMLElement;
+      minus: HTMLButtonElement;
+      plus: HTMLButtonElement;
+    };
+    repair?: HTMLButtonElement;
+  } | null = null;
   private live: HTMLElement;
   private confirmDialog: HTMLDialogElement;
   private menuItems: {
@@ -130,20 +140,6 @@ export class Ui {
     this.backBar = need(root, "[data-back]");
     this.live = need(root, "[data-live]");
     this.confirmDialog = need(root, "[data-confirm]");
-    this.crewBar = need(root, "[data-crew]");
-    for (const button of this.crewBar.querySelectorAll<HTMLButtonElement>(
-      "[data-crew-step]",
-    ))
-      button.addEventListener("click", () => {
-        const b = this.crewFor;
-        if (!b) return;
-        const step = Number(button.dataset.crewStep);
-        o.game.setCrew(b, (b.crew ?? 0) + step);
-        this.updateCrew(true);
-      });
-    need(this.crewBar, "[data-crew-close]").addEventListener("click", () =>
-      this.closeCrew(),
-    );
 
     for (const button of this.toolbox.querySelectorAll<HTMLButtonElement>(
       "[data-tool]",
@@ -186,8 +182,8 @@ export class Ui {
       if (!this.buildMenu.hidden || !this.mainMenu.hidden) {
         this.closeMenus(true);
         event.preventDefault();
-      } else if (this.crewFor) {
-        this.closeCrew();
+      } else if (this.card) {
+        this.closeCard();
       } else if (this.placing) {
         this.stopPlacing();
       } else if (this.reading) {
@@ -224,57 +220,151 @@ export class Ui {
     this.suppliesDirty = true;
   }
 
-  // --- The crews of quarries and the printing house ---------------------------
-
-  private openCrew(b: Building) {
-    this.crewFor = b;
-    this.crewBar.hidden = false;
-    this.updateCrew(true);
-    need<HTMLButtonElement>(this.crewBar, "[data-crew-step='1']").focus();
-  }
-
-  private closeCrew() {
-    if (!this.crewFor) return;
-    this.crewFor = null;
-    this.crewBar.hidden = true;
-    this.mapHost().focus({ preventScroll: true });
-  }
+  // --- The card over a building ------------------------------------------------
 
   /**
-   * Shows how many Waldleute a producing building asks for, how many are
-   * there, what it takes and what is in stock.
+   * Opens a card over a building: its name and state, its stock, and for a
+   * producing building − and + for its crew; for a ruin, its repair.
    */
-  private updateCrew(announce = false) {
-    const b = this.crewFor;
-    if (!b) return;
+  private openCard(b: Building) {
     const g = this.o.game;
-    const recipe = recipes[b.kind];
-    if (!recipe) return;
-    const want = b.crew ?? 0;
-    const there = g.crewOf(b);
-    let text = `${kinds[b.kind].name}: ${
-      want === 0
-        ? "niemand arbeitet hier."
-        : want === 1
-          ? "ein Waldmensch arbeitet hier."
-          : `${want} Waldleute arbeiten hier.`
-    }`;
-    if (there < want)
-      text += ` ${there === 0 ? "Niemand ist" : `Erst ${there} sind`} frei.`;
-    const lacking = (Object.keys(recipe.takes) as Good[]).filter(
-      (key) => g.state.stock[key] < (recipe.takes[key] ?? 0),
+    const name = this.label(b.kind, b.game);
+    const state = el("p", { className: "wg-card-state" });
+    const stock = el("p", { className: "wg-card-stock" });
+    const note = el("p", { className: "wg-card-note" });
+    const close = el(
+      "button",
+      { type: "button", className: "wg-card-close" },
+      "×",
     );
-    if (lacking.length)
-      text += ` Es fehlt ${lacking.map((key) => goodName(key)).join(" und ")}.`;
-    for (const key of Object.keys(recipe.makes) as Good[])
-      text += ` ${goodName(key)}: ${g.state.stock[key]} von ${goodMax(key)}.`;
-    const p = need(this.crewBar, "[data-crew-text]");
-    if (p.textContent !== text) p.textContent = text;
-    need<HTMLButtonElement>(this.crewBar, "[data-crew-step='-1']").disabled =
-      want <= 0;
-    need<HTMLButtonElement>(this.crewBar, "[data-crew-step='1']").disabled =
-      want >= balance.maxCrew;
-    if (announce) this.announce(text);
+    close.setAttribute("aria-label", "Schliessen");
+    close.addEventListener("click", () => this.closeCard(true));
+    const card = el(
+      "div",
+      {},
+      el("p", { className: "wg-card-title" }, name),
+      close,
+      state,
+    );
+    card.setAttribute("role", "group");
+    card.setAttribute("aria-label", name);
+    const entry: NonNullable<Ui["card"]> = { b, state, note, stock };
+    if (b.state === "done" && crewKinds.includes(b.kind)) {
+      const step = (by: number) => {
+        g.setCrew(b, (b.crew ?? 0) + by);
+        this.updateCard();
+        this.announce(this.crewText(b));
+      };
+      const minus = el(
+        "button",
+        { type: "button", className: "wg-button" },
+        "−",
+      );
+      minus.setAttribute("aria-label", "Einen Waldmenschen weniger");
+      minus.addEventListener("click", () => step(-1));
+      const plus = el(
+        "button",
+        { type: "button", className: "wg-button" },
+        "+",
+      );
+      plus.setAttribute("aria-label", "Einen Waldmenschen mehr");
+      plus.addEventListener("click", () => step(1));
+      const count = el("span", { className: "wg-card-count" });
+      card.append(el("div", { className: "wg-card-crew" }, minus, count, plus));
+      entry.crew = { count, minus, plus };
+    }
+    if (b.state === "ruin") {
+      const repair = el(
+        "button",
+        { type: "button", className: "wg-button wg-primary" },
+        `Reparieren (${this.costText(g.repairCost(b))})`,
+      );
+      repair.addEventListener("click", () => {
+        const missing = g.repair(b);
+        this.announce(missing ?? `${name} wird repariert.`);
+        this.updateCard();
+      });
+      card.append(repair);
+      entry.repair = repair;
+    }
+    card.append(stock, note);
+    this.card = entry;
+    this.o.world.showCard(b, card);
+    this.updateCard();
+    this.announce(
+      [name, state.textContent, stock.textContent, note.textContent]
+        .filter(Boolean)
+        .join(" "),
+    );
+  }
+
+  private closeCard(focusMap = false) {
+    if (!this.card) return;
+    this.card = null;
+    this.o.world.closeCard();
+    if (focusMap) this.mapHost().focus({ preventScroll: true });
+  }
+
+  /** How many Waldleute work in a building, of how many it asks for. */
+  private crewText(b: Building): string {
+    const there = this.o.game.crewOf(b);
+    const want = b.crew ?? 0;
+    return `${there} von ${want} Waldleuten`;
+  }
+
+  /** Keeps the card's state, crew and stock current, without moving focus. */
+  private updateCard() {
+    const card = this.card;
+    if (!card) return;
+    const g = this.o.game;
+    const b = card.b;
+    if (!g.state.buildings.includes(b)) return this.closeCard();
+    const set = (element: HTMLElement, text: string) => {
+      if (element.textContent !== text) element.textContent = text;
+      element.hidden = !text;
+    };
+    const recipe = recipes[b.kind];
+    let note = "";
+    let stock = "";
+    if (card.crew && recipe) {
+      const there = g.crewOf(b);
+      const want = b.crew ?? 0;
+      set(card.crew.count, this.crewText(b));
+      card.crew.minus.disabled = want <= 0;
+      card.crew.plus.disabled = want >= balance.maxCrew;
+      const makes = Object.keys(recipe.makes) as Good[];
+      const takes = Object.keys(recipe.takes) as Good[];
+      stock = makes
+        .map(
+          (key) =>
+            `${goodName(key)}: ${g.state.stock[key]} von ${goodMax(key)}`,
+        )
+        .join(" · ");
+      const lacking = takes.filter(
+        (key) => g.state.stock[key] < (recipe.takes[key] ?? 0),
+      );
+      if (want === 0) note = "Niemand arbeitet hier.";
+      else if (there < want)
+        note =
+          there === 0
+            ? "Niemand ist frei: Alle anderen haben schon Arbeit oder sind Kinder."
+            : `Es fehlen ${want - there}: Alle anderen haben schon Arbeit oder sind Kinder.`;
+      else if (makes.every((key) => g.state.stock[key] >= goodMax(key)))
+        note = "Das Lager ist voll. Die Arbeit ruht.";
+      else if (lacking.length)
+        note = `Es fehlt ${lacking.map((key) => goodName(key)).join(" und ")}.`;
+    }
+    if (card.repair) {
+      card.repair.hidden = b.state !== "ruin";
+      if (b.state === "ruin")
+        note = g.economy.missing(g.repairCost(b))
+          ? `Für die Reparatur fehlen ${g.economy.missing(g.repairCost(b))}.`
+          : "";
+    }
+    const state = this.stateText(b);
+    set(card.state, state.charAt(0).toUpperCase() + state.slice(1));
+    set(card.stock, stock);
+    set(card.note, note);
   }
 
   private mapHost(): HTMLElement {
@@ -326,7 +416,7 @@ export class Ui {
         value.textContent = values[key] ?? "";
     }
     if (!this.buildMenu.hidden) this.updateBuildMenu();
-    this.updateCrew();
+    this.updateCard();
   }
 
   private clock = 0;
@@ -645,6 +735,8 @@ export class Ui {
           else this.ghostAt(tile);
           return;
         }
+        // A tap beside an open card only closes it.
+        if (this.card) return this.closeCard();
         this.activateTile(tile);
       },
       hover: (tile) => {
@@ -689,6 +781,7 @@ export class Ui {
           }
           return;
         }
+        if (this.card) return this.closeCard();
         this.activateTile(tile);
       },
       cancel: () => {
@@ -697,7 +790,7 @@ export class Ui {
           this.o.renderer.setSaw(null);
         } else if (this.placing) this.stopPlacing();
         else if (this.reading) this.leaveReading();
-        else if (this.crewFor) this.closeCrew();
+        else if (this.card) this.closeCard();
         else if (this.doomed) this.setDoomed(null);
         else if (this.tool !== "none") this.setTool(this.tool);
       },
@@ -772,24 +865,17 @@ export class Ui {
    */
   private react(b: Building) {
     const g = this.o.game;
-    const name = this.label(b.kind, b.game);
     const say = (text: string) => {
       this.o.world.toast(b, text);
       this.announce(text);
     };
-    if (b.state === "ruin") {
-      const missing = g.repair(b);
-      return say(missing ? `${name}: ${missing}` : `${name} wird repariert.`);
-    }
     if (b.state === "done" && b.kind === "theater") {
-      if (!g.economy.open(b)) return say(`${name}: geschlossen, kein Bier.`);
+      if (!g.economy.open(b)) return this.openCard(b);
       return this.readStage(b);
     }
-    if (b.state === "done" && crewKinds.includes(b.kind))
-      return this.openCrew(b);
     const game = this.o.games.find((x) => x.id === b.game);
     if (b.state === "done" && game && b.kind === "spielhaus") {
-      if (!g.economy.open(b)) return say(`${name}: geschlossen, kein Bier.`);
+      if (!g.economy.open(b)) return this.openCard(b);
       g.mood.event("play");
       this.openGame(game.playUrl);
       return say(`${game.title} öffnet sich in einem neuen Tab.`);
@@ -800,14 +886,14 @@ export class Ui {
         `Der Quellcode von ${game.title} öffnet sich in einem neuen Tab.`,
       );
     }
-    say(`${name}: ${this.stateText(b)}`);
+    this.openCard(b);
   }
 
   /** Called when something on a building changes. */
   building(b: Building, removed: boolean) {
     if (removed && this.doomed?.id === b.id) this.setDoomed(null);
     if (removed && this.reading?.id === b.id) this.leaveReading();
-    if (removed && this.crewFor?.id === b.id) this.closeCrew();
+    if (removed && this.card?.b.id === b.id) this.closeCard();
     if (!this.buildMenu.hidden) this.updateBuildMenu();
   }
 
@@ -852,7 +938,8 @@ export class Ui {
       case "schiff":
         return "fährt die Waldleute zu den anderen Häfen am See.";
       default:
-        return "steht.";
+        // Producing buildings show their crew and stock instead.
+        return "";
     }
   }
 

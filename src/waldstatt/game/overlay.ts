@@ -172,6 +172,9 @@ export class WorldLayer {
   private waterPins: (Pin & { basin: boolean })[] = [];
   private placePins: Pin[] = [];
   private toasts = new Map<number, { pin: Pin; until: number }>();
+  /** The card over a tapped building, in a layer screen readers reach. */
+  private cards: HTMLElement;
+  private card: { pin: Pin; id: number } | null = null;
   private lastKey = "";
   private clock = 0;
   private L: Linear | null = null;
@@ -186,8 +189,9 @@ export class WorldLayer {
     this.floor.setAttribute("aria-label", "Schriften im Wald");
     this.pins = el("div", { className: "wg-pins" });
     this.pins.setAttribute("aria-hidden", "true");
+    this.cards = el("div", { className: "wg-pins wg-cards" });
     host.prepend(this.floor);
-    host.append(this.pins);
+    host.append(this.pins, this.cards);
     if (basinLabel) this.waterPin(basinLabel, true);
     for (const page of loadedPages()) this.page(page);
     onPage((page) => this.page(page));
@@ -370,6 +374,39 @@ export class WorldLayer {
     this.place(pin);
   }
 
+  /**
+   * Shows a card over a building: its state and what can be done there. One
+   * at a time; events on it stay off the map underneath.
+   */
+  showCard(b: Building, element: HTMLElement) {
+    this.closeCard();
+    element.classList.add("wg-card");
+    for (const type of [
+      "pointerdown",
+      "pointerup",
+      "pointermove",
+      "click",
+      "wheel",
+      "keydown",
+      "keyup",
+    ])
+      element.addEventListener(type, (event) => event.stopPropagation());
+    this.cards.append(element);
+    const pin = { element, x: b.x + b.w / 2, y: b.y + b.h / 2, lift: 60 };
+    this.card = { pin, id: b.id };
+    this.place(pin);
+  }
+
+  closeCard() {
+    this.card?.pin.element.remove();
+    this.card = null;
+  }
+
+  /** The building whose card shows, if any. */
+  get cardFor(): number | undefined {
+    return this.card?.id;
+  }
+
   private place(pin: Pin) {
     if (!this.L) return;
     const p = apply(this.L, pin.x, pin.y);
@@ -398,13 +435,16 @@ export class WorldLayer {
     const z = t.zoom;
     const matrix = `matrix(${L.a * z}, ${L.b * z}, ${L.c * z}, ${L.d * z}, ${t.x}, ${t.y})`;
     this.floor.style.transform = matrix;
-    this.pins.style.transform = `translate(${t.x}px, ${t.y}px) scale(${z})`;
-    this.pins.style.setProperty("--wg-zoom", String(z));
+    for (const layer of [this.pins, this.cards]) {
+      layer.style.transform = `translate(${t.x}px, ${t.y}px) scale(${z})`;
+      layer.style.setProperty("--wg-zoom", String(z));
+    }
     if (L !== this.L) {
       this.L = L;
       for (const pin of this.waterPins) this.place(pin);
       for (const pin of this.placePins) this.place(pin);
       for (const toast of this.toasts.values()) this.place(toast.pin);
+      if (this.card) this.place(this.card.pin);
     }
     const margin = 200;
     for (const item of this.items.values()) {

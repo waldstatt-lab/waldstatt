@@ -539,6 +539,84 @@
   font-size: 17px;
   letter-spacing: 0.1em;
 }
+/* The card over a tapped building: anchored above it, bottom centre. */
+.wg-cards > .wg-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 0.5rem;
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 2rem));
+  padding: 0.55rem 0.7rem 0.65rem;
+  border: 3px solid var(--wg-wood-edge);
+  border-radius: 0.375rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+  font-size: 14px;
+  white-space: normal;
+  pointer-events: auto;
+  transform-origin: 50% 100%;
+  transform: translate(-50%, -100%) scale(calc(1 / var(--wg-zoom, 1)));
+  box-shadow: 0 6px 0 rgb(0 0 0 / 0.35);
+}
+/* A small arrow down to the building. */
+.wg-cards > .wg-card::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -12px;
+  border: 9px solid transparent;
+  border-top-color: var(--wg-wood-edge);
+  border-bottom: 0;
+  transform: translateX(-50%);
+}
+.wg-card > * {
+  grid-column: 1 / -1;
+}
+.wg-card-title {
+  grid-column: 1;
+  font-family: var(--wg-serif);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.wg-card-close {
+  grid-column: 2;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 50%;
+  background: var(--wg-parchment-dark);
+  color: var(--wg-ink);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.wg-card-crew {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.wg-card-crew .wg-button {
+  min-width: 2.5rem;
+  font-size: 1.2rem;
+}
+.wg-card-count {
+  flex: 1;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.wg-card-stock {
+  font-variant-numeric: tabular-nums;
+}
+.wg-card-note {
+  font-size: 0.85rem;
+  color: #6a3a1c;
+}
+.wg-card [hidden] {
+  display: none;
+}
+
 .wg-toast {
   padding: 4px 8px;
   border: 2px solid var(--wg-wood-edge);

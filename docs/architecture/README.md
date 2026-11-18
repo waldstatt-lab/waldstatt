@@ -43,6 +43,7 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/nav.ts` | Finding ways: the Waldleute's search over open ground and crossings by ship, straightening ways, and ships' routes over their lake |
 | `game/texts.ts` | Reads the templates and splits each text into sections at its `<h2>` headings |
 | `game/art.ts` | The painted art for the isometric view on canvases at twice the resolution: trees, Waldleute, ravens, the axe and the saw, buildings (a house of its own for each game, with the game's name painted on its front), the amphitheatre in two parts, ground textures |
+| `game/ise-logo.png` | The ISE AG's logo as the ISE AG provided it, scaled to 600 pixels wide; `main.ts` loads it before the art is painted, and `art.ts` puts it on the board in front of the ISE AG's forge |
 | `game/plan.ts` | The same buildings, trees and Waldleute seen from straight above, for the plan view |
 | `game/render.ts` | PixiJS: the ground in tile units under the view's projection (textured tiles in chunks of 16 × 16 with gaps where found texts lie, rivers, lakes, the top-down art, the stage, placing, sawing and cursor overlays), and trees, buildings, Waldleute and the tools on the ground upright on top, sorted back to front, with the ravens and the motes over hidden texts above; the camera's flights and the turn between the views |
 | `game/overlay.ts` | The HTML lying on the map under the same projection: found texts under the canvas; upright pins for water names, Einsiedeln and status labels; and the measuring of texts that sets their footprint |
@@ -149,9 +150,11 @@ buildings take a crew of up to four: the Schafweide (parchment), Getreidehof
 (grain), Viehhof (meat), Mühle (grain to flour, only on a river bank),
 Bäckerei (flour to bread), Brauerei (grain to beer), Steinbruch (stones) and
 Druckerei (parchment and wood to books). A new one asks for a full crew;
-tapping a finished one shows a bar with − and + to change it. Crews are filled
-from the idle and the nearest adults, always leaving one free to fell and
-build, and work only once there; each works faster with motivation. Once
+tapping a finished one opens its card with − and + to change it. Crews are
+filled every second from the idle and the nearest adults, so Waldleute who come
+of age or become free join them, always leaving one free to fell and build;
+they work only once there, each faster with motivation. With its stock full, a
+building stops producing and its crew waits there. Once
 there are stones, the tool **Pflastern** plans cobbles like the saw marks
 trees: tap a tile, or drag over an area, of cleared, dry ground that is not
 built on, texts included. Waldleute lay one stone per planned tile, as long as
@@ -211,8 +214,10 @@ every tree on its site is felled, and the Steinhaus at 100 Waldleute. A dot on
 «Bauen» marks that something appeared, until the menu is opened. Content
 buildings are one of a kind (per game for a game's buildings). Nothing on the
 map opens a panel or dialog: a tap on a building turns the view to its text or
-stage, opens its game or source, sets its crew, repairs it, or shows a short
-status label for a few seconds. Nothing explains the game: there are no hints,
+stage, or opens its game or source; otherwise it opens a small card on the map
+above the building with its state and stock, − and + for a crew, or the repair
+of a ruin. A tap anywhere else, the card's ×, or Escape closes it. Other
+messages show as a short label over a building for a few seconds. Nothing explains the game: there are no hints,
 and announcements tell only what happened. Only «Neu beginnen» in the menu asks
 for confirmation.
 
