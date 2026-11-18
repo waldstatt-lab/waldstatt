@@ -2,6 +2,8 @@
 tags: [adr]
 status: accepted
 date: 2026-11-15
+amended-by:
+  - 0002-make-the-waldstatt-a-browser-game.md
 sources:
   - package.json
   - astro.config.mjs
@@ -12,6 +14,10 @@ sources:
 ---
 
 # 0001 — Build a static site with Astro and daisyUI on GitHub Pages
+
+> Amended by [ADR 0002](0002-make-the-waldstatt-a-browser-game.md): the home
+> page is a browser game whose content needs JavaScript and WebGL, drawn with
+> PixiJS. The site stays static.
 
 ## Context
 

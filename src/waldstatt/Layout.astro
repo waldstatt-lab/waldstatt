@@ -1,7 +1,11 @@
 ---
+/**
+ * The HTML shell of the Waldstatt: one full-screen page without header or
+ * footer, with the web manifest and icons that make it installable
+ * (ADR 0002).
+ */
 import "./styles.css";
 import { href } from "../lib/url";
-import meta from "./meta";
 
 interface Props {
   title: string;
@@ -9,37 +13,30 @@ interface Props {
 }
 
 const { title, description } = Astro.props;
+const base = "/";
 ---
 
 <!doctype html>
 <html lang="de" data-theme="waldstatt-games">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
     <meta name="description" content={description} />
-    <link rel="icon" href="data:," />
+    <meta name="theme-color" content="#1c3420" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href={href(`${base}icon-32.png`)}
+    />
+    <link rel="apple-touch-icon" href={href(`${base}icon-180.png`)} />
+    <link rel="manifest" href={href(`${base}manifest.webmanifest`)} />
     <title>{title}</title>
   </head>
-  <body class="flex min-h-screen flex-col bg-base-100 text-base-content">
-    <header class="navbar bg-base-200 px-4">
-      <div class="flex-1">
-        <a class="text-xl font-bold" href={href("/")}>
-          {meta.name}
-        </a>
-      </div>
-      <nav aria-label="Hauptnavigation">
-        <ul class="menu menu-horizontal gap-1 px-0">
-          <li>
-            <a href={href("/#spiele")}>Spiele</a>
-          </li>
-          <li>
-            <a href={href("/ueber-uns/")}>Über uns</a>
-          </li>
-        </ul>
-      </nav>
-    </header>
-    <main class="flex-1">
-      <slot />
-    </main>
+  <body class="wg-body">
+    <slot />
   </body>
 </html>

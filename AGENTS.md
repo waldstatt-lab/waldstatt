@@ -1,13 +1,13 @@
-# Working on Waldstatt Games
+# Working on the Waldstatt
 
-The website of Waldstatt Games, a hobby game studio, published at
-<https://2raben.github.io/waldstatt/> from the repository `2raben/waldstatt`. It
-links the games programmed at the Nationaler Zukunftstag, which are built and
+A building game in the browser, published as a static site at
+<https://2raben.github.io/waldstatt/> from the repository `2raben/waldstatt`.
+The forest hides the studio's texts and links to its games, which are built and
 deployed from their own repositories: Moto Devil
 (<https://2raben.github.io/moto-devil/>, `2raben/moto-devil`) and Car Drive
 (<https://2raben.github.io/carrrgh/>, `2raben/carrrgh`). "2raben" is a temporary
-organization name. The site is static, built with Astro 7, Tailwind CSS 4 and
-daisyUI 5. Use the versions pinned in `package.json` and `package-lock.json`.
+organization name. The site is built with Astro 7, Tailwind CSS 4, daisyUI 5 and
+PixiJS 8. Use the versions pinned in `package.json` and `package-lock.json`.
 
 ## Start here
 
@@ -16,11 +16,13 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and the
 Consult the [architectural decision records (ADRs)](docs/architecture/decisions/README.md)
 for significant choices and their rationale.
 
-- `src/pages/`: the home page, the about page and a page per game.
-- `src/waldstatt/`: the site's meta, layout, components, stylesheet and daisyUI
-  theme.
+- `src/pages/`: the game's page, and the endpoints for the web manifest, the
+  service worker, the app icons and the water pages.
+- `src/waldstatt/`: the layout, the page's markup, styles and daisyUI theme;
+  `game/` holds the game's modules, `tools/` the water data generator, `data/`
+  its output.
 - `src/content/games/` and `src/content.config.ts`: one German Markdown file per
-  game and its schema.
+  game and its schema, rendered into texts hidden in the forest.
 - `src/lib/`: shared helpers, `getGames()` and `href()` for base-path links.
 - `astro.config.mjs`, `package.json`, `.prettierrc.json`: build, dependencies,
   and formatting.
@@ -38,10 +40,11 @@ place; record their sources and hashes in `skills-lock.json` when adding them.
 
 ## Architecture and scope
 
-Keep the site static: no server, no client-side framework, and JavaScript only
-where a feature cannot work without it. Link to the games' deployments; do not copy
-game builds or assets into this repository. Build only what an accepted pitch or a
-concrete fix needs, and distinguish implemented behavior from ideas and pitches.
+Keep the site static: no server and no client-side framework. The game needs
+JavaScript and WebGL ([ADR 0002](docs/architecture/decisions/0002-make-the-waldstatt-a-browser-game.md)).
+Link to the games' deployments; do not copy game builds or assets into this
+repository. Build only what an accepted pitch or a concrete fix needs, and
+distinguish implemented behavior from ideas and pitches.
 
 Write all site text in German with Swiss spelling ("ss", not "ß"). Describe the
 games from their own repositories' documentation; do not invent features. Link

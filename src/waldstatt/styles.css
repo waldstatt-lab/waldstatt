@@ -1,7 +1,768 @@
-/* The site's stylesheet, loaded by its pages through Layout.astro. */
+/* The Waldstatt's stylesheet, loaded only by its own page through
+   Layout.astro: a full-screen map with wooden panels, parchment for texts,
+   and a small toolbox at the bottom. */
 @import "tailwindcss";
 @import "./theme.css";
 @plugin "@tailwindcss/typography";
 @plugin "daisyui" {
   themes: false;
+}
+
+:root {
+  --wg-wood: #3b2716;
+  --wg-wood-light: #5a3a20;
+  --wg-wood-edge: #24170c;
+  --wg-parchment: #efe0b9;
+  --wg-parchment-dark: #d4be8d;
+  --wg-ink: #3a2a1e;
+  --wg-amber: #e3b04b;
+  --wg-forest: #1c3420;
+  --wg-focus: #ffe08a;
+  --wg-serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.wg-body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--wg-forest);
+  color: var(--wg-parchment);
+  overscroll-behavior: none;
+}
+
+.wg {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.wg :focus-visible {
+  outline: 3px solid var(--wg-focus);
+  outline-offset: 2px;
+}
+
+/* --- The map and the still forest ---------------------------------------- */
+
+.wg-map {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: grab;
+}
+.wg-map:focus-visible {
+  outline-offset: -4px;
+}
+.wg-map[data-mode="axe"],
+.wg-map[data-mode="saw"],
+.wg-map[data-mode="demolish"],
+.wg-map[data-mode="place"] {
+  cursor: crosshair;
+}
+.wg-map {
+  /* Its own stacking context, so the layers inside stay under the toolbox. */
+  z-index: 0;
+  background: #1c3420;
+}
+/* The found texts lie under the map's canvas, which leaves gaps in the ground
+   where they lie cleared; trees, Waldleute and buildings cover them. Plates
+   and pins lie over the canvas. */
+.wg-map canvas {
+  position: relative;
+  z-index: 1;
+  display: block;
+}
+.wg-map > .wg-floor {
+  z-index: 0;
+}
+.wg-map > .wg-world:not(.wg-floor),
+.wg-map > .wg-pins {
+  z-index: 2;
+}
+
+.wg-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.wg-forest {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.wg-fallback-card {
+  position: relative;
+  max-width: min(28rem, calc(100vw - 2rem));
+  padding: 1.25rem 1.5rem;
+  border: 3px solid var(--wg-wood-edge);
+  border-radius: 0.375rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+  text-align: center;
+  box-shadow: 0 6px 0 rgb(0 0 0 / 0.35);
+}
+.wg-fallback-card h1 {
+  font-family: var(--wg-serif);
+  font-size: 2rem;
+  font-weight: 700;
+}
+.wg[data-ready] .wg-fallback {
+  display: none;
+}
+
+/* --- Buttons --------------------------------------------------------------- */
+
+.wg-button,
+.wg-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 2.5rem;
+  padding: 0.35rem 0.75rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-wood-light);
+  color: var(--wg-parchment);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.25);
+}
+.wg-button:hover,
+.wg-tool:hover {
+  filter: brightness(1.12);
+}
+.wg-primary {
+  background: var(--wg-amber);
+  color: var(--wg-ink);
+}
+.wg-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.wg-tool[aria-pressed="true"],
+.wg-tool[aria-expanded="true"],
+.wg-button[aria-pressed="true"] {
+  background: var(--wg-amber);
+  color: var(--wg-ink);
+  box-shadow: inset 0 3px 0 rgb(0 0 0 / 0.25);
+}
+.wg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.wg-icon {
+  flex: none;
+  image-rendering: pixelated;
+}
+
+/* --- Panels ------------------------------------------------------------------ */
+
+.wg-panel,
+.wg-toolbox,
+.wg-dialog {
+  border: 3px solid var(--wg-wood-edge);
+  border-radius: 0.375rem;
+  background: var(--wg-wood);
+  color: var(--wg-parchment);
+  box-shadow:
+    inset 0 0 0 2px var(--wg-wood-light),
+    0 6px 0 rgb(0 0 0 / 0.35);
+}
+.wg-panel h2,
+.wg-dialog h2 {
+  font-family: var(--wg-serif);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+/* --- Toolbox ------------------------------------------------------------------- */
+
+.wg-toolbox {
+  position: absolute;
+  left: 50%;
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.6rem;
+  max-width: calc(100vw - 1.5rem);
+}
+.wg-name {
+  font-family: var(--wg-serif);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.wg-fresh {
+  width: 0.6rem;
+  height: 0.6rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 50%;
+  background: #e8503a;
+}
+
+/* --- Resources: a bar on top on wide screens, in the menu on phones -------------- */
+
+.wg-resources {
+  position: absolute;
+  top: max(0.75rem, env(safe-area-inset-top));
+  left: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: fit-content;
+  max-width: calc(100vw - 1.5rem);
+  margin: 0 auto;
+  padding: 0.35rem 0.75rem;
+}
+.wg-supplies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.wg-supplies li {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 2.75rem;
+}
+.wg-supplies li[hidden] {
+  display: none;
+}
+.wg-menu .wg-menu-supplies {
+  display: none;
+}
+.wg-tools {
+  display: flex;
+  gap: 0.35rem;
+}
+
+/* --- Menus, info, hints, placing --------------------------------------------------- */
+
+.wg-menu {
+  position: absolute;
+  left: 50%;
+  bottom: 5rem;
+  transform: translateX(-50%);
+  width: min(30rem, calc(100vw - 1.5rem));
+  max-height: min(34rem, calc(100vh - 7rem));
+  overflow: auto;
+  padding: 0.75rem;
+}
+.wg-menu ul {
+  display: grid;
+  gap: 0.5rem;
+}
+.wg-main {
+  width: min(18rem, calc(100vw - 1.5rem));
+}
+.wg-main .wg-button {
+  width: 100%;
+}
+.wg-keys {
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+@media (hover: none) {
+  .wg-keys {
+    display: none;
+  }
+}
+
+/* The finder, «/» and «:», like a command line at the top. */
+.wg-finder {
+  position: absolute;
+  top: max(4.25rem, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(30rem, calc(100vw - 1.5rem));
+  padding: 0.5rem;
+}
+.wg-finder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+}
+.wg-finder-prefix {
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+}
+.wg-finder-row input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  outline: none;
+}
+.wg-finder ul {
+  max-height: min(18rem, 50vh);
+  overflow: auto;
+  margin-top: 0.4rem;
+}
+.wg-finder-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.2rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.wg-finder-item[aria-selected="true"] {
+  background: var(--wg-amber);
+  color: var(--wg-ink);
+}
+.wg-finder-hint {
+  opacity: 0.75;
+  font-family: var(--wg-sans, inherit);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.wg-finder-empty {
+  padding: 0.3rem 0.5rem;
+  opacity: 0.8;
+}
+
+.wg-credit {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+.wg-main .wg-actions .wg-button {
+  width: auto;
+  flex: 1;
+}
+.wg-build-group {
+  margin-top: 0.5rem;
+  font-family: var(--wg-serif);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--wg-amber);
+}
+.wg-build-group[hidden],
+.wg-build-items li[hidden] {
+  display: none;
+}
+.wg-menu .wg-build-items {
+  grid-template-columns: repeat(auto-fill, minmax(5.75rem, 1fr));
+  gap: 0.4rem;
+}
+.wg-build-items li {
+  display: flex;
+}
+.wg-build-item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  width: 100%;
+  padding: 0.35rem 0.25rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.15;
+  text-align: center;
+  cursor: pointer;
+}
+.wg-build-item:hover {
+  background: #fff3d2;
+}
+.wg-build-item[aria-disabled="true"] {
+  background: var(--wg-parchment-dark);
+  color: #6a5843;
+}
+.wg-build-item[aria-disabled="true"] canvas {
+  opacity: 0.6;
+}
+.wg-build-item canvas {
+  width: 4.5rem;
+  height: 3.5rem;
+}
+.wg-build-name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.wg-back {
+  position: absolute;
+  top: max(1rem, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Below the resource bar on wide screens. */
+@media (min-width: 40.01rem) {
+  .wg-back {
+    top: max(4.25rem, env(safe-area-inset-top));
+  }
+}
+
+/* The card on a building being placed. With a mouse or the keyboard it is a
+   slim label without buttons that lets clicks through: the building follows
+   the pointer or the cursor, and a click or Enter builds. Only by touch does
+   it carry «Bauen» and ×. */
+.wg-cards > .wg-card.wg-place-card {
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+}
+.wg-place-card .wg-card-title {
+  grid-column: 1;
+}
+.wg-place-card .wg-button,
+.wg-place-card .wg-card-close {
+  grid-column: auto;
+}
+.wg-place-card .wg-button {
+  min-height: 2rem;
+  padding: 0.2rem 0.6rem;
+}
+.wg-place-card .wg-card-note {
+  grid-column: 1 / -1;
+}
+.wg-cards > .wg-card.wg-place-slim {
+  pointer-events: none;
+}
+.wg-place-slim .wg-button,
+.wg-place-slim .wg-card-close {
+  display: none;
+}
+
+/* --- Dialogs ---------------------------------------------------------------------- */
+
+.wg-dialog {
+  width: min(44rem, calc(100vw - 1.5rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 1rem;
+}
+.wg-dialog::backdrop {
+  background: rgb(10 20 12 / 0.6);
+}
+.wg-dialog[open] {
+  display: grid;
+  gap: 0.75rem;
+}
+.wg-confirm {
+  width: min(28rem, calc(100vw - 1.5rem));
+}
+.wg-confirm form {
+  display: grid;
+  gap: 0.75rem;
+}
+.wg-confirm ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+/* --- Texts and the stage lying on the map --------------------------------- */
+
+/* The world layer is in tile units under the view's projection (overlay.ts);
+   each flat item is laid out at 32 text pixels per tile (TEXT_SCALE). */
+.wg-world,
+.wg-pins {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.wg-world > .wg-flat {
+  position: absolute;
+  overflow: hidden;
+  transform: scale(0.03125);
+  transform-origin: 0 0;
+}
+/* A found text lies straight on the forest floor (overlay.ts): a dark green
+   ground, painted with cobbles where they are laid, and two inks, each masked
+   to its tiles: light on the green, dark on the stones. */
+.wg-world > .wg-find {
+  overflow: visible;
+  background-color: #284526;
+  background-size: 100% 100%;
+}
+.wg-ink {
+  position: absolute;
+  inset: 0;
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+}
+.wg-measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+.wg-sheet {
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 17px;
+}
+.wg-sheet-title {
+  margin-bottom: 2px;
+  font-family: var(--wg-serif);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 22px;
+}
+.wg-sheet-tagline {
+  margin: 0 0 4px;
+  font-style: italic;
+}
+.wg-sheet .prose {
+  max-width: none;
+  font-size: 12px;
+  line-height: 17px;
+}
+.wg-sheet .prose h2 {
+  margin: 0.7em 0 0.15em;
+  font-family: var(--wg-serif);
+  font-size: 14px;
+  line-height: 18px;
+}
+.wg-sheet .prose :is(p, ul, table) {
+  margin: 0.3em 0;
+}
+.wg-sheet .prose li {
+  margin: 0.1em 0;
+}
+.wg-sheet .prose table {
+  font-size: 11px;
+}
+/* Light ink on the green floor: cream text, golden headings. The colours are
+   set on .prose itself, where the typography plugin sets its own. Both inks
+   keep the same weight, so their lines break alike. */
+.wg-ink-light .wg-sheet,
+.wg-ink-light .wg-sheet .prose {
+  --tw-prose-body: #f3ead2;
+  --tw-prose-headings: #f2c75c;
+  --tw-prose-bold: #fff6dc;
+  --tw-prose-links: #ffd88a;
+  --tw-prose-bullets: #c9dca0;
+  --tw-prose-th-borders: #8fae6a;
+  --tw-prose-td-borders: #5f7f48;
+  color: #f3ead2;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.55);
+}
+.wg-ink-light .wg-sheet-title {
+  color: #f2c75c;
+}
+/* Dark ink on the cobbles. */
+.wg-ink-dark .wg-sheet,
+.wg-ink-dark .wg-sheet .prose {
+  --tw-prose-body: #1d1812;
+  --tw-prose-headings: #5a2410;
+  --tw-prose-bold: #000;
+  --tw-prose-links: #7a2410;
+  --tw-prose-bullets: #3a3028;
+  --tw-prose-th-borders: #3a3028;
+  --tw-prose-td-borders: #6a6052;
+  color: #1d1812;
+  /* A hairline stroke thickens the letters without moving the lines. */
+  -webkit-text-stroke: 0.3px currentColor;
+  text-shadow: none;
+}
+.wg-ink-dark .wg-sheet-title {
+  color: #5a2410;
+}
+/* Upright labels keep their size on screen. */
+.wg-pins > * {
+  position: absolute;
+  transform: translate(-50%, -50%) scale(calc(1 / var(--wg-zoom, 1)));
+  white-space: nowrap;
+}
+.wg-water {
+  color: #eef7ff;
+  font-family: var(--wg-serif);
+  font-size: 13px;
+  font-style: italic;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-shadow:
+    0 1px 2px rgb(0 25 70 / 0.95),
+    0 0 6px rgb(0 25 70 / 0.6);
+}
+.wg-place {
+  color: #fff4d6;
+  font-family: var(--wg-serif);
+  font-size: 19px;
+  font-variant: small-caps;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-shadow:
+    0 1px 2px rgb(30 18 6 / 0.95),
+    0 0 8px rgb(30 18 6 / 0.7);
+}
+.wg-lake {
+  font-size: 17px;
+  letter-spacing: 0.1em;
+}
+/* The card over a tapped building: anchored above it, bottom centre. */
+.wg-cards > .wg-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 0.5rem;
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 2rem));
+  padding: 0.55rem 0.7rem 0.65rem;
+  border: 3px solid var(--wg-wood-edge);
+  border-radius: 0.375rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+  font-size: 14px;
+  white-space: normal;
+  pointer-events: auto;
+  transform-origin: 50% 100%;
+  transform: translate(-50%, -100%) scale(calc(1 / var(--wg-zoom, 1)));
+  box-shadow: 0 6px 0 rgb(0 0 0 / 0.35);
+}
+/* A small arrow down to the building. */
+.wg-cards > .wg-card::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -12px;
+  border: 9px solid transparent;
+  border-top-color: var(--wg-wood-edge);
+  border-bottom: 0;
+  transform: translateX(-50%);
+}
+.wg-card > * {
+  grid-column: 1 / -1;
+}
+.wg-card-title {
+  grid-column: 1;
+  font-family: var(--wg-serif);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.wg-card-close {
+  grid-column: 2;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 50%;
+  background: var(--wg-parchment-dark);
+  color: var(--wg-ink);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.wg-card-crew {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.wg-card-crew .wg-button {
+  min-width: 2.5rem;
+  font-size: 1.2rem;
+}
+.wg-card-count {
+  flex: 1;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.wg-card-stock {
+  font-variant-numeric: tabular-nums;
+}
+.wg-card-note {
+  font-size: 0.85rem;
+  color: #6a3a1c;
+}
+.wg-card [hidden] {
+  display: none;
+}
+
+.wg-toast {
+  padding: 4px 8px;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 3px;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+  font-size: 13px;
+  box-shadow: 0 4px 8px rgb(0 0 0 / 0.35);
+}
+
+/* --- Phones ---------------------------------------------------------------------------- */
+
+@media (max-width: 40rem) {
+  .wg-toolbox {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    transform: none;
+    max-width: none;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.35rem 0.5rem;
+    padding: 0.4rem 0.5rem max(0.4rem, env(safe-area-inset-bottom));
+    border-radius: 0;
+    border-width: 3px 0 0;
+  }
+  .wg-resources {
+    display: none;
+  }
+  .wg-menu .wg-menu-supplies {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .wg-supply-name {
+    font-size: 0.8rem;
+    opacity: 0.85;
+  }
+  .wg-tools {
+    width: 100%;
+  }
+  .wg-tool {
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+    padding: 0.3rem 0.1rem;
+    font-size: 0.72rem;
+  }
+  .wg-menu {
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: 4.75rem;
+    width: auto;
+    transform: none;
+  }
+  .wg-menu {
+    max-height: calc(100dvh - 6.5rem);
+  }
+}
+.wg-supply-name {
+  display: none;
+}
+.wg-menu-supplies .wg-supply-name {
+  display: inline;
 }
