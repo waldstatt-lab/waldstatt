@@ -128,7 +128,9 @@ in the first clearing, beside the Waldmensch; the saw, once a hut stands and
 «Holzhacken», missing from the toolbox until the axe is picked up: a tap marks
 or unmarks a single tree; once the saw is picked up, it upgrades the tool, whose
 icon turns into the saw, and a drag marks every tree in the dragged area (two
-fingers or another mouse button pan meanwhile), while a tap still marks one; with «Abreissen», a first
+fingers or another mouse button pan meanwhile), while a tap still marks one.
+An area that begins on a marked tree, dragged or selected with the keyboard,
+unmarks every marked tree in it instead, drawn pale rather than red; with «Abreissen», a first
 tap marks a building in red and a second tap on it tears it down. Only within
 10 km of a finished Recyclinghof does that return anything: half its costs, less
 as far as it is worn; a site nobody worked on yet returns its whole costs. With

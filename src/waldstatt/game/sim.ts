@@ -658,6 +658,19 @@ export class Game {
     return count;
   }
 
+  /** Unmarks every marked tree in a rectangle; returns how many. */
+  unmarkArea(x0: number, y0: number, x1: number, y1: number): number {
+    let count = 0;
+    for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
+      for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
+        if (this.unmark(x, y)) {
+          this.events.tree(x, y);
+          count++;
+        }
+    if (count) this.events.dirty();
+    return count;
+  }
+
   // --- Hidden texts and the tools on the ground ----------------------------
 
   /** The hidden text lying on a tile, if any. */

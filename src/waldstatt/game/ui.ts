@@ -171,6 +171,11 @@ export class Ui {
   /** The keyboard cursor's tile, once the keyboard moved it. */
   private keyCursor: Tile | null = null;
   private sawFrom: Tile | null = null;
+  /**
+   * Whether the area being selected with Holzhacken unmarks: it began on a
+   * marked tree. Set when it begins, so jumping to its other corner keeps it.
+   */
+  private unmarking = false;
   /** The building torn down by the next tap with the Abreissen tool. */
   private doomed: Building | null = null;
   /** While reading or playing: what, and where the camera was. */
@@ -1548,8 +1553,11 @@ export class Ui {
         if (this.placing?.mode === "mouse") this.ghostAt(tile);
       },
       saw: (from, to, done) => {
+        // A drag that begins on a marked tree unmarks.
+        this.unmarking = this.startsUnmarking(from);
         this.o.renderer.setSaw(
           done ? null : { x0: from.x, y0: from.y, x1: to.x, y1: to.y },
+          this.unmarking,
         );
         if (!done) return;
         // Holzhacken on one tile is a tap, as with the axe.
@@ -1565,12 +1573,15 @@ export class Ui {
         this.o.renderer.setCursor(this.textMode ? null : tile);
         if (this.placing) this.ghostAt(tile);
         if (this.sawFrom)
-          this.o.renderer.setSaw({
-            x0: this.sawFrom.x,
-            y0: this.sawFrom.y,
-            x1: tile.x,
-            y1: tile.y,
-          });
+          this.o.renderer.setSaw(
+            {
+              x0: this.sawFrom.x,
+              y0: this.sawFrom.y,
+              x1: tile.x,
+              y1: tile.y,
+            },
+            this.unmarking,
+          );
       },
       visual: (tile) => {
         if (this.placing || this.reading) return;
@@ -1579,15 +1590,9 @@ export class Ui {
             return this.announce("Ohne Säge gibt es keine Auswahl.");
           if (this.tool !== "fell") this.setTool("fell");
         }
-        this.sawFrom = tile;
-        this.o.renderer.setSaw({
-          x0: tile.x,
-          y0: tile.y,
-          x1: tile.x,
-          y1: tile.y,
-        });
+        this.beginArea(tile);
         this.announce(
-          `Auswahl. Bewegen, ${firstKey("other")} für die andere Ecke, dann ${firstKey("apply")}.`,
+          `${this.unmarking ? "Auswahl zum Entfernen der Markierungen" : "Auswahl"}. Bewegen, ${firstKey("other")} für die andere Ecke, dann ${firstKey("apply")}.`,
         );
       },
       other: (tile) => {
@@ -1621,15 +1626,9 @@ export class Ui {
           (this.tool === "fell" && this.o.game.state.tools.saw);
         if ((this.sawFrom || areas) && !this.reading) {
           if (!this.sawFrom) {
-            this.sawFrom = tile;
-            this.o.renderer.setSaw({
-              x0: tile.x,
-              y0: tile.y,
-              x1: tile.x,
-              y1: tile.y,
-            });
+            this.beginArea(tile);
             this.announce(
-              `Erste Ecke gesetzt. Bewegen, dann ${firstKey("apply")} für die zweite.`,
+              `${this.unmarking ? "Erste Ecke gesetzt, zum Entfernen der Markierungen" : "Erste Ecke gesetzt"}. Bewegen, dann ${firstKey("apply")} für die zweite.`,
             );
           } else {
             const from = this.sawFrom;
@@ -1659,7 +1658,25 @@ export class Ui {
     };
   }
 
-  /** A dragged area: the saw marks its trees, paving plans its free tiles. */
+  /** Whether an area of Holzhacken beginning on a tile unmarks: a marked tree. */
+  private startsUnmarking(tile: Tile): boolean {
+    return this.tool === "fell" && this.o.game.isMarked(tile.x, tile.y);
+  }
+
+  /** Begins an area with the keyboard at a tile. */
+  private beginArea(tile: Tile) {
+    this.sawFrom = tile;
+    this.unmarking = this.startsUnmarking(tile);
+    this.o.renderer.setSaw(
+      { x0: tile.x, y0: tile.y, x1: tile.x, y1: tile.y },
+      this.unmarking,
+    );
+  }
+
+  /**
+   * A selected area: Holzhacken marks its trees, or, begun on a marked tree,
+   * unmarks them; paving plans its free tiles.
+   */
   private sawArea(from: Tile, to: Tile) {
     if (this.tool === "pave") {
       const count = this.o.game.paveArea(from.x, from.y, to.x, to.y);
@@ -1667,6 +1684,14 @@ export class Ui {
         count === 1
           ? "Ein Feld wird gepflastert."
           : `${count} Felder werden gepflastert.`,
+      );
+    }
+    if (this.unmarking) {
+      const count = this.o.game.unmarkArea(from.x, from.y, to.x, to.y);
+      return this.announce(
+        count === 1
+          ? "Eine Markierung entfernt."
+          : `${count} Markierungen entfernt.`,
       );
     }
     const count = this.o.game.markArea(from.x, from.y, to.x, to.y);

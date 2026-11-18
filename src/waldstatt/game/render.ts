@@ -1992,15 +1992,20 @@ export class Renderer {
     this.previewLayer.visible = on;
   }
 
-  setSaw(area: { x0: number; y0: number; x1: number; y1: number } | null) {
+  /** The area being selected: red to mark, pale to unmark. */
+  setSaw(
+    area: { x0: number; y0: number; x1: number; y1: number } | null,
+    unmark = false,
+  ) {
     this.saw.clear();
     if (!area) return;
     const x = Math.min(area.x0, area.x1);
     const y = Math.min(area.y0, area.y1);
     const w = Math.abs(area.x1 - area.x0) + 1;
     const h = Math.abs(area.y1 - area.y0) + 1;
-    this.saw.rect(x, y, w, h).fill({ color: 0xd8432f, alpha: 0.2 });
-    this.saw.rect(x, y, w, h).stroke({ width: 0.06, color: 0xd8432f });
+    const color = unmark ? 0xfff4c8 : 0xd8432f;
+    this.saw.rect(x, y, w, h).fill({ color, alpha: unmark ? 0.3 : 0.2 });
+    this.saw.rect(x, y, w, h).stroke({ width: 0.06, color });
   }
 
   setCursor(tile: { x: number; y: number } | null) {
