@@ -63,15 +63,9 @@ export function motoGame(report: Report): Game {
     time: 0,
     saltos: 0,
   };
-  let shout = { text: "", left: 0 };
   // The demonstration: every second jump off the ramp becomes a salto, and
   // the laps in between start with a hop.
   const pilot = { laps: 0, salto: false, hopped: false, ramp: false, jet: 0 };
-
-  function say(word: string, words: string) {
-    shout = { text: word, left: 1.2 };
-    report.say(words);
-  }
 
   function reset() {
     Object.assign(s, {
@@ -118,10 +112,9 @@ export function motoGame(report: Report): Game {
     step(dt, input, demo) {
       const { held, pressed } = demo ? autopilot() : input;
       s.time += dt;
-      shout.left = Math.max(0, shout.left - dt);
       if (pressed.has("restart")) {
         reset();
-        say("NEU!", "Neu gestartet");
+        report.say("Neu gestartet");
       }
       if (s.crashed) {
         s.crashed -= dt;
@@ -132,12 +125,12 @@ export function motoGame(report: Report): Game {
         s.air = true;
         s.vy = -78;
         s.spin = 0;
-        say("HOPP!", "Springen");
+        report.say("Springen");
       }
       if (pressed.has("turn")) {
         s.dir = s.dir === 1 ? -1 : 1;
         s.vx *= -0.3;
-        say("WENDE!", "Umgedreht");
+        report.say("Umgedreht");
       }
       if (!held.has("jump")) s.jetFor = 0;
       const tilt = (held.has("forward") ? 1 : 0) - (held.has("back") ? 1 : 0);
@@ -172,7 +165,7 @@ export function motoGame(report: Report): Game {
           s.jetFor += dt;
           if (s.jetFor > 0.25) {
             s.vy -= 260 * dt;
-            if (s.jetFor - dt <= 0.25) say("WUSCH!", "Düsenschub");
+            if (s.jetFor - dt <= 0.25) report.say("Düsenschub");
           }
         }
         s.vy = Math.max(s.vy + 180 * dt, -70);
@@ -187,11 +180,11 @@ export function motoGame(report: Report): Game {
           s.vy = 0;
           if (Math.abs(turnBetween(s.angle, slope(s.x))) > 1.1) {
             s.crashed = 0.9;
-            say("UPS!", "Gestürzt, zurück zum Start");
+            report.say("Gestürzt, zurück zum Start");
           } else if (Math.abs(s.spin) > Math.PI * 1.7) {
             s.saltos += 1;
             report.stat("saltos", s.saltos);
-            say("SALTO!", "Salto!");
+            report.say("Salto!");
           }
           s.angle = slope(s.x);
           s.spin = 0;
@@ -218,20 +211,9 @@ export function motoGame(report: Report): Game {
       if (s.air && s.jetFor > 0.25) jet(ctx, scale, s.time);
       bike(ctx, scale, s.time, s.vx);
       ctx.restore();
-      if (shout.left > 0) {
-        ctx.save();
-        ctx.globalAlpha = Math.min(1, shout.left * 2);
-        ctx.font = "700 7px Georgia, serif";
-        ctx.textAlign = "center";
-        ctx.fillStyle = "#2a2420";
-        const x = clamp(s.x, 16, W - 16);
-        const y = Math.max(9, s.y - 18 - (1.2 - shout.left) * 6);
-        glow(ctx, scale, "#c23b2a", 4, () => ctx.fillText(shout.text, x, y));
-        ctx.restore();
-      }
     },
     iso(P, w, h) {
-      isoScene(P, w, h, s, shout);
+      isoScene(P, w, h, s);
     },
   };
 }
@@ -256,7 +238,6 @@ function isoScene(
     time: number;
     vx: number;
   },
-  shout: { text: string; left: number },
 ) {
   const ctx = P.ctx;
   /** World units per scene unit, and stage tiles per scene unit along the track. */
@@ -321,24 +302,22 @@ function isoScene(
         "#ffd45c",
       );
     }
-    // Far wheel and frame, then the near ones, a little apart in v.
-    for (const dv of [-0.12, 0.12]) {
-      for (const cx of [-6, 6]) {
-        const [x, y] = local(cx, -3);
-        const ring = wheelPoints(P, U(x), track + dv, Z(y), 3 * k, k / unit);
-        fillOutline(ctx, ring, dv < 0 ? "#3a3430" : "#2a2420");
-        const hub = wheelPoints(P, U(x), track + dv, Z(y), 1.6 * k, k / unit);
-        fillOutline(ctx, hub, "#8a8a92");
-      }
-      ctx.strokeStyle = dv < 0 ? "#8c2a1e" : "#c23b2a";
-      ctx.lineWidth = 1.5 * k;
-      ctx.beginPath();
-      ctx.moveTo(...pt(-6, -3, dv));
-      ctx.lineTo(...pt(-2, -6.5, dv));
-      ctx.lineTo(...pt(3.5, -7, dv));
-      ctx.lineTo(...pt(6, -3, dv));
-      ctx.stroke();
+    // Two wheels in the bike's own plane, and the frame between them.
+    for (const cx of [-6, 6]) {
+      const [x, y] = local(cx, -3);
+      const ring = wheelPoints(P, U(x), track, Z(y), 3 * k, k / unit);
+      fillOutline(ctx, ring, "#2a2420");
+      const hub = wheelPoints(P, U(x), track, Z(y), 1.6 * k, k / unit);
+      fillOutline(ctx, hub, "#8a8a92");
     }
+    ctx.strokeStyle = "#c23b2a";
+    ctx.lineWidth = 1.5 * k;
+    ctx.beginPath();
+    ctx.moveTo(...pt(-6, -3));
+    ctx.lineTo(...pt(-2, -6.5));
+    ctx.lineTo(...pt(3.5, -7));
+    ctx.lineTo(...pt(6, -3));
+    ctx.stroke();
     // Tank and seat across the frame.
     fillOutline(
       ctx,
@@ -414,18 +393,6 @@ function isoScene(
     "#4a3320",
   );
   if (onRamp) bike3d();
-  if (shout.left > 0) {
-    const [x, y] = at(clamp(s.x, 16, W - 16), s.y - 22);
-    ctx.globalAlpha = Math.min(1, shout.left * 2);
-    ctx.font = "700 14px Georgia, serif";
-    ctx.textAlign = "center";
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "#fff6dc";
-    ctx.strokeText(shout.text, x, y);
-    ctx.fillStyle = "#c23b2a";
-    ctx.fillText(shout.text, x, y);
-    ctx.globalAlpha = 1;
-  }
 }
 
 /* ---------- Drawing ---------- */
@@ -438,7 +405,7 @@ function backdrop(scale: number) {
   const image = document.createElement("canvas");
   image.width = Math.round(W * scale);
   image.height = Math.round(H * scale);
-  const ctx = image.getContext("2d");
+  const ctx = image.getContext("2d", { willReadFrequently: true });
   cached = { scale, image };
   if (!ctx) return image;
   ctx.scale(scale, scale);

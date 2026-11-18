@@ -276,6 +276,8 @@ export class Renderer {
     private app: Application,
     private game: Game,
     private still: () => boolean,
+    /** A game's title, written on its houses. */
+    private titleOf: (game: string | undefined) => string,
   ) {
     TextureSource.defaultOptions.scaleMode = "linear";
     TextureSource.defaultOptions.autoGenerateMipmaps = true;
@@ -337,7 +339,7 @@ export class Renderer {
     };
     const mote = document.createElement("canvas");
     mote.width = mote.height = 32;
-    const mctx = mote.getContext("2d");
+    const mctx = mote.getContext("2d", { willReadFrequently: true });
     if (mctx) {
       const glow = mctx.createRadialGradient(16, 16, 0, 16, 16, 16);
       glow.addColorStop(0, "rgba(255, 250, 215, 1)");
@@ -1131,7 +1133,14 @@ export class Renderer {
     const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}`;
     let art = this.art.get(name);
     if (!art) {
-      const picture = buildingPicture(b.kind, b.w, b.h, b.game, axis);
+      const picture = buildingPicture(
+        b.kind,
+        b.w,
+        b.h,
+        b.game,
+        axis,
+        this.titleOf(b.game),
+      );
       art = {
         texture: Texture.from(picture.canvas),
         ax: picture.ax,

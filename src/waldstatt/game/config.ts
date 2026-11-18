@@ -23,12 +23,15 @@ export const balance = {
   workersPerSite: 3,
   /** Seconds for one sheep pasture to grow one parchment. */
   parchmentSeconds: 10,
-  /** Seconds for the printing press to turn one parchment into one print. */
-  printSeconds: 8,
+  /** Seconds one Waldmensch in the printing house needs to print one book. */
+  bookSeconds: 8,
+  /** What one book takes. */
+  bookParchment: 1,
+  bookWood: 2,
   /** Stock limits. */
   maxParchment: 30,
-  maxPrints: 20,
-  /** Share of the wood returned when a building is torn down. */
+  maxBooks: 20,
+  /** Share of the costs returned when a building is torn down. */
   refund: 0.5,
   /** Trees the saw marks at most in one stroke. */
   sawMaxTiles: 600,
@@ -49,7 +52,7 @@ export const balance = {
   /** Seconds one Waldmensch in a quarry needs to break one stone. */
   stoneSeconds: 5,
   maxStones: 300,
-  /** Waldleute one quarry takes at most. */
+  /** Waldleute one quarry or printing house takes at most. */
   maxCrew: 4,
   /** Seconds to pave one tile, which takes one stone. */
   paveSeconds: 0.8,
@@ -65,6 +68,7 @@ export type Kind =
   | "druckerei"
   | "steinbruch"
   | "spielhaus"
+  | "bibliothek"
   | "theater"
   | "klause"
   | "kloster"
@@ -78,8 +82,17 @@ export type Group = "Wohnen" | "Wirtschaft" | "Wege" | "Spiele" | "Prestige";
 export interface Cost {
   wood: number;
   parchment: number;
-  prints: number;
+  stones: number;
+  books: number;
 }
+
+/** The supplies, in the order the toolbox and the build menu name them. */
+export const supplies: { key: keyof Cost; name: string }[] = [
+  { key: "wood", name: "Holz" },
+  { key: "parchment", name: "Pergament" },
+  { key: "stones", name: "Steine" },
+  { key: "books", name: "Bücher" },
+];
 
 export interface KindInfo {
   name: string;
@@ -96,10 +109,12 @@ export interface KindInfo {
   about: string;
 }
 
-const cost = (wood: number, parchment = 0, prints = 0): Cost => ({
+const cost = (wood: number, more: Partial<Omit<Cost, "wood">> = {}): Cost => ({
   wood,
-  parchment,
-  prints,
+  parchment: 0,
+  stones: 0,
+  books: 0,
+  ...more,
 });
 
 export const kinds: Record<Kind, KindInfo> = {
@@ -121,17 +136,18 @@ export const kinds: Record<Kind, KindInfo> = {
     h: 3,
     work: 6,
     limit: "many",
-    about: "Schafe geben Pergament für Spielhäuser und das Kloster.",
+    about: "Schafe geben Pergament für Spielhäuser und die Druckerei.",
   },
   druckerei: {
     name: "Druckerei",
     group: "Wirtschaft",
-    cost: cost(20, 4),
+    cost: cost(20, { parchment: 4, stones: 10 }),
     w: 3,
     h: 3,
     work: 14,
     limit: "one",
-    about: "Druckt Pergament zu Programmzetteln für das Theater.",
+    about:
+      "Waldleute drucken hier Bücher aus Pergament und Holz, für Bibliotheken, das Theater und das Kloster.",
   },
   steinbruch: {
     name: "Steinbruch",
@@ -141,23 +157,33 @@ export const kinds: Record<Kind, KindInfo> = {
     h: 3,
     work: 12,
     limit: "many",
-    about:
-      "Waldleute brechen hier Steine. Mit Steinen pflasterst du Wege und Plätze.",
+    about: "Waldleute brechen hier Steine für Pflaster und steinerne Bauten.",
   },
   spielhaus: {
     name: "Spielhaus",
     group: "Spiele",
-    cost: cost(24, 4),
+    cost: cost(24, { parchment: 4 }),
     w: 5,
-    h: 5,
+    h: 4,
     work: 16,
     limit: "game",
     about: "Hier wohnt das Spiel. Antippen öffnet es in einem neuen Tab.",
   },
+  bibliothek: {
+    name: "Bibliothek",
+    group: "Spiele",
+    cost: cost(20, { stones: 12, books: 4 }),
+    w: 4,
+    h: 3,
+    work: 16,
+    limit: "game",
+    about:
+      "Hier liegt der Quellcode des Spiels. Antippen öffnet ihn in einem neuen Tab.",
+  },
   theater: {
     name: "Theater",
     group: "Spiele",
-    cost: cost(40, 0, 4),
+    cost: cost(40, { stones: 16, books: 4 }),
     w: 12,
     h: 13,
     work: 24,
@@ -179,12 +205,13 @@ export const kinds: Record<Kind, KindInfo> = {
   kloster: {
     name: "Kloster Einsiedeln",
     group: "Prestige",
-    cost: cost(150, 10, 6),
+    cost: cost(80, { stones: 120, books: 10 }),
     w: 9,
     h: 7,
     work: 90,
     limit: "one",
-    about: "Der grösste Bau der Waldstatt. Mit ihm kommt ein zweiter Rabe.",
+    about:
+      "Der grösste Bau der Waldstatt, mit einer Bibliothek voller Bücher. Mit ihm kommt ein zweiter Rabe.",
   },
   bruecke: {
     name: "Brücke",
@@ -200,12 +227,12 @@ export const kinds: Record<Kind, KindInfo> = {
   hafen: {
     name: "Hafen",
     group: "Wege",
-    cost: cost(16),
+    cost: cost(12, { stones: 6 }),
     w: 3,
     h: 2,
     work: 10,
     limit: "many",
-    about: "Ein Steg am Seeufer, wo Schiffe anlegen.",
+    about: "Ein Steg auf einer steinernen Mole, wo Schiffe anlegen.",
   },
   schiff: {
     name: "Schiff",
@@ -221,7 +248,7 @@ export const kinds: Record<Kind, KindInfo> = {
   damm: {
     name: "Damm",
     group: "Prestige",
-    cost: cost(60),
+    cost: cost(30, { stones: 80 }),
     w: 7,
     h: 2,
     work: 40,
@@ -237,6 +264,9 @@ export const groups: Group[] = [
   "Spiele",
   "Prestige",
 ];
+
+/** The buildings Waldleute are put in to work: they break stones or print books. */
+export const crewKinds: Kind[] = ["steinbruch", "druckerei"];
 
 /** The buildings that bring a raven: Meinrad kept two. */
 export const ravenKinds: Kind[] = ["klause", "kloster"];

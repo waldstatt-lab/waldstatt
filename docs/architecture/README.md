@@ -34,13 +34,13 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/world.ts` | The world: the forest from a fixed seed, and the water pages, loaded as they come into view and rasterized into tiles: water, lakes by number, the palisade and the land abroad |
 | `game/iso.ts` | The projections between tiles and the screen: the isometric view, the top-down plan, and the blend between them |
 | `game/state.ts` | The save in `localStorage`: versioned JSON, validated on load, reset by key prefix |
-| `game/sim.ts` | The rules: the tools on the ground, marking and felling, the hidden texts, Waldleute and their tasks, bridges, ports and ships, building sites, sheep and the printing press, the ravens, the flood, the Waldmensch's hints |
+| `game/sim.ts` | The rules: the tools on the ground, marking and felling, the hidden texts, Waldleute and their tasks, bridges, ports and ships, building sites, sheep, the crews of quarries and the printing house, the ravens, the flood, the Waldmensch's hints |
 | `game/nav.ts` | Finding ways: the Waldleute's search over open ground and crossings by ship, straightening ways, and ships' routes over their lake |
 | `game/texts.ts` | Reads the templates and splits each text into sections at its `<h2>` headings |
-| `game/art.ts` | The painted art for the isometric view on canvases at twice the resolution: trees, Waldleute, ravens, the axe and the saw, buildings (a house of its own for each game), the amphitheatre in two parts, ground textures |
+| `game/art.ts` | The painted art for the isometric view on canvases at twice the resolution: trees, Waldleute, ravens, the axe and the saw, buildings (a house of its own for each game, with the game's name painted on its front), the amphitheatre in two parts, ground textures |
 | `game/plan.ts` | The same buildings, trees and Waldleute seen from straight above, for the plan view |
 | `game/render.ts` | PixiJS: the ground in tile units under the view's projection (textured tiles in chunks of 16 × 16 with gaps where found texts lie, rivers, lakes, the top-down art, the stage, placing, sawing and cursor overlays), and trees, buildings, Waldleute and the tools on the ground upright on top, sorted back to front, with the ravens and the motes over hidden texts above; the camera's flights and the turn between the views |
-| `game/overlay.ts` | The HTML lying on the map under the same projection: found texts under the canvas, Spielhaus plates over it; upright pins for water names, Einsiedeln and status labels; and the measuring of texts that sets their footprint |
+| `game/overlay.ts` | The HTML lying on the map under the same projection: found texts under the canvas; upright pins for water names, Einsiedeln and status labels; and the measuring of texts that sets their footprint |
 | `game/stage.ts` | The theatre's stage in two canvases: the preview standing on the stage in 3D for the isometric view, and, turned top-down, the preview in 2D with a status line and wooden signs for the programme, the keys and the real game, on the amphitheatre's floor |
 | `game/input.ts` | Pointer, touch, wheel and keyboard input on the map |
 | `game/ui.ts` | The HTML interface, reading on the map, and announcements |
@@ -113,7 +113,7 @@ in the first clearing, beside the Waldmensch; the saw, once a hut stands and
 are missing from the toolbox. The axe marks single trees; the saw marks every tree in a dragged area
 (two fingers or another mouse button pan meanwhile); with «Abreissen», a first
 tap marks a building in red and a second tap on it tears it down, returning half
-its wood. Waldleute walk only on open ground: felled forest, the natural gaps,
+its costs. Waldleute walk only on open ground: felled forest, the natural gaps,
 bridges and the finished dam, never through standing trees or water. They build
 the nearest site they can reach (counted a few tiles nearer) and otherwise fell
 the nearest marked tree beside open ground, so a sawn area is cleared from its
@@ -137,10 +137,13 @@ the lake comes, takes everyone waiting for the same crossing, sails over the
 lake's water to the other port and returns to its own. Ships under way are not
 saved; after a reload they lie at their ports.
 
-A **Steinbruch** gives stones. Tapping a finished quarry shows a bar with − and
-+ to put Waldleute in, up to four; the idle and the nearest go first, walk
-there and break stones at its rock face, one every five seconds each, up to a
-stock of 300. They do no other work until they are taken out again. Once a
+A **Steinbruch** gives stones, the **Druckerei** books. Tapping a finished
+quarry or printing house shows a bar with − and + to put Waldleute in, up to
+four; the idle and the nearest go first, walk there and work: in a quarry they
+break stones at its rock face, one every five seconds each, up to a stock of
+300; in the printing house they print books at its door, one every eight
+seconds each, from one parchment and two wood, up to a stock of 20. They do no
+other work until they are taken out again. Once a
 quarry stands, the tool **Pflastern** plans cobbles like the saw marks trees:
 tap a tile, or drag over an area, of cleared, dry ground that is not built on,
 texts included. Waldleute lay one stone per planned tile, as long as there
@@ -148,8 +151,11 @@ are stones, and walk half again as fast on cobbles. Planned tiles show a pale
 frame until they are paved.
 Buildings stand only on cleared ground: a footprint with trees shows red,
 «Zuerst die Bäume fällen». Each finished hut adds a Waldmensch, up to 16. Sheep
-pastures grow parchment and the printing press turns parchment into prints
-while the page is open; nothing happens while it is closed or hidden. The build
+pastures grow parchment, quarries and the printing house work while the page
+is open; nothing happens while it is closed or hidden. The first buildings
+take wood, and parchment for the Spielhaus; the larger ones also stones and
+books: the printing house, the libraries, the theatre, the Kloster, whose
+library takes the most books, the dam and the ports (`config.ts`). The build
 menu lists every building with its costs; those that cannot be built yet stay
 listed with the reason, and the menu updates in place, so it keeps its scroll
 position. Content buildings are one of a kind (per game for a game's
@@ -195,12 +201,19 @@ scroll left it circles its own building. Its direction is announced.
 
 Each game has a house of its own: Moto Devil a keep with a tower and a jump
 ramp, Car Drive a coach house with two gates and a lantern turret; another game
-gets a generic house. A tap on the house opens the game in a new tab; its plate
-in front carries «Spielen» and «Quellcode», which open new tabs too.
+gets a generic house. The game's name is painted on a board on the house's
+front, in the plane of its wall. A tap on the house opens the game in a new
+tab. Once its Spielhaus stands, each game can have a **Bibliothek**: a stone
+hall with the game's name and «Quellcode» over its door and books stacked
+outside; it costs books, and a tap on it opens the game's source code in a new
+tab. Both are announced, so keyboard users reach them with the cursor and
+Enter.
 
 The theatre is a wooden amphitheatre: tiered stands with railings rise all
 round a stage in its middle, with a backdrop and red curtains at its back,
-pennants and torches. The stage is painted on the map, not HTML (`stage.ts`).
+pennants and torches. A painted audience sits on the stands, the same seats in
+both views (`crowd()` in `art.ts`); the first front row stays free, so the
+hint lying before the stage stays readable. The stage is painted on the map, not HTML (`stage.ts`).
 In the isometric view the preview of a game whose Spielhaus stands plays in 3D
 on the stage: its picture stands between the theatre's back and front, which
 are painted apart, so the front stands hide it. Turned top-down, a canvas
@@ -228,10 +241,11 @@ under the water.
 
 **State and offline.** The save is one versioned JSON document under
 `waldstatt-games/save`: supplies, felled trees as a bitset per chunk, marks,
-buildings with a quarry's crew, the flood, the camera, the dismissed hint,
+buildings with the crew of a quarry or the printing house, the flood, the camera, the dismissed hint,
 the tools picked up, where the saw lies, the seed and positions of the hidden
 texts, stones, and cobbled and planned tiles (cobbles as a bitset per chunk).
-Saves from before stones and cobbles load without them. A save
+Saves from before stones and cobbles load without them, and a save's prints,
+from before the printing house made books, load as books. A save
 from before the move to Holzrüti (version 1) starts a new forest with a
 notice. A text's length follows its current text on load, so changed texts
 need no migration. The game

@@ -62,8 +62,6 @@ export function attachInput(
   };
 
   host.addEventListener("pointerdown", (event) => {
-    // Signs and the stage on the map handle their own clicks.
-    if ((event.target as Element).closest?.("[data-world-ui]")) return;
     host.focus({ preventScroll: true });
     const point = local(event);
     // The cursor tile is for the keyboard; a pointer hides it.
@@ -177,7 +175,7 @@ export function attachInput(
   });
 
   host.addEventListener("keydown", (event) => {
-    // Keys on a plate's links are theirs.
+    // Keys on something inside the map, such as a link in a text, are theirs.
     if (event.target !== host) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (handlers.key(event, true)) {

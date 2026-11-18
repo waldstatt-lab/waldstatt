@@ -18,7 +18,7 @@ const maxChars = 2_000_000;
 export interface Building {
   id: number;
   kind: Kind;
-  /** The game a Spielhaus belongs to. */
+  /** The game a Spielhaus or Bibliothek belongs to. */
   game?: string;
   /** Top-left tile and size in tiles. */
   x: number;
@@ -28,7 +28,7 @@ export interface Building {
   state: "site" | "done" | "drowned";
   /** Seconds of work done. */
   work: number;
-  /** Waldleute put in a quarry. */
+  /** Waldleute put in a quarry or the printing house. */
   crew?: number;
 }
 
@@ -42,7 +42,7 @@ export interface Camera {
 export interface Saved {
   wood: number;
   parchment: number;
-  prints: number;
+  books: number;
   stones: number;
   /** Felled trees: per chunk "cx,cy", a bitset of its tiles. */
   felled: Map<string, Uint8Array>;
@@ -72,7 +72,7 @@ export function freshState(): Saved {
   return {
     wood: 0,
     parchment: 0,
-    prints: 0,
+    books: 0,
     stones: 0,
     felled: new Map(),
     paved: new Map(),
@@ -149,10 +149,14 @@ function parse(data: unknown, gameIds: Set<string>): Saved {
   const d = data as Record<string, unknown>;
   if (d.v !== version) throw new Error("version");
   const state = freshState();
-  for (const name of ["wood", "parchment", "prints"] as const) {
+  for (const name of ["wood", "parchment"] as const) {
     if (!isInt(d[name], 0, 1e7)) throw new Error(name);
     state[name] = d[name] as number;
   }
+  // Older saves count prints; the printing house makes books now.
+  const books = d.books ?? d.prints;
+  if (!isInt(books, 0, 1e7)) throw new Error("books");
+  state.books = books;
   if (typeof d.felled !== "object" || d.felled === null)
     throw new Error("felled");
   for (const [key, value] of Object.entries(d.felled)) {
@@ -283,7 +287,7 @@ export function save(state: Saved): boolean {
     v: version,
     wood: state.wood,
     parchment: state.parchment,
-    prints: state.prints,
+    books: state.books,
     stones: state.stones,
     felled,
     marks,

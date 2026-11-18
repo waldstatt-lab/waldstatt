@@ -5,7 +5,7 @@
  * fall to the lower right.
  */
 import { STAGE, type Kind } from "./config";
-import { standBands } from "./art";
+import { crowd, standBands } from "./art";
 
 /** Canvas pixels per tile. */
 export const PLAN_RES = 64;
@@ -16,7 +16,8 @@ function canvas(w: number, h: number) {
   const element = document.createElement("canvas");
   element.width = Math.ceil(w * PLAN_RES);
   element.height = Math.ceil(h * PLAN_RES);
-  const ctx = element.getContext("2d");
+  // On the CPU, as in art.ts: GPU canvases can lose their colours in WebGL.
+  const ctx = element.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("2d context");
   ctx.scale(PLAN_RES, PLAN_RES);
   ctx.lineJoin = "round";
@@ -224,6 +225,17 @@ function theatre(ctx: Ctx, w: number, h: number) {
       }
     }
   }
+  // The audience from above: shoulders, and a head, hair or hat.
+  for (const s of crowd(w, h)) {
+    ctx.fillStyle = s.shirt;
+    ctx.beginPath();
+    ctx.ellipse(s.u, s.v, 0.13, 0.13, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = s.hat ? "#2f5d34" : s.hair;
+    ctx.beginPath();
+    ctx.arc(s.u, s.v, s.hat ? 0.09 : 0.075, 0, Math.PI * 2);
+    ctx.fill();
+  }
   // The stage's planks.
   rect(ctx, S.u0, S.v0, S.u1 - S.u0, S.v1 - S.v0, "#a8743f", "#4a3320");
 }
@@ -327,6 +339,15 @@ function boat(ctx: Ctx, w: number, h: number) {
   ctx.fill();
 }
 
+const bookColours = ["#8c2a1e", "#2f5d34", "#2c5490", "#7a4e26"];
+
+/** A stack of books from above, the top one turned a little. */
+function books(ctx: Ctx, x: number, y: number) {
+  shadow(ctx, x, y, 0.32, 0.22, 0.06);
+  rect(ctx, x, y, 0.32, 0.22, bookColours[0], "#3a2614");
+  rect(ctx, x + 0.04, y + 0.02, 0.28, 0.18, bookColours[2], "#3a2614");
+}
+
 /** A building seen from above, as large as its footprint. */
 export function planPicture(
   kind: Kind,
@@ -381,7 +402,18 @@ export function planPicture(
       rect(ctx, 0.7, 0.6, 0.3, 0.3, "#4a443c", "#2a2420");
       for (let i = 0; i < 4; i++)
         rect(ctx, 0.55 + i * 0.5, 2.85, 0.35, 0.1, "#f7f2e4");
+      books(ctx, 2.75, 1.0);
       break;
+    case "bibliothek": {
+      const [colour] = gameColours[game ?? ""] ?? ["#5a3a22"];
+      rect(ctx, 0.2, 0.2, 3.6, 2.6, "#cfc7b4", "#6f6656");
+      roof(ctx, 0.35, 0.35, 3.3, 2.15, "x", slate[0], slate[1], slate[2]);
+      // The board with the game's name, seen from above, over the door.
+      rect(ctx, 1.05, 2.55, 1.9, 0.1, colour, "#3a2614");
+      books(ctx, 0.55, 2.7);
+      books(ctx, 2.95, 2.75);
+      break;
+    }
     case "schafweide": {
       rect(ctx, 0.1, 0.1, w - 0.2, h - 0.2, "#86b356");
       ctx.strokeStyle = "#7a5230";

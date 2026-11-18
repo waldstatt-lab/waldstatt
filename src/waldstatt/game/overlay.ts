@@ -5,9 +5,9 @@
  * the ground leaves a gap on each cleared tile of a found text (render.ts),
  * so the text lies on the floor, and the trees still standing, the Waldleute
  * and the buildings stand over it. The text is light on a dark green floor;
- * on cobbled tiles, a dark copy of it shows instead, so it stays readable. Each Spielhaus's plate with its links lies
- * over the canvas, in front of its house. (The theatre's stage is painted on the map:
- * stage.ts.) Pins stand upright over the map: the water names, Einsiedeln,
+ * on cobbled tiles, a dark copy of it shows instead, so it stays readable.
+ * (The game's titles on its houses and the theatre's stage are painted on the
+ * map: art.ts, stage.ts.) Pins stand upright over the map: the water names, Einsiedeln,
  * and short status labels. Nodes are cloned from the page's templates or
  * built with the DOM API, never from HTML strings.
  */
@@ -148,14 +148,12 @@ export function textLength(
 }
 
 export class WorldLayer {
-  /** Plates, lying over the map. */
-  readonly root: HTMLElement;
   /** Found texts, lying under the map's ground. */
   readonly floor: HTMLElement;
   /** Upright labels over the map. */
   private pins: HTMLElement;
-  /** By building id (plates) or text key (texts). */
-  private items = new Map<number | string, Item>();
+  /** The found texts' places, by text key. */
+  private items = new Map<string, Item>();
   /** The found texts: their two inks and the cobbles they were painted for. */
   private finds = new Map<
     string,
@@ -183,16 +181,13 @@ export class WorldLayer {
     private game: Game,
     private games: GameInfo[],
   ) {
-    this.root = el("div", { className: "wg-world" });
-    this.root.setAttribute("role", "region");
-    this.root.setAttribute("aria-label", "Im Wald");
     this.floor = el("div", { className: "wg-world wg-floor" });
     this.floor.setAttribute("role", "region");
     this.floor.setAttribute("aria-label", "Schriften im Wald");
     this.pins = el("div", { className: "wg-pins" });
     this.pins.setAttribute("aria-hidden", "true");
     host.prepend(this.floor);
-    host.append(this.root, this.pins);
+    host.append(this.pins);
     if (basinLabel) this.waterPin(basinLabel, true);
     for (const page of loadedPages()) this.page(page);
     onPage((page) => this.page(page));
@@ -206,7 +201,6 @@ export class WorldLayer {
       lift: 0,
     });
     this.flooded();
-    for (const b of game.state.buildings) this.building(b);
     for (const t of game.hidden) this.text(t);
   }
 
@@ -242,33 +236,14 @@ export class WorldLayer {
     return textTitle(t.kind, this.gameInfo(t.game));
   }
 
-  private add(
-    id: number | string,
-    element: HTMLElement,
-    area: Area,
-    layer: HTMLElement,
-  ) {
+  private add(id: string, element: HTMLElement, area: Area) {
     element.style.left = `${area.x}px`;
     element.style.top = `${area.y}px`;
     element.style.width = `${area.w * TEXT_SCALE}px`;
     element.style.height = `${area.h * TEXT_SCALE}px`;
-    layer.append(element);
+    this.floor.append(element);
     this.items.set(id, { element, area, shown: true });
     this.lastKey = "";
-  }
-
-  /** Adds, refreshes or removes a Spielhaus's plate. */
-  building(b: Building, removed = false) {
-    const existing = this.items.get(b.id);
-    const wanted = !removed && b.state === "done" && b.kind === "spielhaus";
-    if (existing) {
-      if (wanted) return;
-      existing.element.remove();
-      this.items.delete(b.id);
-    }
-    if (!wanted) return;
-    const made = this.plate(b);
-    if (made) this.add(b.id, made.element, made.area, this.root);
   }
 
   /**
@@ -306,7 +281,7 @@ export class WorldLayer {
         paved: null,
         urls: [],
       });
-      this.add(t.key, element, { x: t.x, y: t.y, w: t.w, h: t.h }, this.floor);
+      this.add(t.key, element, { x: t.x, y: t.y, w: t.w, h: t.h });
     }
     this.pending.add(t);
     if (!this.paveTimer)
@@ -385,38 +360,6 @@ export class WorldLayer {
     return { x: t.x + side, y: t.y + end, w: t.w - 2 * side, h: t.h - 2 * end };
   }
 
-  /** The Spielhaus's plate in front of the house, with its links. */
-  private plate(b: Building) {
-    const game = this.gameInfo(b.game);
-    if (!game) return null;
-    const link = (text: string, href: string, primary: boolean) => {
-      const a = el(
-        "a",
-        { className: primary ? "wg-chip wg-primary" : "wg-chip", href },
-        text,
-      );
-      a.target = "_blank";
-      a.rel = "noopener";
-      return a;
-    };
-    const plate = el(
-      "div",
-      { className: "wg-flat wg-plate" },
-      el("strong", { className: "wg-plate-title" }, game.title),
-      el(
-        "span",
-        { className: "wg-plate-links" },
-        link("Spielen", game.playUrl, true),
-        link("Quellcode", game.sourceUrl, false),
-      ),
-    );
-    plate.dataset.worldUi = "";
-    return {
-      element: plate,
-      area: { x: b.x + 0.6, y: b.y + b.h - 1.3, w: b.w - 1.2, h: 1.2 },
-    };
-  }
-
   /** A short status label over a building, for a few seconds. */
   toast(b: Building, text: string) {
     this.toasts.get(b.id)?.pin.element.remove();
@@ -454,7 +397,6 @@ export class WorldLayer {
     this.lastKey = key;
     const z = t.zoom;
     const matrix = `matrix(${L.a * z}, ${L.b * z}, ${L.c * z}, ${L.d * z}, ${t.x}, ${t.y})`;
-    this.root.style.transform = matrix;
     this.floor.style.transform = matrix;
     this.pins.style.transform = `translate(${t.x}px, ${t.y}px) scale(${z})`;
     this.pins.style.setProperty("--wg-zoom", String(z));

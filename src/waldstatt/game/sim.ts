@@ -1,6 +1,7 @@
 /**
  * The game's rules: Waldleute fell marked trees and build building sites,
- * sheep grow parchment, the printing press prints, and the finished dam floods
+ * sheep grow parchment, Waldleute break stones in quarries and print books
+ * from parchment and wood in the printing house, and the finished dam floods
  * the Sihlsee. The site's texts lie hidden under the forest and are found by
  * felling it; the axe and the saw lie on the ground to be picked up, and
  * ravens show the way to the games' scrolls. Waldleute walk only on open ground (nav.ts): they fell their
@@ -11,10 +12,13 @@
 import {
   balance,
   CHUNK,
+  crewKinds,
   kinds,
   placing,
   ravenKinds,
+  supplies,
   texts,
+  type Cost,
   type Kind,
   type TextKind,
 } from "./config";
@@ -61,8 +65,8 @@ export interface Worker {
     | { type: "fell"; x: number; y: number }
     | { type: "build"; id: number }
     | { type: "pave"; x: number; y: number }
-    | { type: "quarry"; id: number };
-  /** The quarry this Waldmensch was put in, if any. */
+    | { type: "workshop"; id: number };
+  /** The quarry or printing house this Waldmensch was put in, if any. */
   job?: number;
   /** The way still ahead. */
   route: Step[];
@@ -221,7 +225,7 @@ const neighbours: [number, number][] = [
 ];
 
 /** The Waldmensch's hints, one per milestone, in the order they are reached. */
-export const hintCount = 15;
+export const hintCount = 16;
 
 export class Game {
   readonly workers: Worker[] = [];
@@ -377,16 +381,16 @@ export class Game {
     this.checkHint();
   }
 
-  // --- The quarry's crew ----------------------------------------------------
+  // --- The crews of quarries and the printing house -------------------------
 
-  /** How many Waldleute work a quarry now. */
+  /** How many Waldleute work in a quarry or the printing house now. */
   crewOf(b: Building): number {
     return this.workers.filter((w) => w.job === b.id).length;
   }
 
-  /** Puts Waldleute into a quarry or takes them out. */
+  /** Puts Waldleute into a quarry or the printing house, or takes them out. */
   setCrew(b: Building, crew: number) {
-    if (b.kind !== "steinbruch" || b.state !== "done") return;
+    if (!crewKinds.includes(b.kind) || b.state !== "done") return;
     b.crew = clamp(crew, 0, balance.maxCrew);
     this.syncCrews();
     this.events.building(b);
@@ -394,19 +398,20 @@ export class Game {
   }
 
   /**
-   * Gives every finished quarry the Waldleute it asks for, as far as there
-   * are any: idle ones and those nearest first. The others go back to work.
+   * Gives every finished quarry and printing house the Waldleute it asks
+   * for, as far as there are any: idle ones and those nearest first. The
+   * others go back to work.
    */
   private syncCrews() {
-    const quarries = this.state.buildings.filter(
-      (b) => b.kind === "steinbruch" && b.state === "done",
+    const workshops = this.state.buildings.filter(
+      (b) => crewKinds.includes(b.kind) && b.state === "done",
     );
     for (const w of this.workers)
-      if (w.job && !quarries.some((q) => q.id === w.job)) {
+      if (w.job && !workshops.some((q) => q.id === w.job)) {
         w.job = undefined;
         this.idle(w);
       }
-    for (const q of quarries) {
+    for (const q of workshops) {
       const crew = this.workers.filter((w) => w.job === q.id);
       const want = Math.min(q.crew ?? 0, balance.maxCrew);
       while (crew.length > want) {
@@ -882,6 +887,8 @@ export class Game {
         ? "Erst wenn die ganze Schriftrolle frei liegt."
         : "Zuerst die Schriftrolle des Spiels im Wald finden.";
     }
+    if (kind === "bibliothek" && game && !this.done("spielhaus", game))
+      return "Braucht das fertige Spielhaus des Spiels.";
     if (kind === "theater" && !this.done("spielhaus"))
       return "Braucht ein fertiges Spielhaus.";
     if (kind === "schiff" && !this.done("hafen"))
@@ -889,12 +896,10 @@ export class Game {
     if (kind === "damm" && this.state.flooded)
       return "Der Sihlsee ist gestaut.";
     const missing: string[] = [];
-    const { wood, parchment, prints } = info.cost;
-    if (this.state.wood < wood) missing.push(`${wood - this.state.wood} Holz`);
-    if (this.state.parchment < parchment)
-      missing.push(`${parchment - this.state.parchment} Pergament`);
-    if (this.state.prints < prints)
-      missing.push(`${prints - this.state.prints} Drucke`);
+    for (const { key, name } of supplies) {
+      const lack = info.cost[key] - this.state[key];
+      if (lack > 0) missing.push(`${lack} ${name}`);
+    }
     if (missing.length) return `Es fehlen ${missing.join(", ")}.`;
     return undefined;
   }
@@ -1000,9 +1005,7 @@ export class Game {
     const spot = this.placement(kind, x, y);
     if (!spot.ok) return undefined;
     const info = kinds[kind];
-    this.state.wood -= info.cost.wood;
-    this.state.parchment -= info.cost.parchment;
-    this.state.prints -= info.cost.prints;
+    for (const { key } of supplies) this.state[key] -= info.cost[key];
     const b: Building = {
       id: this.state.nextId++,
       kind,
@@ -1024,6 +1027,18 @@ export class Game {
     return b;
   }
 
+  /** What tearing a building down gives back: half its costs, rounded down. */
+  refund(b: Building): Cost {
+    const cost = kinds[b.kind].cost;
+    const back = (n: number) => Math.floor(n * balance.refund);
+    return {
+      wood: back(cost.wood),
+      parchment: back(cost.parchment),
+      stones: back(cost.stones),
+      books: back(cost.books),
+    };
+  }
+
   canDemolish(b: Building): boolean {
     return b.state !== "drowned" && !(b.kind === "damm" && b.state === "done");
   }
@@ -1038,7 +1053,8 @@ export class Game {
         if (this.unmark(x, y)) this.events.tree(x, y);
       }
     }
-    this.state.wood += Math.floor(kinds[b.kind].cost.wood * balance.refund);
+    const refund = this.refund(b);
+    for (const { key } of supplies) this.state[key] += refund[key];
     for (const w of this.workers)
       if (w.task?.type === "build" && w.task.id === b.id) this.idle(w);
     this.waysChanged(true);
@@ -1130,17 +1146,18 @@ export class Game {
     const paves =
       this.paveSet.size > this.paveClaimed.size &&
       this.state.stones > this.paveClaimed.size;
-    // A Waldmensch put in a quarry looks only for the way there.
-    const quarry = w.job
+    // A Waldmensch put in a quarry or the printing house looks only for the
+    // way there.
+    const workshop = w.job
       ? this.state.buildings.find((b) => b.id === w.job && b.state === "done")
       : undefined;
-    if (w.job && !quarry) return false;
-    if (!quarry && !sites && !trees && !paves) return false;
+    if (w.job && !workshop) return false;
+    if (!workshop && !sites && !trees && !paves) return false;
     const sx = Math.floor(w.x);
     const sy = Math.floor(w.y);
     // Another Waldmensch just searched here in vain.
     if (
-      !quarry &&
+      !workshop &&
       this.noWork?.chances === this.chances &&
       this.noWork.tiles.has(tileId(sx, sy))
     )
@@ -1149,7 +1166,7 @@ export class Game {
       | { type: "fell"; x: number; y: number }
       | { type: "build"; b: Building }
       | { type: "pave"; x: number; y: number }
-      | { type: "quarry"; b: Building };
+      | { type: "workshop"; b: Building };
     // The tiles on and around the sites that still need hands.
     const siteNear = new Map<number, Building>();
     for (const b of this.state.buildings) {
@@ -1164,14 +1181,14 @@ export class Game {
       y: number,
       open: (x: number, y: number) => boolean,
     ) => {
-      if (quarry) {
+      if (workshop) {
         const inside =
-          x >= quarry.x - 1 &&
-          x <= quarry.x + quarry.w &&
-          y >= quarry.y - 1 &&
-          y <= quarry.y + quarry.h;
+          x >= workshop.x - 1 &&
+          x <= workshop.x + workshop.w &&
+          y >= workshop.y - 1 &&
+          y <= workshop.y + workshop.h;
         return inside
-          ? { bias: -4, value: { type: "quarry", b: quarry } as Found }
+          ? { bias: -4, value: { type: "workshop", b: workshop } as Found }
           : undefined;
       }
       const b = sites ? siteNear.get(tileId(x, y)) : undefined;
@@ -1198,7 +1215,7 @@ export class Game {
     // Failed searches add up until something changes.
     if (this.noWork?.chances !== this.chances)
       this.noWork = { chances: this.chances, tiles: new Set() };
-    const searched = quarry ? new Set<number>() : this.noWork.tiles;
+    const searched = workshop ? new Set<number>() : this.noWork.tiles;
     const found = search(
       {
         open: (x, y) => this.open(x, y),
@@ -1226,11 +1243,15 @@ export class Game {
       end = { x: v.x + 0.5, y: v.y + 0.5 };
       w.task = { type: "pave", x: v.x, y: v.y };
       this.paveClaimed.add(tileId(v.x, v.y));
-    } else if (v.type === "quarry") {
+    } else if (v.type === "workshop") {
       const q = v.b;
-      // At the rock face, somewhere along the quarry's back.
-      end = { x: q.x + 0.4 + Math.random() * (q.w - 0.8), y: q.y + 0.6 };
-      w.task = { type: "quarry", id: q.id };
+      end =
+        q.kind === "steinbruch"
+          ? // At the rock face, somewhere along the quarry's back.
+            { x: q.x + 0.4 + Math.random() * (q.w - 0.8), y: q.y + 0.6 }
+          : // At the printing house's door, by the sheets drying.
+            { x: q.x + 1.1 + Math.random() * 0.9, y: q.y + q.h - 0.3 };
+      w.task = { type: "workshop", id: q.id };
     } else {
       const b = v.b;
       const nx = clamp(ex, b.x, b.x + b.w - 1);
@@ -1320,7 +1341,7 @@ export class Game {
       return this.idle(w);
     if (task.type === "pave" && !this.isPlannedPaving(task.x, task.y))
       return this.idle(w);
-    if (task.type === "quarry" && w.job !== task.id) return this.idle(w);
+    if (task.type === "workshop" && w.job !== task.id) return this.idle(w);
     const site =
       task.type === "build"
         ? this.state.buildings.find(
@@ -1368,7 +1389,7 @@ export class Game {
         w.t = 0;
         if (task.type === "fell") this.face(w, task.x + 0.5, task.y + 0.5);
         else if (site) this.face(w, site.x + site.w / 2, site.y + site.h / 2);
-        else if (task.type === "quarry") this.face(w, w.x - 1, w.y - 1);
+        else if (task.type === "workshop") this.face(w, w.x - 1, w.y - 1);
       }
       return;
     }
@@ -1385,8 +1406,9 @@ export class Game {
       this.idle(w);
       return;
     }
-    // In the quarry, the work goes on; produce() counts the stones.
-    if (task.type === "quarry") return;
+    // In a quarry or the printing house, the work goes on; produce() counts
+    // the stones and books.
+    if (task.type === "workshop") return;
     if (site) {
       site.work += dt;
       if (site.work >= kinds[site.kind].work) this.finish(site);
@@ -1588,7 +1610,7 @@ export class Game {
     this.waysChanged(false);
     if (b.kind === "huette") this.syncWorkers();
     if (b.kind === "huette") this.checkSaw();
-    if (b.kind === "steinbruch") this.syncCrews();
+    if (crewKinds.includes(b.kind)) this.syncCrews();
     if (ravenKinds.includes(b.kind)) this.syncRavens();
     if (b.kind === "schiff") this.syncShips();
     if (b.kind === "damm") this.flood();
@@ -1622,7 +1644,8 @@ export class Game {
       () => this.done("schafweide"),
       () => this.done("spielhaus"),
       () => this.done("steinbruch") || this.state.paved.size > 0,
-      () => this.done("theater") || this.done("druckerei"),
+      () => this.done("druckerei"),
+      () => this.done("bibliothek") || this.done("theater"),
       () => !!this.standing("damm") || this.state.flooded,
       () => this.done("bruecke") || this.done("schiff"),
     ];
@@ -1667,8 +1690,10 @@ export class Game {
       case 11:
         return "Tipp ein Spielhaus an, und das Spiel öffnet sich in einem neuen Tab. Bau einen Steinbruch: Tippst du ihn an, schickst du Waldleute hinein, die Steine brechen.";
       case 12:
-        return "Mit Steinen pflastern wir Wege und Plätze: Nimm «Pflastern» und zieh über freien Boden. Auf Pflaster gehen wir schneller, und Schriften bleiben lesbar. Im Theater spielst du die Spiele an; die Druckerei druckt die Programmzettel dafür.";
+        return "Mit Steinen pflastern wir Wege und Plätze: Nimm «Pflastern» und zieh über freien Boden. Auf Pflaster gehen wir schneller, und Schriften bleiben lesbar. Bau auch eine Druckerei und schick Waldleute hinein: Aus Pergament und Holz drucken sie Bücher.";
       case 13:
+        return "Mit Büchern bauen wir jedem Spiel eine Bibliothek: Tippst du sie an, öffnet sich sein Quellcode in einem neuen Tab. Im Theater spielst du die Spiele an.";
+      case 14:
         return "Die Sihl liesse sich stauen. Aber was im Becken steht, geht unter.";
       default:
         return "Schwimmen können wir nicht. Über Flüsse führen Brücken; an einem See bauen wir Häfen, und Schiffe bringen uns hinüber.";
@@ -1839,9 +1864,16 @@ export class Game {
 
   private produce(dt: number) {
     const s = this.state;
-    const breaking = this.workers.filter(
-      (w) => w.task?.type === "quarry" && w.phase === "work",
-    ).length;
+    // Waldleute at work in a quarry or the printing house, by its kind.
+    let breaking = 0;
+    let printing = 0;
+    for (const w of this.workers) {
+      if (w.task?.type !== "workshop" || w.phase !== "work") continue;
+      const id = w.task.id;
+      const kind = s.buildings.find((b) => b.id === id)?.kind;
+      if (kind === "steinbruch") breaking++;
+      else if (kind === "druckerei") printing++;
+    }
     if (breaking && s.stones < balance.maxStones) {
       this.stoneClock += dt * breaking;
       if (this.stoneClock >= balance.stoneSeconds) {
@@ -1866,15 +1898,17 @@ export class Game {
       }
     } else this.pastureClock = 0;
     if (
-      this.done("druckerei") &&
-      s.parchment > 0 &&
-      s.prints < balance.maxPrints
+      printing &&
+      s.parchment >= balance.bookParchment &&
+      s.wood >= balance.bookWood &&
+      s.books < balance.maxBooks
     ) {
-      this.pressClock += dt;
-      if (this.pressClock >= balance.printSeconds) {
-        this.pressClock = 0;
-        s.parchment--;
-        s.prints++;
+      this.pressClock += dt * printing;
+      if (this.pressClock >= balance.bookSeconds) {
+        this.pressClock -= balance.bookSeconds;
+        s.parchment -= balance.bookParchment;
+        s.wood -= balance.bookWood;
+        s.books++;
         this.events.supplies();
         this.events.dirty();
       }

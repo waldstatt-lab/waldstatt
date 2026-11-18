@@ -379,7 +379,7 @@
   padding-left: 1.25rem;
 }
 
-/* --- Texts, plates and the stage lying on the map ------------------------- */
+/* --- Texts and the stage lying on the map --------------------------------- */
 
 /* The world layer is in tile units under the view's projection (overlay.ts);
    each flat item is laid out at 32 text pixels per tile (TEXT_SCALE). */
@@ -489,45 +489,6 @@
 }
 .wg-ink-dark .wg-sheet-title {
   color: #5a2410;
-}
-.wg-plate {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  border: 3px solid var(--wg-wood-edge);
-  border-radius: 3px;
-  background: linear-gradient(#7a5230, #5a3a20);
-  color: var(--wg-parchment);
-  pointer-events: auto;
-  cursor: pointer;
-}
-.wg-plate-title {
-  font-family: var(--wg-serif);
-  font-size: 13px;
-  line-height: 15px;
-}
-.wg-plate-links {
-  display: flex;
-  gap: 5px;
-}
-.wg-chip {
-  padding: 1px 6px;
-  border: 1.5px solid var(--wg-wood-edge);
-  border-radius: 3px;
-  background: var(--wg-wood-light);
-  color: var(--wg-parchment);
-  font: inherit;
-  font-size: 10px;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
-}
-.wg-chip.wg-primary,
-.wg-chip[aria-pressed="true"] {
-  background: var(--wg-amber);
-  color: var(--wg-ink);
 }
 /* Upright labels keep their size on screen. */
 .wg-pins > * {

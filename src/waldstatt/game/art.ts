@@ -26,7 +26,9 @@ function canvas(w: number, h: number) {
   const element = document.createElement("canvas");
   element.width = Math.ceil(w * RES);
   element.height = Math.ceil(h * RES);
-  const ctx = element.getContext("2d");
+  // A canvas on the CPU: some browsers, such as Zen on Linux, swap red and
+  // blue when a canvas drawn on the GPU becomes a WebGL texture.
+  const ctx = element.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("2d context");
   ctx.scale(RES, RES);
   ctx.lineJoin = "round";
@@ -819,6 +821,7 @@ const heights: Record<Kind, number> = {
   schafweide: 50,
   druckerei: 96,
   spielhaus: 160,
+  bibliothek: 110,
   klause: 90,
   steinbruch: 100,
   theater: 130,
@@ -901,6 +904,68 @@ function timber(
   P.line([u1, v0, z0], [u1, v0 + (v1 - v0) / 4, mid], dark, 1.2);
 }
 
+/** The serif of the site's texts, which every system has. */
+const signFont = 'Georgia, "Times New Roman", serif';
+
+/**
+ * A signboard on a front (the left face, v = v) between u0..u1 and z0..z1,
+ * with lines of text painted in the face's plane: each line a share of the
+ * board's height, all shrunk together until the widest fits.
+ */
+function frontSign(
+  P: Painter,
+  v: number,
+  u0: number,
+  u1: number,
+  z0: number,
+  z1: number,
+  lines: { text: string; size: number; italic?: boolean }[],
+  c: { board: string; edge: string; ink: string },
+) {
+  P.leftOpening(v, u0, u1, z0, z1, c.board, c.edge);
+  P.leftOpening(
+    v,
+    u0 + 0.06,
+    u1 - 0.06,
+    z0 + 1,
+    z1 - 1,
+    c.board,
+    shade(c.board, 0.25),
+  );
+  const shown = lines.filter((line) => line.text);
+  if (!shown.length) return;
+  const ctx = P.ctx;
+  const font = (line: (typeof shown)[number], k: number) =>
+    `${line.italic ? "italic 600" : "700"} ${line.size * k}px ${signFont}`;
+  // Along the face, x runs with u; the board's width on screen is its run in x.
+  const room = ((u1 - u0) * TW) / 2 - 5;
+  const total = shown.reduce((sum, line) => sum + line.size, 0);
+  let k = Math.min(1, (z1 - z0 - 2.5) / (total * 1.1));
+  for (const line of shown) {
+    ctx.font = font(line, 1);
+    k = Math.min(k, room / ctx.measureText(line.text).width);
+  }
+  const [x, y] = P.p((u0 + u1) / 2, v, (z0 + z1) / 2);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.transform(1, TH / TW, 0, 1, 0, 0);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  let top = (-total * k * 1.1) / 2;
+  for (const line of shown) {
+    const height = line.size * k * 1.1;
+    const middle = top + height / 2;
+    ctx.font = font(line, k);
+    // Letters cut into the board, then painted.
+    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+    ctx.fillText(line.text, 0.4, middle + 0.5);
+    ctx.fillStyle = c.ink;
+    ctx.fillText(line.text, 0, middle);
+    top += height;
+  }
+  ctx.restore();
+}
+
 function hut(P: Painter) {
   P.shadow(0.2, 0.2, 1.8, 1.8, 0.9);
   P.box(0.25, 0.3, 1.75, 1.75, 0, 20, logs);
@@ -919,7 +984,7 @@ const gameColours: Record<string, [string, string]> = {
   "car-drive": ["#2a62b8", "#f2f2f2"],
 };
 
-function spielhaus(P: Painter, game?: string) {
+function spielhaus(P: Painter, title: string, game?: string) {
   const [flag, sign] = gameColours[game ?? ""] ?? ["#b0782e", "#f0e0b0"];
   P.shadow(0.2, 0.2, 2.8, 2.8, 1.3);
   P.box(0.3, 0.3, 2.7, 2.7, 0, 3, stone);
@@ -929,9 +994,12 @@ function spielhaus(P: Painter, game?: string) {
   for (const u of [0.6, 2.05]) P.leftOpening(2.65, u, u + 0.4, 14, 26, glow);
   for (const v of [0.6, 1.4, 2.05])
     P.rightOpening(2.65, v, v + 0.35, 14, 26, glass);
-  // The game's sign over the door.
-  P.leftOpening(2.65, 1.0, 2.0, 27, 33, flag, "#3a2614");
-  P.leftOpening(2.65, 1.15, 1.85, 28.5, 31.5, sign, flag);
+  // The game's name over the door.
+  frontSign(P, 2.65, 0.45, 2.55, 27, 35.5, [{ text: title, size: 9 }], {
+    board: flag,
+    edge: "#3a2614",
+    ink: sign,
+  });
   P.gable(0.35, 0.35, 2.65, 2.65, 36, 34, "v", tiles, 0.2);
   // A flag in the game's colours on the roof.
   const [fx, fy] = P.p(1.5, 0.6, 70);
@@ -1015,7 +1083,7 @@ function crenels(
  * stone tower, red roofs, banners in the game's red and gold, and a wooden
  * jump ramp leaning against the tower.
  */
-function motoHouse(P: Painter) {
+function motoHouse(P: Painter, title: string) {
   const red = "#c23b2a";
   const gold = "#f4d24a";
   P.shadow(0.2, 0.2, 4.7, 3.6, 1.8);
@@ -1026,11 +1094,16 @@ function motoHouse(P: Painter) {
   leftArch(P, 3.3, 1.2, 2.1, 3, 26, glow);
   for (const v of [0.8, 1.6, 2.4])
     P.rightOpening(3.0, v, v + 0.35, 18, 30, glass);
-  // Banners hanging on the hall's front.
+  // Banners hanging on the hall's front, under the game's name.
   for (const u of [0.6, 2.35]) {
-    P.leftOpening(3.3, u, u + 0.4, 12, 36, red, "#5e1c14");
-    P.leftOpening(3.3, u + 0.12, u + 0.28, 12, 36, gold, red);
+    P.leftOpening(3.3, u, u + 0.4, 9, 28, red, "#5e1c14");
+    P.leftOpening(3.3, u + 0.12, u + 0.28, 9, 28, gold, red);
   }
+  frontSign(P, 3.3, 0.5, 2.9, 26.5, 37.5, [{ text: title, size: 10 }], {
+    board: "#3a1a10",
+    edge: "#5e1c14",
+    ink: gold,
+  });
   P.gable(0.4, 0.5, 3.0, 3.3, 40, 36, "v", redTiles, 0.2);
   // The tower, with battlements and a tall roof.
   P.box(3.0, 0.4, 4.5, 1.9, 0, 86, stone);
@@ -1094,7 +1167,7 @@ function motoHouse(P: Painter) {
  * slate roof with a lantern turret, a cart wheel over the gates and pennants
  * in the game's blue and white.
  */
-function carHouse(P: Painter) {
+function carHouse(P: Painter, title: string) {
   const blue = "#2a62b8";
   const white = "#f2f2f2";
   P.shadow(0.2, 0.2, 4.8, 3.6, 1.6);
@@ -1134,6 +1207,14 @@ function carHouse(P: Painter) {
   for (const v of [0.8, 1.7, 2.5])
     P.rightOpening(4.6, v, v + 0.35, 16, 28, glass);
   P.gable(0.4, 0.5, 4.6, 3.3, 36, 30, "u", blueSlate, 0.2);
+  // The game's name on a board standing on the roof, over the gates.
+  for (const u of [1.3, 3.7])
+    P.line([u, 3.4, 36], [u, 3.4, 42], "#3a2614", 1.6);
+  frontSign(P, 3.4, 1.0, 4.0, 41, 53, [{ text: title, size: 10 }], {
+    board: blue,
+    edge: "#1d3a66",
+    ink: white,
+  });
   // The lantern turret on the ridge.
   P.box(2.2, 1.6, 2.8, 2.2, 58, 74, plaster);
   P.leftOpening(2.2, 2.35, 2.65, 61, 71, glow);
@@ -1272,6 +1353,60 @@ function druckerei(P: Painter) {
     P.line([u + 0.06, 3.0, 19], [u + 0.28, 3.0, 19], "#2a2420", 1);
     P.line([u + 0.06, 3.0, 16], [u + 0.25, 3.0, 16], "#7a7064", 0.8);
   }
+  bookStack(P, 2.75, 1.0, 3);
+}
+
+const bookColours = ["#8c2a1e", "#2f5d34", "#2c5490", "#7a4e26", "#5e3a6e"];
+
+/** A stack of bound books on the ground beside (u, v). */
+function bookStack(P: Painter, u: number, v: number, count: number) {
+  for (let k = 0; k < count; k++) {
+    const colour = bookColours[k % bookColours.length];
+    const shift = (k % 2) * 0.04;
+    P.box(u + shift, v, u + 0.32 + shift, v + 0.22, k * 2.6, k * 2.6 + 2.6, {
+      top: shade(colour, 0.15),
+      left: "#f2ead6",
+      right: colour,
+      line: shade(colour, -0.4),
+    });
+  }
+}
+
+/**
+ * A game's library, where its source code lies: a stone hall with tall
+ * arched windows, pilasters by the door, a slate roof, the game's name and
+ * «Quellcode» on a board over the door, and books stacked outside.
+ */
+function bibliothek(P: Painter, title: string, game?: string) {
+  const [colour, ink] = gameColours[game ?? ""] ?? ["#5a3a22", "#f0e0b0"];
+  P.shadow(0.2, 0.2, 3.8, 2.7, 1.4);
+  P.box(0.2, 0.2, 3.8, 2.8, 0, 3, stone);
+  P.box(0.35, 0.35, 3.65, 2.5, 3, 46, stone);
+  for (let z = 9; z < 46; z += 6) {
+    P.line([0.35, 2.5, z], [3.65, 2.5, z], "#a89e88", 0.7);
+    P.line([3.65, 0.35, z], [3.65, 2.5, z], "#857b67", 0.7);
+  }
+  for (const u of [0.6, 3.0]) leftArch(P, 2.5, u, u + 0.4, 9, 36, glow);
+  leftArch(P, 2.5, 1.75, 2.25, 3, 24, "#4a2f1c");
+  const pilaster = { ...stone, top: "#ddd6c4", left: "#d3cab4" };
+  for (const u of [1.45, 2.4]) P.box(u, 2.5, u + 0.15, 2.62, 3, 44, pilaster);
+  for (const v of [0.65, 1.4]) P.rightOpening(3.65, v, v + 0.4, 12, 34, glow);
+  frontSign(
+    P,
+    2.62,
+    1.05,
+    2.95,
+    27,
+    43,
+    [
+      { text: title, size: 9 },
+      { text: "Quellcode", size: 6, italic: true },
+    ],
+    { board: colour, edge: "#3a2614", ink },
+  );
+  P.gable(0.35, 0.35, 3.65, 2.5, 46, 26, "u", slate, 0.2);
+  bookStack(P, 0.55, 2.7, 4);
+  bookStack(P, 2.95, 2.75, 2);
 }
 
 function sheep(P: Painter, u: number, v: number, rnd: () => number) {
@@ -1383,6 +1518,134 @@ export function standBands(w: number, d: number) {
   return bands;
 }
 
+/** Which stand a spectator sits on: back and left face the viewer. */
+export type StandSide = "back" | "left" | "right" | "front";
+
+export interface Spectator {
+  u: number;
+  v: number;
+  /** The row's height, in world units. */
+  z: number;
+  r: number;
+  side: StandSide;
+  shirt: string;
+  skin: string;
+  hair: string;
+  hat: boolean;
+  cheering: boolean;
+}
+
+const shirts = [
+  "#a8432f",
+  "#2f5d34",
+  "#2c5490",
+  "#c9a046",
+  "#6b4a8a",
+  "#8a5a32",
+  "#d8d0c0",
+  "#3a5a6a",
+  "#b8323a",
+];
+const skins = ["#e2b58a", "#d9a477", "#c08a5e", "#f0c9a0", "#a8744a"];
+const hairs = [
+  "#3a2a1e",
+  "#6b4a28",
+  "#c9a46c",
+  "#2a2420",
+  "#8a3a1e",
+  "#b0aaa0",
+];
+
+/**
+ * The theatre's audience: where each spectator sits on the stands and how
+ * they look, the same every time, for the isometric and the plan view. Rows
+ * are not full; here and there a seat is free. The first front row stays
+ * empty, so its heads do not cover the hint lying before the stage.
+ */
+export function crowd(w: number, d: number): Spectator[] {
+  const rnd = random(21);
+  const pick = <T>(list: T[]) => list[Math.floor(rnd() * list.length)];
+  const seats: Spectator[] = [];
+  for (const band of standBands(w, d)) {
+    for (const side of ["back", "left", "right", "front"] as const) {
+      if (side === "front" && band.r === 0) continue;
+      const b = band[side];
+      const alongU = side === "back" || side === "front";
+      const [a0, a1] = alongU ? [b.u0, b.u1] : [b.v0, b.v1];
+      const across = alongU ? (b.v0 + b.v1) / 2 : (b.u0 + b.u1) / 2;
+      for (let a = a0 + 0.22; a < a1 - 0.15; a += 0.3 + rnd() * 0.08) {
+        if (rnd() < 0.2) continue;
+        const off = across + (rnd() - 0.5) * 0.1;
+        seats.push({
+          u: alongU ? a : off,
+          v: alongU ? off : a,
+          z: band.height,
+          r: band.r,
+          side,
+          shirt: pick(shirts),
+          skin: pick(skins),
+          hair: pick(hairs),
+          hat: rnd() < 0.22,
+          cheering: rnd() < 0.12,
+        });
+      }
+    }
+  }
+  return seats;
+}
+
+/** A spectator sitting on a row: facing the viewer, or seen from behind. */
+function spectator(P: Painter, s: Spectator) {
+  const ctx = P.ctx;
+  const [x, y] = P.p(s.u, s.v, s.z);
+  const toward = s.side === "back" || s.side === "left";
+  ellipse(ctx, x + 1, y, 3.6, 1.4, "rgba(30, 20, 10, 0.3)");
+  if (toward) {
+    // The lap and knees.
+    ctx.fillStyle = "#4a3a2e";
+    ctx.fillRect(x - 2.6, y - 2.4, 5.2, 2.4);
+  }
+  if (s.cheering) {
+    ctx.strokeStyle = s.shirt;
+    ctx.lineWidth = 1.5;
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(x + side * 2.4, y - 8);
+      ctx.lineTo(x + side * 4.2, y - 14);
+      ctx.stroke();
+      ellipse(ctx, x + side * 4.3, y - 14.6, 1, 1, s.skin);
+    }
+  }
+  ctx.beginPath();
+  ctx.moveTo(x - 3.1, y - 1.5);
+  ctx.lineTo(x - 2.8, y - 8);
+  ctx.quadraticCurveTo(x, y - 9.6, x + 2.8, y - 8);
+  ctx.lineTo(x + 3.1, y - 1.5);
+  ctx.closePath();
+  ctx.fillStyle = s.shirt;
+  ctx.fill();
+  ctx.strokeStyle = shade(s.shirt, -0.4);
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+  const hy = y - 11.6;
+  if (toward) {
+    ellipse(ctx, x, hy, 2.5, 2.6, s.skin);
+    ctx.fillStyle = s.hair;
+    ctx.beginPath();
+    ctx.arc(x, hy - 0.4, 2.6, Math.PI, 0);
+    ctx.fill();
+  } else {
+    ellipse(ctx, x, hy, 2.5, 2.6, s.hair);
+  }
+  if (s.hat) {
+    ellipse(ctx, x, hy - 1.6, 3.4, 1, "#2f5d34");
+    ctx.fillStyle = "#2f5d34";
+    ctx.fillRect(x - 1.9, hy - 4.2, 3.8, 2.6);
+    ctx.fillStyle = "#c9a046";
+    ctx.fillRect(x - 1.9, hy - 2.4, 3.8, 0.7);
+  }
+}
+
 const plank = {
   top: "#b98a52",
   left: "#8a5a32",
@@ -1391,8 +1654,9 @@ const plank = {
 };
 
 /**
- * A wooden amphitheatre: tiered stands all round the stage, a backdrop with
- * red curtains at the stage's back, and pennants and torches round it. The
+ * A wooden amphitheatre: tiered stands all round the stage with an audience
+ * on them, a backdrop with red curtains at the stage's back, and pennants and
+ * torches round it. The
  * stage itself is left empty: its picture lies on the ground below
  * (stage.ts), so the stands in front of it hide its edge. Painted in two
  * parts, so the preview standing on the stage comes between them: the back
@@ -1469,6 +1733,13 @@ function theater(
     const [a, c] = [posts[0], posts[posts.length - 1]];
     P.line([a[0], a[1], z + 8], [c[0], c[1], z + 8], "#5a3a20", 1.2);
   };
+  // The audience, row by row, each row from the back of the picture forward.
+  const audience = crowd(w, d);
+  const seated = (r: number, side: StandSide) =>
+    audience
+      .filter((s) => s.r === r && s.side === side)
+      .sort((a, b) => a.u + a.v - (b.u + b.v))
+      .forEach((s) => spectator(P, s));
   const outer = bands.length - 1;
   const top = bands[outer];
   const flags = ["#c23b2a", "#f4d24a", "#2a62b8", "#f2f2f2", "#3f8a4a"];
@@ -1479,10 +1750,12 @@ function theater(
     for (const band of [...bands].reverse()) {
       tier(band.back, band.height, "u");
       if (band.r === outer) railing(band.back, band.height, "back");
+      seated(band.r, "back");
     }
     for (const band of [...bands].reverse()) {
       tier(band.left, band.height, "v");
       if (band.r === outer) railing(band.left, band.height, "left");
+      seated(band.r, "left");
     }
     P.pennant(top.back.u0 + 0.1, top.back.v0 + 0.1, top.height, 54, [
       flags[0],
@@ -1501,10 +1774,12 @@ function theater(
   if (front) {
     for (const band of bands) {
       tier(band.right, band.height, "v");
+      seated(band.r, "right");
       if (band.r === outer) railing(band.right, band.height, "right");
     }
     for (const band of bands) {
       tier(band.front, band.height, "u");
+      seated(band.r, "front");
       if (band.r === outer) railing(band.front, band.height, "front");
     }
     P.pennant(top.right.u1 - 0.1, top.right.v0 + 0.1, top.height, 54, [
@@ -1903,6 +2178,8 @@ export function buildingPicture(
   game?: string,
   /** The axis a bridge spans along. */
   axis: "x" | "y" = "x",
+  /** The game's title, written on its houses. */
+  title = "",
 ): Picture {
   const { element, P, ax, ay } = painter(kind, w, d);
   switch (kind) {
@@ -1910,9 +2187,9 @@ export function buildingPicture(
       hut(P);
       break;
     case "spielhaus":
-      // The house stands at the back; its plate lies in front.
-      if (game === "moto-devil") motoHouse(P);
-      else if (game === "car-drive") carHouse(P);
+      // The house stands at the back, its name on its front.
+      if (game === "moto-devil") motoHouse(P, title);
+      else if (game === "car-drive") carHouse(P, title);
       else
         spielhaus(
           new Painter(
@@ -1920,8 +2197,12 @@ export function buildingPicture(
             P.ox + ((w - 3) / 2) * (TW / 2),
             P.oy + ((w - 3) / 2) * (TH / 2),
           ),
+          title,
           game,
         );
+      break;
+    case "bibliothek":
+      bibliothek(P, title, game);
       break;
     case "druckerei":
       druckerei(P);
@@ -1968,7 +2249,7 @@ export function groundTexture(
   const element = document.createElement("canvas");
   element.width = size;
   element.height = size;
-  const ctx = element.getContext("2d");
+  const ctx = element.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("2d context");
   const base = { meadow: "#6f9e45", floor: "#2f4a2a", bank: "#9c8a62" }[kind];
   ctx.fillStyle = base;
@@ -2041,7 +2322,7 @@ export function cobbles(
 ) {
   const element = document.createElement("canvas");
   element.width = element.height = size;
-  const ctx = element.getContext("2d");
+  const ctx = element.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("2d context");
   ctx.fillStyle = faint ? "#d3cbb7" : "#b8af9b";
   ctx.fillRect(0, 0, size, size);
@@ -2078,7 +2359,7 @@ export function textFloor(
   const element = document.createElement("canvas");
   element.width = w * res;
   element.height = h * res;
-  const ctx = element.getContext("2d");
+  const ctx = element.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("2d context");
   ctx.fillStyle = "#284526";
   ctx.fillRect(0, 0, element.width, element.height);

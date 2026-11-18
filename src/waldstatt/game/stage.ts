@@ -119,13 +119,14 @@ export class Stage {
   ) {
     this.canvas.width = Math.round(w * STAGE_RES);
     this.canvas.height = Math.round(h * STAGE_RES);
-    const ctx = this.canvas.getContext("2d");
+    // On the CPU, as in art.ts: GPU canvases can lose their colours in WebGL.
+    const ctx = this.canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) throw new Error("2d context");
     this.ctx = ctx;
     this.iso.width = Math.ceil((((w + h) * TW) / 2) * ISO_RES);
     this.iso.height = Math.ceil((((w + h) * TH) / 2 + isoHeadroom) * ISO_RES);
     this.isoOrigin = { x: ((h * TW) / 2) * ISO_RES, y: isoHeadroom * ISO_RES };
-    const isoCtx = this.iso.getContext("2d");
+    const isoCtx = this.iso.getContext("2d", { willReadFrequently: true });
     if (!isoCtx) throw new Error("2d context");
     this.isoCtx = isoCtx;
     this.choose(this.programme()[0]?.id ?? "");

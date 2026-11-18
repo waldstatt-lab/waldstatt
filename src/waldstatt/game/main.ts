@@ -105,7 +105,6 @@ async function start(root: HTMLElement) {
     tree: (x, y) => renderer?.tree(x, y),
     building: (b, removed) => {
       renderer?.building(b, removed);
-      world?.building(b, removed);
       if (b.kind === "theater" || b.kind === "spielhaus") syncStage();
       ui?.building(b, !!removed);
       if (!ui || removed) return;
@@ -197,7 +196,12 @@ async function start(root: HTMLElement) {
   new ResizeObserver(() => app.resize()).observe(host);
   app.canvas.setAttribute("aria-hidden", "true");
 
-  renderer = new Renderer(app, game, () => still.matches);
+  renderer = new Renderer(
+    app,
+    game,
+    () => still.matches,
+    (id) => games.find((g) => g.id === id)?.title ?? "",
+  );
   world = new WorldLayer(host, game, games);
   ui = new Ui({
     root,
