@@ -354,6 +354,11 @@ export class Ui {
     this.mapHost().dataset.mode = "place";
     const name = this.label(kind, game);
     let text = `${name} platzieren: auf freien Boden tippen oder klicken.`;
+    if (kind === "bruecke")
+      text = `${name}: auf einen Fluss tippen. Sie reicht von Ufer zu Ufer.`;
+    if (kind === "hafen") text = `${name}: an das Ufer eines Sees setzen.`;
+    if (kind === "schiff")
+      text = `${name}: aufs Wasser neben einen fertigen Hafen setzen.`;
     if (kind === "damm") {
       const drowned = this.o.game.wouldDrown();
       text = `${name}: nur dort, wo die Sihl das Tal verlässt. Blau wird der Sihlsee`;
@@ -587,8 +592,20 @@ export class Ui {
       druckerei: `Drucke ${this.o.game.state.prints} von ${balance.maxPrints}.`,
       kloster: "der Stolz der Waldstatt.",
       damm: "staut die Sihl zum Sihlsee.",
+      bruecke: "hier kommen die Waldleute über den Fluss.",
+      hafen: this.portText(b),
+      schiff: "fährt die Waldleute zu den anderen Häfen am See.",
     };
     return texts[b.kind] ?? info.about;
+  }
+
+  private portText(b: Building): string {
+    const { ports, ships } = this.o.game.harbour(b);
+    if (!ships) return "noch liegt kein Schiff hier. Bau eines.";
+    if (ports < 2) return "die Schiffe brauchen einen zweiten Hafen am See.";
+    return ships === 1
+      ? "ein Schiff fährt über diesen See."
+      : `${ships} Schiffe fahren über diesen See.`;
   }
 
   /** The Abreissen tool: the first tap marks a building, the second tears it down. */

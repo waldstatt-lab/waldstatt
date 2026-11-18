@@ -35,7 +35,15 @@ export function noise(x: number, y: number, salt = 0): number {
 /** Half widths in tiles: rivers are drawn wider than they are, brooks narrow. */
 export const halfWidth = { river: 0.6, brook: 0.3 };
 
-// The water grid over the data's area: bit 1 water, bit 2 the Sihlsee basin.
+/**
+ * Water tiles lie within this distance of a river's line; at least half a
+ * tile, so even a brook is an unbroken line of water that nobody slips
+ * through.
+ */
+const barrier = 0.5;
+
+// The water grid over the data's area: bit 1 water, bit 2 the Sihlsee basin,
+// bit 4 a natural lake.
 const gx0 = Math.floor(area.x0);
 const gy0 = Math.floor(area.y0);
 const gw = Math.ceil(area.x1) - gx0;
@@ -107,13 +115,13 @@ function strokeLine(cells: Uint8Array, points: number[], hw: number) {
 function cells(): Uint8Array {
   if (grid) return grid;
   grid = new Uint8Array(gw * gh);
-  for (const lake of lakes) fillRings(grid, lake.rings, 1);
+  for (const lake of lakes) fillRings(grid, lake.rings, 1 | 4);
   fillRings(grid, basin.rings, 2);
   for (const line of lines)
     strokeLine(
       grid,
       line.points,
-      line.wide ? halfWidth.river : halfWidth.brook,
+      Math.max(barrier, line.wide ? halfWidth.river : halfWidth.brook),
     );
   return grid;
 }
@@ -128,6 +136,55 @@ function cell(tx: number, ty: number): number {
 /** Whether a tile is a river, a brook or a natural lake. */
 export function isRiver(tx: number, ty: number): boolean {
   return (cell(tx, ty) & 1) !== 0;
+}
+
+/** Whether a tile is part of a natural lake. */
+export function isNaturalLake(tx: number, ty: number): boolean {
+  return (cell(tx, ty) & 4) !== 0;
+}
+
+/**
+ * Numbers each lake's connected water, the Sihlsee's basin too once it is
+ * flooded, so ships know which ports they can reach. 0 is no lake.
+ */
+export function lakeLabels(
+  flooded: boolean,
+): (tx: number, ty: number) => number {
+  const all = cells();
+  const labels = new Int32Array(gw * gh);
+  const lake = (i: number) =>
+    (all[i] & 4) !== 0 || (flooded && (all[i] & 2) !== 0);
+  let next = 1;
+  const stack: number[] = [];
+  for (let i = 0; i < all.length; i++) {
+    if (labels[i] || !lake(i)) continue;
+    labels[i] = next;
+    stack.push(i);
+    while (stack.length) {
+      const j = stack.pop() as number;
+      const x = j % gw;
+      const y = (j - x) / gw;
+      for (const [nx, ny] of [
+        [x + 1, y],
+        [x - 1, y],
+        [x, y + 1],
+        [x, y - 1],
+      ]) {
+        if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
+        const n = ny * gw + nx;
+        if (labels[n] || !lake(n)) continue;
+        labels[n] = next;
+        stack.push(n);
+      }
+    }
+    next++;
+  }
+  return (tx, ty) => {
+    const x = tx - gx0;
+    const y = ty - gy0;
+    if (x < 0 || y < 0 || x >= gw || y >= gh) return 0;
+    return labels[y * gw + x];
+  };
 }
 
 /** Whether a tile lies in the basin that the dam floods. */

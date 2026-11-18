@@ -588,6 +588,9 @@ const heights: Record<Kind, number> = {
   theater: 130,
   kloster: 190,
   damm: 50,
+  bruecke: 34,
+  hafen: 80,
+  schiff: 70,
 };
 
 function painter(kind: Kind, w: number, d: number) {
@@ -1076,6 +1079,189 @@ function damm(P: Painter, w: number, d: number) {
   P.line([0, 0.23, 36], [w, 0.23, 36], "#6d6b64", 1);
 }
 
+const plankWood = {
+  top: "#b98a52",
+  left: "#8a5a32",
+  right: "#6b4423",
+  line: "#4a3320",
+};
+
+/** A wooden bridge along its axis, resting on piles and reaching onto both banks. */
+function bruecke(P: Painter, w: number, d: number, axis: "x" | "y") {
+  // Painted along u; along v the same with u and v swapped.
+  const length = axis === "x" ? w : d;
+  const at = (a: number, b: number, z: number): Point =>
+    axis === "x" ? [a, b, z] : [b, a, z];
+  const deck = (
+    a0: number,
+    b0: number,
+    a1: number,
+    b1: number,
+    z0: number,
+    z1: number,
+  ) =>
+    axis === "x"
+      ? P.box(a0, b0, a1, b1, z0, z1, plankWood)
+      : P.box(b0, a0, b1, a1, z0, z1, plankWood);
+  const a0 = -0.3;
+  const a1 = length + 0.3;
+  P.poly(
+    [
+      at(a0, 0.25, 0),
+      at(a1, 0.25, 0),
+      at(a1 + 0.3, 0.9, 0),
+      at(a0 + 0.3, 0.9, 0),
+    ],
+    "rgba(10, 25, 12, 0.25)",
+  );
+  for (let a = 0.5; a < length; a += 1) {
+    deck(a - 0.06, 0.18, a + 0.06, 0.3, -4, 7);
+    deck(a - 0.06, 0.7, a + 0.06, 0.82, -4, 7);
+  }
+  deck(a0, 0.15, a1, 0.85, 7, 10);
+  for (let a = a0 + 0.2; a < a1; a += 0.18)
+    P.line(at(a, 0.15, 10), at(a, 0.85, 10), "#8a5a32", 0.6);
+  for (const b of [0.18, 0.82]) {
+    for (let a = a0 + 0.1; a <= a1 - 0.05; a += 0.5)
+      deck(a - 0.04, b - 0.04, a + 0.04, b + 0.04, 10, 20);
+    P.line(at(a0 + 0.1, b, 20), at(a1 - 0.1, b, 20), "#5a3a22", 1.6);
+    P.line(at(a0 + 0.1, b, 15), at(a1 - 0.1, b, 15), "#6b4423", 1);
+  }
+}
+
+/** A port: a plank quay with a boathouse, bollards, a crane and some cargo. */
+function hafen(P: Painter, w: number, d: number) {
+  P.shadow(0.1, 0.1, w - 0.1, d - 0.1, 0.6);
+  P.box(0.05, 0.05, w - 0.05, d - 0.05, 0, 5, plankWood);
+  for (let u = 0.25; u < w; u += 0.22)
+    P.line([u, 0.05, 5], [u, d - 0.05, 5], "#8a5a32", 0.6);
+  // The boathouse at the back.
+  P.box(0.25, 0.2, 1.55, 1.1, 5, 26, logs);
+  P.leftOpening(1.1, 0.55, 1.15, 5, 20, "#3a2614");
+  P.rightOpening(1.55, 0.4, 0.75, 13, 19, glass);
+  P.gable(0.25, 0.2, 1.55, 1.1, 26, 18, "u", tiles, 0.15);
+  // A small crane with a hanging net.
+  P.box(w - 0.55, 0.3, w - 0.4, 0.45, 5, 52, logs);
+  P.line([w - 0.47, 0.37, 50], [w - 0.47, 1.25, 50], "#5a3a22", 2);
+  P.line([w - 0.47, 1.2, 50], [w - 0.47, 1.2, 34], "#3a2a1e", 0.8);
+  P.box(w - 0.6, 1.1, w - 0.35, 1.3, 28, 34, {
+    top: "#c9b27a",
+    left: "#a8904f",
+    right: "#86703a",
+  });
+  // Barrels and crates.
+  P.box(1.8, 0.3, 2.1, 0.6, 5, 13, plankWood);
+  P.box(1.85, 0.7, 2.15, 1.0, 5, 11, plankWood);
+  const ctx = P.ctx;
+  for (const [u, v] of [
+    [0.5, 1.5],
+    [0.85, 1.6],
+  ]) {
+    const [x, y] = P.p(u, v, 5);
+    ctx.fillStyle = "#7a4a26";
+    ctx.fillRect(x - 3.5, y - 10, 7, 10);
+    ellipse(ctx, x, y - 10, 3.5, 1.6, "#9a6a3c");
+    ctx.fillStyle = "#3a2614";
+    ctx.fillRect(x - 3.5, y - 7, 7, 0.8);
+    ctx.fillRect(x - 3.5, y - 3, 7, 0.8);
+  }
+  // Bollards along every edge, since the water may lie on any side.
+  for (let u = 0.3; u < w; u += 1)
+    for (const v of [0.1, d - 0.1])
+      P.box(u - 0.05, v - 0.05, u + 0.05, v + 0.05, 5, 10, stone);
+}
+
+/** A wooden sailing boat along u, with a sail in the studio's colours. */
+function schiff(P: Painter, w: number, d: number) {
+  const v = d / 2;
+  const bow = w - 0.05;
+  const stern = 0.15;
+  const half = 0.34;
+  const ctx = P.ctx;
+  const [wx, wy] = P.p(w / 2, v, 0);
+  ellipse(ctx, wx + 3, wy + 2, 40, 12, "rgba(220, 240, 255, 0.25)");
+  ellipse(ctx, wx + 2, wy + 1, 34, 9, "rgba(10, 30, 60, 0.25)");
+  const deckZ = 9;
+  // The hull: the far side, the near side and the deck.
+  P.poly(
+    [
+      [stern, v - half, 0],
+      [bow - 0.4, v - half, 0],
+      [bow, v, 2],
+      [bow, v, deckZ + 3],
+      [bow - 0.4, v - half, deckZ],
+      [stern, v - half, deckZ],
+    ],
+    "#6b4423",
+    "#3a2614",
+  );
+  P.poly(
+    [
+      [stern, v + half, 0],
+      [bow - 0.4, v + half, 0],
+      [bow, v, 2],
+      [bow, v, deckZ + 3],
+      [bow - 0.4, v + half, deckZ],
+      [stern, v + half, deckZ],
+    ],
+    "#8a5a32",
+    "#3a2614",
+  );
+  P.poly(
+    [
+      [stern, v - half, 0],
+      [stern, v + half, 0],
+      [stern, v + half, deckZ],
+      [stern, v - half, deckZ],
+    ],
+    "#5a3a22",
+    "#3a2614",
+  );
+  P.poly(
+    [
+      [stern, v - half, deckZ],
+      [bow - 0.4, v - half, deckZ],
+      [bow, v, deckZ + 3],
+      [bow - 0.4, v + half, deckZ],
+      [stern, v + half, deckZ],
+    ],
+    "#c9a46c",
+    "#6b4423",
+  );
+  for (let u = stern + 0.2; u < bow - 0.3; u += 0.2)
+    P.line([u, v - half, deckZ], [u, v + half, deckZ], "#a8834e", 0.5);
+  P.line([stern, v + half, 4], [bow - 0.4, v + half, 4], "#c23b2a", 1.2);
+  // Mast, boom and sail.
+  const mast = w * 0.45;
+  P.line([mast, v, deckZ], [mast, v, 58], "#4a3320", 1.8);
+  P.line([mast, v, 16], [stern + 0.1, v, 16], "#4a3320", 1.2);
+  P.poly(
+    [
+      [mast, v, 56],
+      [mast, v, 17],
+      [stern + 0.12, v, 17],
+    ],
+    "#f2ead6",
+    "#b9ae94",
+  );
+  P.poly(
+    [
+      [mast + 0.04, v, 52],
+      [mast + 0.04, v, 18],
+      [bow - 0.15, v, 14],
+    ],
+    "#e3d6b8",
+    "#b9ae94",
+  );
+  const [fx, fy] = P.p(mast, v, 58);
+  ctx.fillStyle = "#c23b2a";
+  ctx.beginPath();
+  ctx.moveTo(fx, fy);
+  ctx.lineTo(fx + 9, fy + 2);
+  ctx.lineTo(fx, fy + 4);
+  ctx.fill();
+}
+
 /** A scroll's two rollers; the parchment between them is HTML. */
 function scroll(P: Painter, w: number, d: number) {
   P.shadow(0.2, 0.2, w - 0.2, d - 0.2, 0.3);
@@ -1102,6 +1288,8 @@ export function buildingPicture(
   w: number,
   d: number,
   game?: string,
+  /** The axis a bridge spans along. */
+  axis: "x" | "y" = "x",
 ): Picture {
   const { element, P, ax, ay } = painter(kind, w, d);
   switch (kind) {
@@ -1139,6 +1327,15 @@ export function buildingPicture(
       break;
     case "damm":
       damm(P, w, d);
+      break;
+    case "bruecke":
+      bruecke(P, w, d, axis);
+      break;
+    case "hafen":
+      hafen(P, w, d);
+      break;
+    case "schiff":
+      schiff(P, w, d);
       break;
     case "chronik":
     case "spielidee":

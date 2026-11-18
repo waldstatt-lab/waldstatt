@@ -473,6 +473,7 @@ export class Renderer {
     if (this.planLayer.visible)
       for (const chunk of this.chunks.values()) this.ensurePlanTrees(chunk);
     this.updateWorkers();
+    this.updateShips();
     for (const b of this.game.state.buildings) {
       const view = this.buildings.get(b.id);
       if (view?.bar) this.drawBar(view.bar, b);
@@ -774,11 +775,19 @@ export class Renderer {
 
   // --- Buildings -------------------------------------------------------------
 
-  private picture(b: Pick<Building, "kind" | "w" | "h" | "game">): Art {
-    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}`;
+  /** The axis a bridge spans along; x for everything else. */
+  private axis(b: Pick<Building, "kind" | "x" | "y" | "w" | "h">): "x" | "y" {
+    return b.kind === "bruecke" ? this.game.bridgeAxis(b) : "x";
+  }
+
+  private picture(
+    b: Pick<Building, "kind" | "w" | "h" | "game">,
+    axis: "x" | "y",
+  ): Art {
+    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}`;
     let art = this.art.get(name);
     if (!art) {
-      const picture = buildingPicture(b.kind, b.w, b.h, b.game);
+      const picture = buildingPicture(b.kind, b.w, b.h, b.game, axis);
       art = {
         texture: Texture.from(picture.canvas),
         ax: picture.ax,
@@ -789,11 +798,14 @@ export class Renderer {
     return art;
   }
 
-  private planTexture(b: Pick<Building, "kind" | "w" | "h" | "game">): Texture {
-    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}`;
+  private planTexture(
+    b: Pick<Building, "kind" | "w" | "h" | "game">,
+    axis: "x" | "y",
+  ): Texture {
+    const name = `${b.kind}:${b.game ?? ""}:${b.w}x${b.h}:${axis}`;
     let texture = this.planArt.get(name);
     if (!texture) {
-      texture = Texture.from(planPicture(b.kind, b.w, b.h, b.game));
+      texture = Texture.from(planPicture(b.kind, b.w, b.h, b.game, axis));
       this.planArt.set(name, texture);
     }
     return texture;
@@ -821,9 +833,10 @@ export class Renderer {
     this.repaintFootprint(b);
     if (removed) return;
 
+    const axis = this.axis(b);
     const container = new Container();
     const sprite = new Sprite();
-    this.dress(sprite, this.picture(b));
+    this.dress(sprite, this.picture(b, axis));
     container.addChild(sprite);
     // Sorted by its front tile, so trees further south still overlap it.
     const upright: Upright = {
@@ -836,7 +849,7 @@ export class Renderer {
     };
     const plan = new Container();
     plan.position.set(b.x, b.y);
-    const top = new Sprite(this.planTexture(b));
+    const top = new Sprite(this.planTexture(b, axis));
     top.scale.set(1 / PLAN_RES);
     plan.addChild(top);
     this.planBuildings.addChild(plan);
@@ -942,6 +955,8 @@ export class Renderer {
         this.workerSprites.set(w.id, sprite);
       }
       let frame = 0;
+      // On board, a Waldmensch stands on the deck.
+      const lift = w.phase === "sail" ? 9 : 0;
       if (!still && w.phase === "walk")
         frame = 1 + (Math.floor(this.time * 7) % 2);
       if (!still && w.phase === "work")
@@ -949,7 +964,7 @@ export class Renderer {
       sprite.texture = this.workerTextures[frame];
       sprite.scale.set(w.facing / RES, 1 / RES);
       const p = apply(this.L, w.x, w.y);
-      sprite.position.set(p.x, p.y);
+      sprite.position.set(p.x, p.y - lift * (1 - ease(this.plan)));
       sprite.zIndex = p.y;
     }
     for (const [id, sprite] of this.workerSprites) {
@@ -976,6 +991,26 @@ export class Renderer {
         top.destroy();
         this.planWorkers.delete(id);
       }
+    }
+  }
+
+  /** Ships under way: their pictures follow them and turn with their course. */
+  private updateShips() {
+    for (const s of this.game.ships.values()) {
+      const view = this.buildings.get(s.id);
+      if (!view) continue;
+      const u = view.upright;
+      u.x = s.x;
+      u.y = s.y;
+      u.sort = { x: s.x + 0.4, y: s.y + 0.4 };
+      this.put(u);
+      // Mirrored, the hull painted along x lies along y.
+      u.object.scale.x = s.axis === "x" ? 1 : -1;
+      const b = this.game.state.buildings.find((other) => other.id === s.id);
+      if (!b) continue;
+      view.plan.pivot.set(b.w / 2, b.h / 2);
+      view.plan.position.set(s.x, s.y);
+      view.plan.rotation = s.axis === "x" ? 0 : Math.PI / 2;
     }
   }
 
@@ -1046,7 +1081,11 @@ export class Renderer {
       .rect(spot.x, spot.y, spot.w, spot.h)
       .stroke({ width: 0.06, color: spot.ok ? 0xfff4c8 : 0xd8432f });
     if (!spot.ok || kinds[b.kind].fit) return;
-    this.dress(this.ghostSprite, this.picture({ ...b, w: spot.w, h: spot.h }));
+    const at = { kind: b.kind, x: spot.x, y: spot.y, w: spot.w, h: spot.h };
+    this.dress(
+      this.ghostSprite,
+      this.picture({ ...b, w: spot.w, h: spot.h }, this.axis(at)),
+    );
     this.ghostAt.x = spot.x + spot.w / 2;
     this.ghostAt.y = spot.y + spot.h / 2;
     this.put(this.ghostAt);

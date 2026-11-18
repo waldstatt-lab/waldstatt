@@ -69,6 +69,11 @@ a stock limit. The app icons are pixel art encoded as PNG at build time.
 - The theatre is a wooden amphitheatre with stands all round, and its stage is
   painted on the map: the preview with wooden signs for the programme and the
   keys, played by tapping the signs or with the keyboard.
+- Waldleute walk only on open ground and find their way around trees, so they
+  fell their way into the forest from the clearing's edge. They no longer wade:
+  rivers and brooks need a bridge, which spans from bank to bank. At a lake,
+  ports can be built, and ships built at a port carry Waldleute between the
+  ports of their lake. This replaces the rabbit hole's «no pathfinding».
 
 This is a hobby project, so the pitch sets no appetite. The game should still
 grow in playable slices, each a sensible place to stop: forest, felling and huts;

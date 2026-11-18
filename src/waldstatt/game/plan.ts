@@ -239,12 +239,69 @@ function kloster(ctx: Ctx, w: number, h: number) {
   }
 }
 
+/** A bridge from above: planks across its axis between two rails. */
+function bridge(ctx: Ctx, w: number, h: number, axis: "x" | "y") {
+  if (axis === "y") {
+    ctx.translate(w, 0);
+    ctx.rotate(Math.PI / 2);
+    [w, h] = [h, w];
+  }
+  shadow(ctx, 0, 0.15, w, 0.7, 0.12);
+  rect(ctx, 0, 0.15, w, 0.7, "#b98a52");
+  ctx.strokeStyle = "#8a5a32";
+  ctx.lineWidth = 0.025;
+  for (let x = 0.09; x < w; x += 0.18) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0.15);
+    ctx.lineTo(x, 0.85);
+    ctx.stroke();
+  }
+  rect(ctx, 0, 0.13, w, 0.07, "#5a3a22");
+  rect(ctx, 0, 0.8, w, 0.07, "#5a3a22");
+}
+
+/** A boat from above, along x: hull, deck, mast and furled sail. */
+function boat(ctx: Ctx, w: number, h: number) {
+  const v = h / 2;
+  ctx.fillStyle = "rgba(10, 30, 60, 0.3)";
+  ctx.beginPath();
+  ctx.ellipse(w / 2 + 0.08, v + 0.08, w / 2 - 0.05, 0.38, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(0.15, v - 0.34);
+  ctx.lineTo(w - 0.45, v - 0.34);
+  ctx.quadraticCurveTo(w - 0.1, v - 0.2, w - 0.05, v);
+  ctx.quadraticCurveTo(w - 0.1, v + 0.2, w - 0.45, v + 0.34);
+  ctx.lineTo(0.15, v + 0.34);
+  ctx.closePath();
+  ctx.fillStyle = "#c9a46c";
+  ctx.fill();
+  ctx.strokeStyle = "#6b4423";
+  ctx.lineWidth = 0.05;
+  ctx.stroke();
+  ctx.strokeStyle = "#a8834e";
+  ctx.lineWidth = 0.02;
+  for (let x = 0.35; x < w - 0.4; x += 0.2) {
+    ctx.beginPath();
+    ctx.moveTo(x, v - 0.32);
+    ctx.lineTo(x, v + 0.32);
+    ctx.stroke();
+  }
+  rect(ctx, 0.25, v - 0.05, w * 0.45 - 0.25, 0.1, "#f2ead6", "#b9ae94");
+  ctx.fillStyle = "#4a3320";
+  ctx.beginPath();
+  ctx.arc(w * 0.45, v, 0.06, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 /** A building seen from above, as large as its footprint. */
 export function planPicture(
   kind: Kind,
   w: number,
   h: number,
   game?: string,
+  /** The axis a bridge spans along. */
+  axis: "x" | "y" = "x",
 ): HTMLCanvasElement {
   const { element, ctx } = canvas(w, h);
   switch (kind) {
@@ -310,6 +367,38 @@ export function planPicture(
       break;
     case "kloster":
       kloster(ctx, w, h);
+      break;
+    case "bruecke":
+      bridge(ctx, w, h, axis);
+      break;
+    case "hafen":
+      shadow(ctx, 0.05, 0.05, w - 0.1, h - 0.1, 0.1);
+      rect(ctx, 0.05, 0.05, w - 0.1, h - 0.1, "#b98a52", "#4a3320");
+      ctx.strokeStyle = "#8a5a32";
+      ctx.lineWidth = 0.02;
+      for (let x = 0.25; x < w; x += 0.22) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0.05);
+        ctx.lineTo(x, h - 0.05);
+        ctx.stroke();
+      }
+      roof(ctx, 0.25, 0.2, 1.3, 0.9, "x", tiles[0], tiles[1], tiles[2]);
+      rect(ctx, w - 0.55, 0.3, 0.15, 0.15, "#6b4423");
+      rect(ctx, w - 0.5, 0.37, 0.05, 0.9, "#5a3a22");
+      rect(ctx, 1.8, 0.3, 0.3, 0.3, "#a8743f", "#4a3320");
+      rect(ctx, 1.85, 0.7, 0.3, 0.3, "#a8743f", "#4a3320");
+      for (const [x, y] of [
+        [0.5, 1.5],
+        [0.85, 1.6],
+      ]) {
+        ctx.fillStyle = "#9a6a3c";
+        ctx.beginPath();
+        ctx.arc(x, y, 0.11, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    case "schiff":
+      boat(ctx, w, h);
       break;
     case "damm":
       shadow(ctx, 0, 0.2, w, h - 0.4, 0.15);

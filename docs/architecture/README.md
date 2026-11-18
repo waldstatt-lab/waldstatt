@@ -30,10 +30,11 @@ the map. Its folder `src/waldstatt/` holds:
 | `tools/waters.mjs`, `tools/download.mjs` | Generate `game/waters.ts` from swisstopo and BAFU data; see below |
 | `game/waters.ts` | Generated: the rivers, brooks and lakes around Einsiedeln, the Sihlsee basin, the dam's site and the water names, in tiles |
 | `game/config.ts` | The balance table: costs, footprints, build times, speeds, stock limits |
-| `game/world.ts` | The world: the forest from a fixed seed, and the water grid rasterized from `waters.ts` at start-up |
+| `game/world.ts` | The world: the forest from a fixed seed, the water grid rasterized from `waters.ts` at start-up, and each lake's connected water |
 | `game/iso.ts` | The projections between tiles and the screen: the isometric view, the top-down plan, and the blend between them |
 | `game/state.ts` | The save in `localStorage`: versioned JSON, validated on load, reset by key prefix |
-| `game/sim.ts` | The rules: marking and felling, Waldleute and their tasks, building sites, sheep and the printing press, the flood, the Waldmensch's hints |
+| `game/sim.ts` | The rules: marking and felling, Waldleute and their tasks, bridges, ports and ships, building sites, sheep and the printing press, the flood, the Waldmensch's hints |
+| `game/nav.ts` | Finding ways: the Waldleute's search over open ground and crossings by ship, straightening ways, and ships' routes over their lake |
 | `game/texts.ts` | Reads the templates and splits each text into sections at its `<h2>` headings |
 | `game/art.ts` | The painted art for the isometric view on canvases at twice the resolution: trees, Waldleute, buildings, the amphitheatre's stands, ground textures |
 | `game/plan.ts` | The same buildings, trees and Waldleute seen from straight above, for the plan view |
@@ -79,8 +80,29 @@ contacts swisstopo. The game's menu credits swisstopo and BAFU.
 **Play.** The axe marks single trees; the saw marks every tree in a dragged area
 (two fingers or another mouse button pan meanwhile); with «Abreissen», a first
 tap marks a building in red and a second tap on it tears it down, returning half
-its wood. Waldleute walk in straight lines, wade through rivers, build sites
-first and otherwise fell the nearest marked tree. Felled wood counts at once.
+its wood. Waldleute walk only on open ground: felled forest, the natural gaps,
+bridges and the finished dam, never through standing trees or water. They build
+the nearest site they can reach (counted a few tiles nearer) and otherwise fell
+the nearest marked tree beside open ground, so a sawn area is cleared from its
+edge inward and a tree marked deep in the forest waits until a way leads to it.
+Felled wood counts at once. Ways are found tile by tile with eight neighbours,
+never cutting between two diagonal trees, and straightened where the straight
+line stays clear (`nav.ts`). A search reaches 256 tiles from the Waldmensch; to
+keep it cheap, at most two run per frame, and tiles from which a search found
+nothing are not searched again until a tree is marked or felled, a task is
+freed or a way changes.
+
+Water needs building. A **Brücke** spans a river where the visitor points:
+the shorter of the straight runs of water across, up to five tiles, from bank
+to bank. Brooks count as rivers; their water tiles are at least half a tile
+wide, so they form an unbroken line. Lakes take no bridge. A **Hafen** stands on
+the shore of a lake: a natural lake, or the Sihlsee once it is dammed. A
+**Schiff** is built on the lake beside a finished port. Once a lake has a ship,
+Waldleute cross it between any two of its ports: the search counts the
+crossing as a path, a Waldmensch waits at the quay, the nearest free ship of
+the lake comes, takes everyone waiting for the same crossing, sails over the
+lake's water to the other port and returns to its own. Ships under way are not
+saved; after a reload they lie at their ports.
 Buildings stand only on cleared ground: a footprint with trees shows red,
 «Zuerst die Bäume fällen». Each finished hut adds a Waldmensch, up to 16. Sheep
 pastures grow parchment and the printing press turns parchment into prints
@@ -151,8 +173,8 @@ link is a real button or link with a German name; status, finished buildings,
 the stage's status while somebody plays and the Waldmensch's hints are
 announced politely,
 and the texts on the map are in the page as a region «Im Wald». With reduced
-motion Waldleute do not walk or swing their tools, and the previews play no
-demonstration. Screen-reader users and search engines can hardly reach the
+motion Waldleute do not walk or swing their tools, ships do not sail visibly,
+and the previews play no demonstration. Screen-reader users and search engines can hardly reach the
 content: accepted in ADR 0002. The page weighs about
 10 kB of HTML and about 210 kB of scripts, styles and water data, gzipped, most
 of it PixiJS.

@@ -32,6 +32,14 @@ export const balance = {
   refund: 0.5,
   /** Trees the saw marks at most in one stroke. */
   sawMaxTiles: 600,
+  /** Water tiles a bridge spans at most. */
+  bridgeMaxSpan: 5,
+  /** Tiles per second a ship sails. */
+  shipSpeed: 3,
+  /** What boarding a ship costs a Waldmensch who looks for a way, in tiles walked. */
+  boardingCost: 6,
+  /** Tiles a Waldmensch searches at most when looking for a way to work. */
+  searchTiles: 40000,
 } as const;
 
 export type Kind =
@@ -45,9 +53,13 @@ export type Kind =
   | "spielhaus"
   | "theater"
   | "kloster"
-  | "damm";
+  | "damm"
+  | "bruecke"
+  | "hafen"
+  | "schiff";
 
-export type Group = "Wohnen" | "Wirtschaft" | "Wissen" | "Spiele" | "Prestige";
+export type Group =
+  "Wohnen" | "Wirtschaft" | "Wege" | "Wissen" | "Spiele" | "Prestige";
 
 export interface Cost {
   wood: number;
@@ -59,7 +71,10 @@ export interface KindInfo {
   name: string;
   group: Group;
   cost: Cost;
-  /** Footprint in tiles; for texts lying on the ground, h follows the text. */
+  /**
+   * Footprint in tiles; for texts lying on the ground, h follows the text, and
+   * a bridge is as long as the river is wide.
+   */
   w: number;
   h: number;
   /** Seconds of work for one Waldmensch. */
@@ -194,6 +209,38 @@ export const kinds: Record<Kind, KindInfo> = {
     limit: "one",
     about: "Der grösste Bau der Waldstatt. Nur zum Bewundern.",
   },
+  bruecke: {
+    name: "Brücke",
+    group: "Wege",
+    cost: cost(6),
+    w: 1,
+    h: 1,
+    work: 5,
+    limit: "many",
+    about:
+      "Führt von Ufer zu Ufer über einen Fluss. Schwimmen können die Waldleute nicht.",
+  },
+  hafen: {
+    name: "Hafen",
+    group: "Wege",
+    cost: cost(16),
+    w: 3,
+    h: 2,
+    work: 10,
+    limit: "many",
+    about: "Ein Steg am Seeufer, wo Schiffe anlegen.",
+  },
+  schiff: {
+    name: "Schiff",
+    group: "Wege",
+    cost: cost(12),
+    w: 2,
+    h: 1,
+    work: 8,
+    limit: "many",
+    about:
+      "Liegt an einem Hafen und fährt die Waldleute zu den anderen Häfen am See.",
+  },
   damm: {
     name: "Damm",
     group: "Prestige",
@@ -209,6 +256,7 @@ export const kinds: Record<Kind, KindInfo> = {
 export const groups: Group[] = [
   "Wohnen",
   "Wirtschaft",
+  "Wege",
   "Wissen",
   "Spiele",
   "Prestige",
