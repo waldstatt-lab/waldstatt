@@ -15,13 +15,22 @@ import { textLength, WorldLayer } from "./overlay";
 import { Renderer } from "./render";
 import { Stage } from "./stage";
 import { Game, type Events, type TextSpec } from "./sim";
-import { clearSaved, keep, load, save } from "./state";
+import { clearSaved, keep, load, save, whenClosed } from "./state";
 import { readGames } from "./texts";
 import { Ui } from "./ui";
 import { loadPages, onPage, town } from "./world";
 
 const root = document.querySelector<HTMLElement>("[data-wg]");
-if (root) void start(root);
+if (root)
+  start(root).catch((error: unknown) => {
+    // Say so instead of leaving the forest picture without a word.
+    console.error(error);
+    const note = root.querySelector<HTMLElement>("[data-fallback-note]");
+    if (note)
+      note.textContent = `Die Waldstatt konnte nicht starten: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+  });
 
 function hasWebGL(): boolean {
   try {
@@ -242,6 +251,19 @@ async function start(root: HTMLElement) {
     ui.announce(
       "Der Browser lässt nicht speichern. Der Wald bleibt nur, bis du die Seite schliesst.",
     );
+  if (problem === "blocked") {
+    // Another tab holds the saved forest; saving here could overwrite it.
+    saving = false;
+    ui.announce(
+      "Ein anderer Tab der Waldstatt hält den gespeicherten Wald fest. Schliess ihn und lade diese Seite neu; bis dahin wird hier nicht gespeichert.",
+    );
+  }
+  whenClosed(() => {
+    saving = false;
+    ui?.announce(
+      "Der Wald wurde in einem anderen Tab neu begonnen. Lade diese Seite neu; bis dahin wird hier nicht gespeichert.",
+    );
+  });
 
   if (window.matchMedia("(display-mode: standalone)").matches) keep();
   app.ticker.add((ticker) => {

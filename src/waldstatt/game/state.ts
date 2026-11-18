@@ -177,17 +177,64 @@ const request = <T>(r: IDBRequest<T>) =>
   });
 
 let opening: Promise<IDBDatabase> | null = null;
+/** Set when another tab reset the forest: this tab no longer saves. */
+let closed = false;
+let onClosed = () => {};
+
+/** Calls back when another tab resets the forest and this one stops saving. */
+export function whenClosed(listener: () => void) {
+  onClosed = listener;
+}
+
+/** Seconds to wait for the database, e.g. while another tab holds it. */
+const openTimeout = 5000;
 
 function open(): Promise<IDBDatabase> {
-  opening ??= new Promise((resolve, reject) => {
-    const r = indexedDB.open(dbName, 1);
-    r.onupgradeneeded = () => {
-      r.result.createObjectStore("meta");
-      r.result.createObjectStore("chunks");
+  if (closed) return Promise.reject(new Error("closed"));
+  opening ??= new Promise<IDBDatabase>((resolve, reject) => {
+    const timer = window.setTimeout(
+      () => reject(new Error("blocked")),
+      openTimeout,
+    );
+    const connect = (version?: number) => {
+      const r = indexedDB.open(dbName, version);
+      r.onupgradeneeded = () => {
+        for (const store of ["meta", "chunks"])
+          if (!r.result.objectStoreNames.contains(store))
+            r.result.createObjectStore(store);
+      };
+      r.onsuccess = () => {
+        const db = r.result;
+        // A database without its stores, e.g. left by an interrupted reset:
+        // open it once more at the next version, which adds them.
+        if (
+          !db.objectStoreNames.contains("meta") ||
+          !db.objectStoreNames.contains("chunks")
+        ) {
+          const next = db.version + 1;
+          db.close();
+          return connect(next);
+        }
+        // Another tab resets the forest: let go, and save no more here, so
+        // this tab cannot write its old forest back.
+        db.onversionchange = () => {
+          db.close();
+          closed = true;
+          opening = null;
+          onClosed();
+        };
+        window.clearTimeout(timer);
+        resolve(db);
+      };
+      r.onerror = () => {
+        window.clearTimeout(timer);
+        reject(r.error);
+      };
     };
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-    r.onblocked = () => reject(new Error("blocked"));
+    connect();
+  }).catch((error: unknown) => {
+    opening = null;
+    throw error;
   });
   return opening;
 }
@@ -211,13 +258,14 @@ const bytes = (value: unknown, length: number): Uint8Array | undefined =>
 /** Reads the saved state; anything invalid starts a fresh forest. */
 export async function load(gameIds: Set<string>): Promise<{
   state: Saved;
-  problem?: "storage" | "invalid";
+  problem?: "storage" | "invalid" | "blocked";
 }> {
   let db: IDBDatabase;
   try {
     db = await open();
-  } catch {
-    return { state: freshState(), problem: "storage" };
+  } catch (error) {
+    const blocked = error instanceof Error && error.message === "blocked";
+    return { state: freshState(), problem: blocked ? "blocked" : "storage" };
   }
   try {
     const tx = db.transaction(["meta", "chunks"], "readonly");
@@ -542,6 +590,7 @@ export async function clearSaved() {
   } catch {
     // Nothing was saved there.
   }
+  closed = true;
   try {
     (await opening)?.close();
   } catch {

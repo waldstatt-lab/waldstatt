@@ -20,6 +20,34 @@ export interface Picture {
   /** Where the anchor (the footprint's centre on the ground) lies, in world units. */
   ax: number;
   ay: number;
+  /**
+   * For buildings mostly flat (fields, pastures, a graveyard): their ground,
+   * on a canvas of the same size and anchor, drawn under trees and Waldleute.
+   */
+  flat?: HTMLCanvasElement;
+}
+
+/**
+ * The buildings that lie mostly flat on the ground, and the front corner of
+ * their upright part (house, barn, shelter, yew) in the footprint's tiles,
+ * by which that part is sorted among trees and Waldleute.
+ */
+export function flatPart(
+  kind: Kind,
+  w: number,
+): { u: number; v: number } | null {
+  switch (kind) {
+    case "getreidehof":
+      return { u: 2.0, v: 1.6 };
+    case "viehhof":
+      return { u: 2.3, v: 1.7 };
+    case "schafweide":
+      return { u: w - 0.2, v: 1.2 };
+    case "friedhof":
+      return { u: 0.8, v: 0.8 };
+    default:
+      return null;
+  }
 }
 
 function canvas(w: number, h: number) {
@@ -1481,8 +1509,8 @@ function sheep(P: Painter, u: number, v: number, rnd: () => number) {
   ctx.fillRect(x + 3, y - 4, 1.2, 4);
 }
 
-function schafweide(P: Painter, w: number, d: number) {
-  P.poly(
+function schafweide(F: Painter, P: Painter, w: number, d: number) {
+  F.poly(
     [
       [0.1, 0.1, 0],
       [w - 0.1, 0.1, 0],
@@ -1493,17 +1521,17 @@ function schafweide(P: Painter, w: number, d: number) {
   );
   const rnd = random(9);
   for (let i = 0; i < 160; i++) {
-    const [x, y] = P.p(0.2 + rnd() * (w - 0.4), 0.2 + rnd() * (d - 0.4));
-    P.ctx.fillStyle =
+    const [x, y] = F.p(0.2 + rnd() * (w - 0.4), 0.2 + rnd() * (d - 0.4));
+    F.ctx.fillStyle =
       rnd() < 0.5 ? "rgba(255,255,200,0.25)" : "rgba(30,70,20,0.25)";
-    P.ctx.fillRect(x, y, 1.5, 1);
+    F.ctx.fillRect(x, y, 1.5, 1);
   }
   // A shelter in the back corner.
   P.box(w - 1.4, 0.2, w - 0.2, 1.2, 0, 14, logs);
   P.gable(w - 1.4, 0.2, w - 0.2, 1.2, 14, 12, "u", thatch, 0.12);
   // The trough.
-  P.box(0.5, d - 0.9, 1.3, d - 0.6, 0, 4, logs);
-  P.poly(
+  F.box(0.5, d - 0.9, 1.3, d - 0.6, 0, 4, logs);
+  F.poly(
     [
       [0.55, d - 0.85, 4],
       [1.25, d - 0.85, 4],
@@ -1520,13 +1548,13 @@ function schafweide(P: Painter, w: number, d: number) {
     [1.3, 2.0],
   ];
   flock.sort((a, b) => a[0] + a[1] - b[0] - b[1]);
-  for (const [u, v] of flock) sheep(P, u, v, rnd);
+  for (const [u, v] of flock) sheep(F, u, v, rnd);
   // Fence posts and rails round the edge, back sides first.
   const post = (u: number, v: number) =>
-    P.box(u - 0.04, v - 0.04, u + 0.04, v + 0.04, 0, 9, logs);
+    F.box(u - 0.04, v - 0.04, u + 0.04, v + 0.04, 0, 9, logs);
   const rails = (a: [number, number], b: [number, number]) => {
-    P.line([a[0], a[1], 7], [b[0], b[1], 7], "#7a5230", 1.2);
-    P.line([a[0], a[1], 3.5], [b[0], b[1], 3.5], "#7a5230", 1.2);
+    F.line([a[0], a[1], 7], [b[0], b[1], 7], "#7a5230", 1.2);
+    F.line([a[0], a[1], 3.5], [b[0], b[1], 3.5], "#7a5230", 1.2);
   };
   rails([0.1, 0.1], [w - 0.1, 0.1]);
   rails([0.1, 0.1], [0.1, d - 0.1]);
@@ -2276,18 +2304,18 @@ function sheaf(P: Painter, u: number, v: number) {
 }
 
 /** A farm with a timbered house at the back and grain fields. */
-function getreidehof(P: Painter, w: number, d: number) {
-  field(P, 0.1, 1.9, w - 0.1, d - 0.1);
-  field(P, 2.3, 0.1, w - 0.1, 1.8);
+function getreidehof(F: Painter, P: Painter, w: number, d: number) {
+  field(F, 0.1, 1.9, w - 0.1, d - 0.1);
+  field(F, 2.3, 0.1, w - 0.1, 1.8);
   P.shadow(0.2, 0.2, 2.0, 1.6, 0.9);
   P.box(0.2, 0.2, 2.0, 1.6, 0, 18, plaster);
   timber(P, 0.2, 0.2, 2.0, 1.6, 0, 18);
   P.leftOpening(1.6, 0.9, 1.3, 0, 12, "#4a2f1c");
   P.rightOpening(2.0, 0.6, 0.95, 7, 13, glass);
   P.gable(0.2, 0.2, 2.0, 1.6, 18, 18, "u", thatch, 0.16);
-  sheaf(P, 2.6, 1.4);
-  sheaf(P, 3.2, 1.5);
-  sheaf(P, 3.8, 1.3);
+  sheaf(F, 2.6, 1.4);
+  sheaf(F, 3.2, 1.5);
+  sheaf(F, 3.8, 1.3);
 }
 
 function cow(P: Painter, u: number, v: number, spotted: boolean) {
@@ -2326,8 +2354,8 @@ function chicken(P: Painter, u: number, v: number) {
 }
 
 /** A farm with a barn, a fenced pasture, cows, pigs and chickens. */
-function viehhof(P: Painter, w: number, d: number) {
-  P.poly(
+function viehhof(F: Painter, P: Painter, w: number, d: number) {
+  F.poly(
     [
       [0.1, 0.1, 0],
       [w - 0.1, 0.1, 0],
@@ -2336,7 +2364,7 @@ function viehhof(P: Painter, w: number, d: number) {
     ],
     "#7fa84c",
   );
-  P.poly(
+  F.poly(
     [
       [0.1, 0.1, 0],
       [2.4, 0.1, 0],
@@ -2356,7 +2384,7 @@ function viehhof(P: Painter, w: number, d: number) {
   P.line([1.6, 1.7, 0], [0.8, 1.7, 16], "#8a5a32", 1);
   P.gable(0.2, 0.2, 2.3, 1.7, 22, 20, "u", tiles, 0.16);
   // A trough and the animals.
-  P.box(2.8, 0.5, 3.8, 0.8, 0, 4, logs);
+  F.box(2.8, 0.5, 3.8, 0.8, 0, 4, logs);
   const herd: [number, number, "cow" | "spot" | "pig" | "hen"][] = [
     [3.2, 1.4, "cow"],
     [4.2, 2.2, "spot"],
@@ -2369,21 +2397,21 @@ function viehhof(P: Painter, w: number, d: number) {
   ];
   herd.sort((a, b) => a[0] + a[1] - b[0] - b[1]);
   for (const [u, v, kind] of herd) {
-    if (kind === "cow" || kind === "spot") cow(P, u, v, kind === "spot");
-    else if (kind === "pig") pig(P, u, v);
-    else chicken(P, u, v);
+    if (kind === "cow" || kind === "spot") cow(F, u, v, kind === "spot");
+    else if (kind === "pig") pig(F, u, v);
+    else chicken(F, u, v);
   }
   // Rails round the pasture.
   const rails = (a: [number, number], b: [number, number]) => {
-    P.line([a[0], a[1], 7], [b[0], b[1], 7], "#7a5230", 1.2);
-    P.line([a[0], a[1], 3.5], [b[0], b[1], 3.5], "#7a5230", 1.2);
+    F.line([a[0], a[1], 7], [b[0], b[1], 7], "#7a5230", 1.2);
+    F.line([a[0], a[1], 3.5], [b[0], b[1], 3.5], "#7a5230", 1.2);
   };
   rails([0.1, d - 0.1], [w - 0.1, d - 0.1]);
   rails([w - 0.1, 0.1], [w - 0.1, d - 0.1]);
   for (let u = 0.1; u <= w; u += 0.5)
-    P.box(u - 0.04, d - 0.14, u + 0.04, d - 0.06, 0, 9, logs);
+    F.box(u - 0.04, d - 0.14, u + 0.04, d - 0.06, 0, 9, logs);
   for (let v = 0.1; v <= d; v += 0.5)
-    P.box(w - 0.14, v - 0.04, w - 0.06, v + 0.04, 0, 9, logs);
+    F.box(w - 0.14, v - 0.04, w - 0.06, v + 0.04, 0, 9, logs);
 }
 
 /** A water mill: stone below, timber above, and a wheel on its side. */
@@ -2572,8 +2600,14 @@ function tombstone(ctx: Ctx, x: number, y: number, scale = 1) {
 }
 
 /** A graveyard: a low wall, grass, a yew, and its tombstones. */
-function friedhof(P: Painter, w: number, d: number, graves: number) {
-  P.poly(
+function friedhof(
+  F: Painter,
+  P: Painter,
+  w: number,
+  d: number,
+  graves: number,
+) {
+  F.poly(
     [
       [0.1, 0.1, 0],
       [w - 0.1, 0.1, 0],
@@ -2583,16 +2617,17 @@ function friedhof(P: Painter, w: number, d: number, graves: number) {
     "#6f9a48",
   );
   const low = { ...stone, top: "#ddd6c4" };
-  P.box(0.1, 0.1, w - 0.1, 0.25, 0, 6, low);
-  P.box(0.1, 0.1, 0.25, d - 0.1, 0, 6, low);
+  F.box(0.1, 0.1, w - 0.1, 0.25, 0, 6, low);
+  F.box(0.1, 0.1, 0.25, d - 0.1, 0, 6, low);
   // A yew in the back corner.
-  const ctx = P.ctx;
+  const yew = P.ctx;
   const [tx, ty] = P.p(0.6, 0.6, 0);
-  ellipse(ctx, tx + 4, ty + 1, 10, 4, "rgba(0, 0, 0, 0.3)");
-  ctx.fillStyle = "#4a3320";
-  ctx.fillRect(tx - 1.5, ty - 10, 3, 10);
-  ellipse(ctx, tx, ty - 20, 9, 13, "#24502c");
-  ellipse(ctx, tx - 2, ty - 24, 5, 7, "#326a3a");
+  ellipse(yew, tx + 4, ty + 1, 10, 4, "rgba(0, 0, 0, 0.3)");
+  yew.fillStyle = "#4a3320";
+  yew.fillRect(tx - 1.5, ty - 10, 3, 10);
+  ellipse(yew, tx, ty - 20, 9, 13, "#24502c");
+  ellipse(yew, tx - 2, ty - 24, 5, 7, "#326a3a");
+  const ctx = F.ctx;
   const spots: [number, number][] = [];
   for (let v = 0.75; v < d - 0.3; v += 0.65)
     for (let u = 0.75; u < w - 0.3; u += 0.55) {
@@ -2602,9 +2637,9 @@ function friedhof(P: Painter, w: number, d: number, graves: number) {
   spots
     .slice(0, graves)
     .sort((a, b) => a[0] + a[1] - b[0] - b[1])
-    .forEach(([u, v]) => tombstone(ctx, ...P.p(u, v, 0)));
-  P.box(0.1, d - 0.25, w - 0.1, d - 0.1, 0, 6, low);
-  P.box(w - 0.25, 0.1, w - 0.1, d - 0.1, 0, 6, low);
+    .forEach(([u, v]) => tombstone(ctx, ...F.p(u, v, 0)));
+  F.box(0.1, d - 0.25, w - 0.1, d - 0.1, 0, 6, low);
+  F.box(w - 0.25, 0.1, w - 0.1, d - 0.1, 0, 6, low);
 }
 
 /** The ISE AG's forge: an open smithy with anvil, hearth and its name. */
@@ -2819,6 +2854,8 @@ export function buildingPicture(
   graves = 0,
 ): Picture {
   const { element, P, ax, ay } = painter(kind, w, d);
+  const ground = flatPart(kind, w) ? painter(kind, w, d) : null;
+  const F = ground?.P ?? P;
   switch (kind) {
     case "huette":
       hut(P);
@@ -2845,7 +2882,7 @@ export function buildingPicture(
       druckerei(P);
       break;
     case "schafweide":
-      schafweide(P, w, d);
+      schafweide(F, P, w, d);
       break;
     case "klause":
       klause(P);
@@ -2875,10 +2912,10 @@ export function buildingPicture(
       steinhaus(P);
       break;
     case "getreidehof":
-      getreidehof(P, w, d);
+      getreidehof(F, P, w, d);
       break;
     case "viehhof":
-      viehhof(P, w, d);
+      viehhof(F, P, w, d);
       break;
     case "muehle":
       muehle(P);
@@ -2893,7 +2930,7 @@ export function buildingPicture(
       kirche(P, w, d);
       break;
     case "friedhof":
-      friedhof(P, w, d, graves);
+      friedhof(F, P, w, d, graves);
       break;
     case "ise":
       ise(P);
@@ -2902,7 +2939,7 @@ export function buildingPicture(
       brot(P, w, d);
       break;
   }
-  return { canvas: element, ax, ay };
+  return { canvas: element, ax, ay, flat: ground?.element };
 }
 
 // --- Ground textures --------------------------------------------------------

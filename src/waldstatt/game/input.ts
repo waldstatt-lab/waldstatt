@@ -1,7 +1,8 @@
 /**
  * Pointer, touch, wheel and keyboard input on the map. Dragging pans (with
  * the saw, one finger or the left mouse button marks an area instead, and two
- * fingers or another mouse button pan); pinching and the wheel zoom; a tap is
+ * fingers or another mouse button pan; while placing, a drag that starts on
+ * the building being placed moves it); pinching and the wheel zoom; a tap is
  * a short press without movement. Keys are handled only while the map has
  * focus: arrows move the cursor tile, Shift and arrows pan, + and − zoom,
  * Enter or Space applies, Escape cancels.
@@ -22,6 +23,10 @@ export interface MapHandlers {
   key(event: KeyboardEvent, down: boolean): boolean;
   /** Whether a one-finger or left-button drag marks an area (the saw). */
   sawing(): boolean;
+  /** A press on the building being placed: true if it is taken to drag. */
+  grab(tile: Tile): boolean;
+  /** The building being placed is dragged over a tile. */
+  drag(tile: Tile): void;
   tap(tile: Tile, pointer: string): void;
   hover(tile: Tile): void;
   saw(from: Tile, to: Tile, done: boolean): void;
@@ -47,6 +52,8 @@ export function attachInput(
   let cursor: Tile | null = null;
   /** A press taken by something on the map, held until the pointer lifts. */
   let pressing = false;
+  /** The building being placed is held and follows the pointer. */
+  let grabbing = false;
 
   const local = (event: PointerEvent | WheelEvent) => {
     const box = host.getBoundingClientRect();
@@ -78,6 +85,10 @@ export function attachInput(
       }
       downAt = { ...point, time: performance.now(), id: event.pointerId };
       moved = false;
+      grabbing =
+        (event.pointerType !== "mouse" || event.button === 0) &&
+        handlers.grab(tileAt(point));
+      if (grabbing) return;
       const marks =
         handlers.sawing() &&
         (event.pointerType !== "mouse" || event.button === 0);
@@ -103,7 +114,12 @@ export function attachInput(
     if (pressing) return;
     if (downAt && Math.hypot(point.x - downAt.x, point.y - downAt.y) > tapSlop)
       moved = true;
+    if (grabbing && pointers.size === 1) {
+      handlers.drag(tileAt(point));
+      return;
+    }
     if (pointers.size >= 2) {
+      grabbing = false;
       const now = spread();
       if (pinch && now) {
         const [a, b] = [...pointers.values()];
@@ -135,7 +151,11 @@ export function attachInput(
       pinch = spread();
       return;
     }
-    if (sawFrom) {
+    if (grabbing) {
+      grabbing = false;
+      // A press on it without a drag is a tap: with a mouse, it builds.
+      if (!cancelled && !moved) handlers.tap(tileAt(point), event.pointerType);
+    } else if (sawFrom) {
       if (!cancelled) handlers.saw(sawFrom, tileAt(point), true);
       sawFrom = null;
     } else if (!cancelled && !moved && downAt?.id === event.pointerId) {

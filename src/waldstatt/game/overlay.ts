@@ -379,6 +379,11 @@ export class WorldLayer {
    * at a time; events on it stay off the map underneath.
    */
   showCard(b: Building, element: HTMLElement) {
+    this.showCardAt({ x: b.x + b.w / 2, y: b.y + b.h / 2 }, element, b.id);
+  }
+
+  /** Shows a card over a point in tiles; `id` 0 for a building being placed. */
+  showCardAt(at: { x: number; y: number }, element: HTMLElement, id = 0) {
     this.closeCard();
     element.classList.add("wg-card");
     for (const type of [
@@ -392,9 +397,17 @@ export class WorldLayer {
     ])
       element.addEventListener(type, (event) => event.stopPropagation());
     this.cards.append(element);
-    const pin = { element, x: b.x + b.w / 2, y: b.y + b.h / 2, lift: 60 };
-    this.card = { pin, id: b.id };
+    const pin = { element, x: at.x, y: at.y, lift: 60 };
+    this.card = { pin, id };
     this.place(pin);
+  }
+
+  /** Moves the card, e.g. with the building being placed. */
+  moveCard(at: { x: number; y: number }) {
+    if (!this.card) return;
+    this.card.pin.x = at.x;
+    this.card.pin.y = at.y;
+    this.place(this.card.pin);
   }
 
   closeCard() {

@@ -86,7 +86,20 @@ const leaveBelow = 0.5;
 
 export class Ui {
   private tool: Tool = "none";
-  private placing: { kind: Kind; game?: string; at?: Tile } | null = null;
+  private placing: {
+    kind: Kind;
+    game?: string;
+    at?: Tile;
+    /** Where the building was taken, from the tile it is placed by. */
+    hold?: Tile;
+    /** Chosen with the mouse: it follows the pointer, and a click builds. */
+    mouse?: boolean;
+    /** Its card: why it cannot stand here, and «Bauen». */
+    note?: HTMLElement;
+    build?: HTMLButtonElement;
+  } | null = null;
+  /** The kind of pointer last pressed: "mouse", "touch" or "pen". */
+  private pointerKind = "mouse";
   private sawFrom: Tile | null = null;
   /** The building torn down by the next tap with the Abreissen tool. */
   private doomed: Building | null = null;
@@ -104,7 +117,6 @@ export class Ui {
   private toolbox: HTMLElement;
   private buildMenu: HTMLElement;
   private mainMenu: HTMLElement;
-  private placingBar: HTMLElement;
   private backBar: HTMLElement;
   /** The card over a tapped building, and the parts of it that change. */
   private card: {
@@ -136,7 +148,6 @@ export class Ui {
     this.toolbox = need(root, "[data-toolbox]");
     this.buildMenu = need(root, "[data-build-menu]");
     this.mainMenu = need(root, "[data-main-menu]");
-    this.placingBar = need(root, "[data-placing]");
     this.backBar = need(root, "[data-back]");
     this.live = need(root, "[data-live]");
     this.confirmDialog = need(root, "[data-confirm]");
@@ -165,12 +176,6 @@ export class Ui {
       if (action !== "zoom-in" && action !== "zoom-out") this.closeMenus();
       this.menuAction(action);
     });
-    need(this.placingBar, "[data-place-here]").addEventListener("click", () => {
-      if (this.placing?.at) this.tryPlace(this.placing.at);
-    });
-    need(this.placingBar, "[data-place-cancel]").addEventListener("click", () =>
-      this.stopPlacing(),
-    );
     need(this.backBar, "button").addEventListener("click", () =>
       this.leaveReading(),
     );
@@ -189,6 +194,17 @@ export class Ui {
       } else if (this.reading) {
         this.leaveReading();
       }
+    });
+    document.addEventListener(
+      "pointerdown",
+      (event) => (this.pointerKind = event.pointerType),
+      { capture: true },
+    );
+    // A right click stops placing, as Escape does.
+    this.mapHost().addEventListener("contextmenu", (event) => {
+      if (!this.placing) return;
+      event.preventDefault();
+      this.stopPlacing();
     });
     document.addEventListener("pointerdown", (event) => {
       const target = event.target as Node;
@@ -565,11 +581,14 @@ export class Ui {
             el("span", { className: "wg-build-name" }, this.label(kind, game)),
           );
           button.dataset.build = `${kind}:${game ?? ""}`;
-          button.addEventListener("click", () => {
+          button.addEventListener("click", (event) => {
             const why = this.o.game.unavailable(kind, game);
             if (why) return this.announce(`${this.label(kind, game)}: ${why}`);
             this.closeMenus();
-            this.startPlacing(kind, game);
+            // Chosen with the mouse (not the keyboard, whose click has no
+            // detail): the building follows the mouse.
+            const mouse = event.detail > 0 && this.pointerKind === "mouse";
+            this.startPlacing(kind, game, mouse);
           });
           const item = el("li", {}, button);
           items.append(item);
@@ -601,7 +620,7 @@ export class Ui {
     entry.drawn = true;
     const info = kinds[entry.kind];
     const w = entry.kind === "bruecke" ? 3 : info.w;
-    const { canvas } = buildingPicture(
+    const { canvas, flat } = buildingPicture(
       entry.kind,
       w,
       info.h,
@@ -613,13 +632,16 @@ export class Ui {
     if (!ctx) return;
     const { width, height } = entry.picture;
     const k = Math.min(width / canvas.width, height / canvas.height);
-    ctx.drawImage(
-      canvas,
-      (width - canvas.width * k) / 2,
-      (height - canvas.height * k) / 2,
-      canvas.width * k,
-      canvas.height * k,
-    );
+    // A field's or pasture's ground first, then its house.
+    for (const part of [flat, canvas])
+      if (part)
+        ctx.drawImage(
+          part,
+          (width - canvas.width * k) / 2,
+          (height - canvas.height * k) / 2,
+          canvas.width * k,
+          canvas.height * k,
+        );
   }
 
   /** Shows what is available and marks what cannot be built now. */
@@ -642,16 +664,55 @@ export class Ui {
 
   // --- Placing ----------------------------------------------------------------
 
-  private startPlacing(kind: Kind, game?: string) {
+  /**
+   * Starts placing a building. A card on it names it and its costs and says
+   * why it cannot stand where it is. With the mouse it follows the pointer
+   * and a click builds; by touch it is dragged or tapped into place, and the
+   * card's «Bauen» builds; × or Escape stops.
+   */
+  private startPlacing(kind: Kind, game?: string, mouse = false) {
     if (this.reading) this.leaveReading();
     this.setDoomed(null);
-    this.placing = { kind, game };
+    this.closeCard();
+    this.placing = { kind, game, mouse: mouse && kind !== "damm" };
     this.mapHost().dataset.mode = "place";
-    const name = this.label(kind, game);
-    const cost = this.costText(kinds[kind].cost);
-    const text = cost ? `${name}: ${cost}.` : `${name}.`;
-    need(this.placingBar, "[data-placing-text]").textContent = text;
-    this.placingBar.hidden = false;
+    const text = this.placingText();
+    const note = el("p", { className: "wg-card-note" });
+    const build = el(
+      "button",
+      { type: "button", className: "wg-button wg-primary" },
+      "Bauen",
+    );
+    build.addEventListener("click", () => {
+      if (this.placing?.at) this.tryPlace(this.placing.at);
+    });
+    const close = el(
+      "button",
+      { type: "button", className: "wg-card-close" },
+      "×",
+    );
+    close.setAttribute("aria-label", "Abbrechen");
+    close.addEventListener("click", () => {
+      this.stopPlacing();
+      this.mapHost().focus({ preventScroll: true });
+    });
+    const card = el(
+      "div",
+      {
+        className: this.placing.mouse
+          ? "wg-place-card wg-place-mouse"
+          : "wg-place-card",
+      },
+      el("p", { className: "wg-card-title" }, text),
+      build,
+      close,
+      note,
+    );
+    card.setAttribute("role", "group");
+    card.setAttribute("aria-label", text);
+    this.placing.note = note;
+    this.placing.build = build;
+    this.o.world.showCardAt({ x: 0, y: 0 }, card);
     const r = this.o.renderer;
     if (kind === "damm") {
       // The dam has its one site.
@@ -668,6 +729,15 @@ export class Ui {
     this.mapHost().focus();
   }
 
+  /** The building's name and costs, such as «Hütte: 8 Holz.» */
+  private placingText(): string {
+    if (!this.placing) return "";
+    const { kind, game } = this.placing;
+    const name = this.label(kind, game);
+    const cost = this.costText(kinds[kind].cost);
+    return cost ? `${name}: ${cost}.` : `${name}.`;
+  }
+
   private anchor(tile: Tile): Tile {
     if (!this.placing) return tile;
     const { w, h } = this.o.game.size(this.placing.kind);
@@ -681,11 +751,18 @@ export class Ui {
     const at = this.anchor(tile);
     const spot = this.o.game.placement(kind, at.x, at.y);
     this.o.renderer.setGhost(spot, { kind, game });
-    need<HTMLButtonElement>(this.placingBar, "[data-place-here]").disabled =
-      !spot.ok;
-    need(this.placingBar, "[data-placing-reason]").textContent = spot.ok
-      ? ""
-      : (spot.reason ?? "");
+    const { note, build, mouse } = this.placing;
+    if (build) build.disabled = !spot.ok;
+    if (note) {
+      const text = spot.ok
+        ? mouse
+          ? "Klick: bauen · Esc: abbrechen"
+          : ""
+        : (spot.reason ?? "Hier nicht.");
+      if (note.textContent !== text) note.textContent = text;
+      note.hidden = !text;
+    }
+    this.o.world.moveCard({ x: spot.x + spot.w / 2, y: spot.y + spot.h / 2 });
   }
 
   private tryPlace(tile: Tile) {
@@ -708,7 +785,7 @@ export class Ui {
   private stopPlacing() {
     if (!this.placing) return;
     this.placing = null;
-    this.placingBar.hidden = true;
+    this.o.world.closeCard();
     this.o.renderer.setGhost(null);
     this.mapHost().dataset.mode = this.tool;
   }
@@ -743,18 +820,42 @@ export class Ui {
         (this.tool === "saw" || this.tool === "pave") &&
         !this.placing &&
         !this.reading,
-      tap: (tile, pointer) => {
+      grab: (tile) => {
+        const p = this.placing;
+        // With the mouse it follows the pointer anyway.
+        if (!p?.at || p.kind === "damm" || p.mouse) return false;
+        const at = this.anchor(p.at);
+        const spot = this.o.game.placement(p.kind, at.x, at.y);
+        const inside =
+          tile.x >= spot.x &&
+          tile.x < spot.x + spot.w &&
+          tile.y >= spot.y &&
+          tile.y < spot.y + spot.h;
+        if (!inside) return false;
+        p.hold = { x: tile.x - p.at.x, y: tile.y - p.at.y };
+        return true;
+      },
+      drag: (tile) => {
+        const hold = this.placing?.hold ?? { x: 0, y: 0 };
+        this.ghostAt({ x: tile.x - hold.x, y: tile.y - hold.y });
+      },
+      tap: (tile) => {
         if (this.placing) {
-          if (pointer === "mouse") this.tryPlace(tile);
-          else this.ghostAt(tile);
+          // With the mouse a click builds. By touch, a tap on the building
+          // leaves it and anywhere else moves it there; «Hier bauen» builds.
+          if (this.placing.mouse) return this.tryPlace(tile);
+          const hold = this.placing.hold;
+          this.placing.hold = undefined;
+          if (!hold) this.ghostAt(tile);
           return;
         }
         // A tap beside an open card only closes it.
         if (this.card) return this.closeCard();
         this.activateTile(tile);
       },
+      // With a mouse, the building being placed follows the pointer.
       hover: (tile) => {
-        if (this.placing) this.ghostAt(tile);
+        if (this.placing && !this.placing.hold) this.ghostAt(tile);
       },
       saw: (from, to, done) => {
         this.o.renderer.setSaw(

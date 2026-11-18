@@ -341,32 +341,36 @@
   transform: translateX(-50%);
 }
 
-.wg-placing {
-  position: absolute;
-  top: max(1rem, env(safe-area-inset-top));
-  left: 50%;
-  transform: translateX(-50%);
-  display: grid;
-  gap: 0.5rem;
-  width: min(26rem, calc(100vw - 2rem));
-  padding: 0.75rem;
-  border: 3px solid var(--wg-wood-edge);
-  border-radius: 0.375rem;
-  background: var(--wg-parchment);
-  color: var(--wg-ink);
-  box-shadow: 0 6px 0 rgb(0 0 0 / 0.35);
-}
-.wg-placing-reason {
-  display: block;
-  font-size: 0.85rem;
-  color: #8c2b33;
-}
 /* Below the resource bar on wide screens. */
 @media (min-width: 40.01rem) {
-  .wg-placing,
   .wg-back {
     top: max(4.25rem, env(safe-area-inset-top));
   }
+}
+
+/* The card on a building being placed. With a mouse the building follows the
+   pointer and a click builds, so the card lets clicks through and has no
+   buttons. */
+.wg-cards > .wg-card.wg-place-card {
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+}
+.wg-place-card .wg-card-title {
+  grid-column: 1;
+}
+.wg-place-card .wg-button {
+  min-height: 2rem;
+  padding: 0.2rem 0.6rem;
+}
+.wg-place-card .wg-card-note {
+  grid-column: 1 / -1;
+}
+.wg-cards > .wg-card.wg-place-mouse {
+  pointer-events: none;
+}
+.wg-place-mouse .wg-button,
+.wg-place-mouse .wg-card-close {
+  display: none;
 }
 
 /* --- Dialogs ---------------------------------------------------------------------- */

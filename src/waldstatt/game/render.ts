@@ -30,6 +30,7 @@ import {
 import {
   buildingPicture,
   firePicture,
+  flatPart,
   groundTexture,
   hill,
   itemPicture,
@@ -145,6 +146,8 @@ interface ChunkView {
 
 interface BuildingView {
   upright: Upright;
+  /** The flat ground of a field, pasture or graveyard, under everything upright. */
+  flat?: Upright;
   plan: Container;
   signature: string;
   bar?: Graphics;
@@ -154,6 +157,8 @@ interface Art {
   texture: Texture;
   ax: number;
   ay: number;
+  /** The flat ground part, for buildings mostly flat. */
+  flat?: Art;
 }
 
 function insideRing(x: number, y: number, ring: number[]): boolean {
@@ -277,8 +282,13 @@ export class Renderer {
   private markLayer = new Container();
   private workerLayer = new Container({ sortableChildren: true });
   private ghostSprite = new Sprite();
+  /** The ghost's flat ground, and both together as the ghost. */
+  private ghostFlat = new Sprite();
+  private ghostGroup = new Container();
+  /** Flat ground of buildings: fields, pastures, graveyards. */
+  private flats = new Container();
   private ghostAt: Upright = {
-    object: this.ghostSprite,
+    object: this.ghostGroup,
     x: 0,
     y: 0,
     lift: 0,
@@ -468,13 +478,14 @@ export class Renderer {
       this.planWorkerLayer,
     );
     this.planLayer.visible = false;
-    this.ghostSprite.alpha = 0.7;
-    this.ghostSprite.visible = false;
+    this.ghostGroup.addChild(this.ghostFlat, this.ghostSprite);
+    this.ghostGroup.visible = false;
     this.upright.addChild(
+      this.flats,
       this.objects,
       this.markLayer,
       this.workerLayer,
-      this.ghostSprite,
+      this.ghostGroup,
       this.skyLayer,
     );
     app.stage.addChild(this.ground, this.upright);
@@ -791,7 +802,10 @@ export class Renderer {
       for (const u of chunk.marks.values()) this.put(u);
       for (const u of chunk.walls) this.put(u);
     }
-    for (const view of this.buildings.values()) this.put(view.upright);
+    for (const view of this.buildings.values()) {
+      this.put(view.upright);
+      if (view.flat) this.put(view.flat);
+    }
     for (const view of this.itemViews) this.put(view.upright);
     for (const view of this.propViews) this.put(view.upright);
     this.put(this.ghostAt);
@@ -1318,6 +1332,11 @@ export class Renderer {
         texture: Texture.from(picture.canvas),
         ax: picture.ax,
         ay: picture.ay,
+        flat: picture.flat && {
+          texture: Texture.from(picture.flat),
+          ax: picture.ax,
+          ay: picture.ay,
+        },
       };
       this.art.set(name, art);
     }
@@ -1360,6 +1379,7 @@ export class Renderer {
         this.stageSlot = null;
       }
       existing.upright.object.destroy({ children: true });
+      existing.flat?.object.destroy();
       existing.plan.destroy({ children: true });
       this.buildings.delete(b.id);
     }
@@ -1386,19 +1406,33 @@ export class Renderer {
       container.addChild(sprite, slot, front);
       this.stageSlot = { slot, b };
       this.fillSlot();
-    } else {
-      this.dress(sprite, this.picture(b, axis));
+    }
+    const art =
+      b.kind === "theater" && b.state === "done" ? null : this.picture(b, axis);
+    if (art) {
+      this.dress(sprite, art);
       container.addChild(sprite);
     }
-    // Sorted by its front tile, so trees further south still overlap it.
+    // Sorted by its front tile, so trees further south still overlap it; a
+    // field, pasture or graveyard by its house, barn, shelter or yew, while
+    // its ground lies under everything upright.
+    const part = flatPart(b.kind, b.w);
     const upright: Upright = {
       object: container,
       x: b.x + b.w / 2,
       y: b.y + b.h / 2,
       lift: 0,
       depth: 0.1,
-      sort: { x: b.x + b.w - 0.5, y: b.y + b.h - 0.5 },
+      sort: part
+        ? { x: b.x + part.u - 0.5, y: b.y + part.v - 0.5 }
+        : { x: b.x + b.w - 0.5, y: b.y + b.h - 0.5 },
     };
+    let flat: Sprite | null = null;
+    if (art?.flat) {
+      flat = new Sprite();
+      this.dress(flat, art.flat);
+      this.flats.addChild(flat);
+    }
     const plan = new Container();
     plan.position.set(b.x, b.y);
     const top = new Sprite(this.planTexture(b, axis));
@@ -1406,6 +1440,14 @@ export class Renderer {
     plan.addChild(top);
     this.planBuildings.addChild(plan);
     const view: BuildingView = { upright, plan, signature };
+    if (flat)
+      view.flat = {
+        object: flat,
+        x: upright.x,
+        y: upright.y,
+        lift: 0,
+        depth: 0,
+      };
     if (b.state === "drowned") {
       // Under water a pale shape; above the water line the rest, which for
       // a church or the Kloster are its towers once the lake is full.
@@ -1425,6 +1467,10 @@ export class Renderer {
       sprite.mask = mask;
       plan.alpha = 0.32;
       top.tint = 0x7fb0e0;
+      if (flat) {
+        flat.tint = 0x7fb0e0;
+        flat.alpha = 0.35 * (1 - (b.sunk ?? 0) * 0.5);
+      }
     } else if (b.state === "ruin") {
       sprite.tint = 0x8a8478;
       top.tint = 0x8a8478;
@@ -1433,6 +1479,7 @@ export class Renderer {
       top.tint = 0xb8b0a0;
     } else if (b.state === "site") {
       sprite.alpha = 0.4;
+      if (flat) flat.alpha = 0.4;
       top.alpha = 0.4;
       plan.addChild(
         new Graphics()
@@ -1445,6 +1492,7 @@ export class Renderer {
       this.drawBar(view.bar, b);
     }
     this.put(upright);
+    if (view.flat) this.put(view.flat);
     this.objects.addChild(container);
     this.buildings.set(b.id, view);
   }
@@ -1506,6 +1554,7 @@ export class Renderer {
     this.stageSlot = null;
     for (const view of this.buildings.values()) {
       view.upright.object.destroy({ children: true });
+      view.flat?.object.destroy();
       view.plan.destroy({ children: true });
     }
     this.buildings.clear();
@@ -1846,7 +1895,7 @@ export class Renderer {
 
   setGhost(spot: Placement | null, b?: Pick<Building, "kind" | "game">) {
     this.ghost.clear();
-    this.ghostSprite.visible = false;
+    this.ghostGroup.visible = false;
     if (!spot || !b) return;
     spot.tiles.forEach((tile, i) => {
       const x = spot.x + (i % spot.w);
@@ -1860,17 +1909,22 @@ export class Renderer {
     this.ghost
       .rect(spot.x, spot.y, spot.w, spot.h)
       .stroke({ width: 0.06, color: spot.ok ? 0xfff4c8 : 0xd8432f });
-    if (!spot.ok) return;
+    // The building itself, above the trees so it shows in the forest too;
+    // reddish where it cannot stand.
+    const tint = spot.ok ? 0xffffff : 0xff8a78;
+    this.ghostSprite.tint = tint;
+    this.ghostFlat.tint = tint;
+    this.ghostGroup.alpha = spot.ok ? 0.75 : 0.55;
     const at = { kind: b.kind, x: spot.x, y: spot.y, w: spot.w, h: spot.h };
-    this.dress(
-      this.ghostSprite,
-      this.picture({ ...b, w: spot.w, h: spot.h }, this.axis(at)),
-    );
+    const art = this.picture({ ...b, w: spot.w, h: spot.h }, this.axis(at));
+    this.dress(this.ghostSprite, art);
+    this.ghostFlat.visible = !!art.flat;
+    if (art.flat) this.dress(this.ghostFlat, art.flat);
     this.ghostAt.x = spot.x + spot.w / 2;
     this.ghostAt.y = spot.y + spot.h / 2;
     this.put(this.ghostAt);
-    this.ghostSprite.zIndex = 0;
-    this.ghostSprite.visible = true;
+    this.ghostGroup.zIndex = 0;
+    this.ghostGroup.visible = true;
   }
 
   setLakePreview(on: boolean) {

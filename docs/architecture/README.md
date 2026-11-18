@@ -85,7 +85,10 @@ there, a tile counts as forest, its ground is not drawn, and it cannot be
 marked; when it arrives, the chunks it touches are made anew and the Waldleute
 look for ways again. Ground chunks are made as they come into view, a few per
 frame, and destroyed far off screen; trees, buildings and Waldleute are sorted
-by depth.
+by depth. Buildings that lie mostly flat (Getreidehof, Viehhof, Schafweide,
+Friedhof) are painted in two parts: their fields, pastures and fences on a flat
+layer under everything upright, and their house, barn, shelter or yew sorted
+by its own front corner, so trees beside them stand in front of the fields.
 How far one can zoom out is limited so that about 16,000 tiles are on screen at
 most.
 
@@ -206,7 +209,13 @@ cover it again unless it is cobbled; a game whose scroll once lay free stays
 explored.
 
 **Building.** Buildings stand only on cleared ground: a footprint with trees
-shows red, «Zuerst die Bäume fällen». Some have rules of their own: a church
+shows red, «Zuerst die Bäume fällen». A building chosen in the menu appears in
+the middle of the view, drawn above the trees and reddish where it cannot
+stand, with a small card on it: its name and costs, and why it cannot stand
+there. There is no bar or dialog. Chosen with the mouse, it follows the pointer
+and a click builds; Escape or a right click stops. By touch or keyboard, a drag
+that starts on it or a tap elsewhere moves it (other drags still pan), and the
+card's «Bauen» or Enter builds it; its × or Escape stops. Some have rules of their own: a church
 stands more than 1 km from every other church and Kloster not under water, a
 graveyard right beside a church or the Kloster, the ISE AG in the first
 clearing, the Mühle on a river bank. The build menu shows each building as a
@@ -337,7 +346,12 @@ Pages sites share one origin (the games save under `moto-devil/` and
 `car-drive/` in `localStorage`), so the save is validated on load, a broken
 save starts a new forest with a notice, and «Neu beginnen» deletes the
 database and any old keys starting with `waldstatt-games/`. The installed app
-asks the browser to keep its storage. The manifest's start URL and scope and
+asks the browser to keep its storage. Each tab holds the database open; when
+one tab resets the forest, the others let go of it and stop saving, so they
+cannot write their old forest back, and say so. If the database does not open
+within five seconds, as when an older tab still holds it, the page starts a
+fresh forest without saving and says why. If the start fails otherwise, the
+still picture shows the error instead of waiting silently. The manifest's start URL and scope and
 the service worker's scope are the base path. The
 worker's cache is named after the build; it fetches the page network-first and
 serves files under the base path and Astro's `_astro/` assets cache-first,
