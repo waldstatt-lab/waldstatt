@@ -46,12 +46,24 @@ export const balance = {
   ravenLead: 10,
   /** Tiles per second a raven flies. */
   ravenSpeed: 6,
+  /** Seconds one Waldmensch in a quarry needs to break one stone. */
+  stoneSeconds: 5,
+  maxStones: 300,
+  /** Waldleute one quarry takes at most. */
+  maxCrew: 4,
+  /** Seconds to pave one tile, which takes one stone. */
+  paveSeconds: 0.8,
+  /** Tiles the paving tool plans at most in one stroke. */
+  paveMaxTiles: 600,
+  /** How much faster Waldleute walk on cobbles. */
+  pavedSpeed: 1.5,
 } as const;
 
 export type Kind =
   | "huette"
   | "schafweide"
   | "druckerei"
+  | "steinbruch"
   | "spielhaus"
   | "theater"
   | "klause"
@@ -120,6 +132,17 @@ export const kinds: Record<Kind, KindInfo> = {
     work: 14,
     limit: "one",
     about: "Druckt Pergament zu Programmzetteln für das Theater.",
+  },
+  steinbruch: {
+    name: "Steinbruch",
+    group: "Wirtschaft",
+    cost: cost(20),
+    w: 4,
+    h: 3,
+    work: 12,
+    limit: "many",
+    about:
+      "Waldleute brechen hier Steine. Mit Steinen pflasterst du Wege und Plätze.",
   },
   spielhaus: {
     name: "Spielhaus",
@@ -229,16 +252,44 @@ export const texts: Record<
   TextKind,
   {
     name: string;
-    w: number;
+    /** Width in tiles on narrow screens and on wide ones. */
+    w: { narrow: number; wide: number };
     style: "board" | "scroll";
     /** Where it lies: within 1 km of the Klosterplatz, or 1.5 to 5 km out. */
     where: "town" | "far";
   }
 > = {
-  ortstafel: { name: "Ortstafel", w: 5, style: "board", where: "town" },
-  chronik: { name: "Chronik", w: 7, style: "scroll", where: "town" },
-  game: { name: "Schriftrolle", w: 8, style: "scroll", where: "far" },
+  ortstafel: {
+    name: "Ortstafel",
+    w: { narrow: 6, wide: 9 },
+    style: "board",
+    where: "town",
+  },
+  chronik: {
+    name: "Chronik",
+    w: { narrow: 8, wide: 12 },
+    style: "scroll",
+    where: "town",
+  },
+  game: {
+    name: "Schriftrolle",
+    w: { narrow: 8, wide: 13 },
+    style: "scroll",
+    where: "far",
+  },
 };
+
+/**
+ * A text's width in tiles: wider on wide screens, so lines are long enough on
+ * a desktop and the text still fills a phone at a readable size. Chosen once
+ * when the page starts.
+ */
+export function textWidth(kind: TextKind): number {
+  const wide =
+    typeof window !== "undefined" &&
+    Math.min(window.screen.width, window.innerWidth) >= 900;
+  return wide ? texts[kind].w.wide : texts[kind].w.narrow;
+}
 
 /** Distances of hidden texts from the Klosterplatz, in tiles. */
 export const placing = {

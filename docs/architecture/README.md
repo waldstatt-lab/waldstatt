@@ -136,6 +136,16 @@ crossing as a path, a Waldmensch waits at the quay, the nearest free ship of
 the lake comes, takes everyone waiting for the same crossing, sails over the
 lake's water to the other port and returns to its own. Ships under way are not
 saved; after a reload they lie at their ports.
+
+A **Steinbruch** gives stones. Tapping a finished quarry shows a bar with − and
++ to put Waldleute in, up to four; the idle and the nearest go first, walk
+there and break stones at its rock face, one every five seconds each, up to a
+stock of 300. They do no other work until they are taken out again. Once a
+quarry stands, the tool **Pflastern** plans cobbles like the saw marks trees:
+tap a tile, or drag over an area, of cleared, dry ground that is not built on,
+texts included. Waldleute lay one stone per planned tile, as long as there
+are stones, and walk half again as fast on cobbles. Planned tiles show a pale
+frame until they are paved.
 Buildings stand only on cleared ground: a footprint with trees shows red,
 «Zuerst die Bäume fällen». Each finished hut adds a Waldmensch, up to 16. Sheep
 pastures grow parchment and the printing press turns parchment into prints
@@ -157,13 +167,20 @@ forest from a seed and saved. A hidden text lies under unbroken forest:
 its tiles always carry a tree, its ground shimmers pale, and motes of light
 drift over its treetops. Its first felled tree finds it; once all its trees are
 felled it is explored, and a game's explored scroll lets its Spielhaus be
-built. Each text is as long as its text, measured once in a hidden copy with
-the map's styles (`textLength()`). A found text is real HTML, cloned from the
+built. A text is wider on wide screens (9 to 13 tiles) than on narrow ones (6
+to 8), chosen once when the page starts, and as long as its text, measured
+once in a hidden copy with the map's styles (`textLength()`). The view reads it
+at zoom 0.95 at most, so its 12 text pixels show at about 16 screen pixels. A found text is real HTML, cloned from the
 templates, in a layer under the map's canvas and under the same projection as
 the ground, at 32 text pixels per tile: the canvas is transparent where no
 ground is drawn, and the ground leaves a gap on each cleared tile of a found
 text. So the text lies on the floor, the trees still standing cover the rest,
-and Waldleute and buildings stand over it. Buildings cannot be placed on a
+and Waldleute and buildings stand over it. It is cream with golden headings
+on a dark green floor; on cobbled tiles the floor under it shows cobbles, and
+a dark copy of the text, hidden from screen readers, shows instead of the light
+one, on cobbles drawn light and calm for it, with a hairline stroke that
+thickens its letters without moving its lines: each is masked to its tiles at four mask pixels per tile, so a cobbled path
+across a text changes its ink tile by tile. Buildings cannot be placed on a
 text. A label marks Einsiedeln on the map.
 
 Meinrads Klause and the Kloster each bring one of Meinrad's two ravens. A
@@ -206,8 +223,10 @@ under the water.
 
 **State and offline.** The save is one versioned JSON document under
 `waldstatt-games/save`: supplies, felled trees as a bitset per chunk, marks,
-buildings, the flood, the camera, the dismissed hint, the tools picked up,
-where the saw lies, and the seed and positions of the hidden texts. A save
+buildings with a quarry's crew, the flood, the camera, the dismissed hint,
+the tools picked up, where the saw lies, the seed and positions of the hidden
+texts, stones, and cobbled and planned tiles (cobbles as a bitset per chunk).
+Saves from before stones and cobbles load without them. A save
 from before the move to Holzrüti (version 1) starts a new forest with a
 notice. A text's length follows its current text on load, so changed texts
 need no migration. The game

@@ -57,7 +57,13 @@ export interface Worker {
   y: number;
   /** "wait": at a quay for a ship; "sail": on board. */
   phase: "idle" | "walk" | "wait" | "sail" | "work";
-  task?: { type: "fell"; x: number; y: number } | { type: "build"; id: number };
+  task?:
+    | { type: "fell"; x: number; y: number }
+    | { type: "build"; id: number }
+    | { type: "pave"; x: number; y: number }
+    | { type: "quarry"; id: number };
+  /** The quarry this Waldmensch was put in, if any. */
+  job?: number;
   /** The way still ahead. */
   route: Step[];
   /** The ways as they were when the route was found (Game.ways). */
@@ -139,6 +145,8 @@ export interface Events {
   flooded(drowned: Building[]): void;
   /** A hidden text was found, or more of it lies free. */
   text(t: HiddenText, found: boolean): void;
+  /** A tile was cobbled, or planned for cobbles or no longer. */
+  paving(x: number, y: number): void;
   /** The axe or the saw appeared or was picked up. */
   items(): void;
   /** A raven took up a new text to lead to, or came. */
@@ -213,7 +221,7 @@ const neighbours: [number, number][] = [
 ];
 
 /** The Waldmensch's hints, one per milestone, in the order they are reached. */
-export const hintCount = 14;
+export const hintCount = 15;
 
 export class Game {
   readonly workers: Worker[] = [];
@@ -226,6 +234,10 @@ export class Game {
   private marked = new Set<number>();
   /** Trees a Waldmensch is on the way to fell. */
   private claimed = new Set<number>();
+  /** Tiles planned for cobbles, and those a Waldmensch is on the way to pave. */
+  private paveSet = new Set<number>();
+  private paveClaimed = new Set<number>();
+  private stoneClock = 0;
   /** Whether a tile is open ground, as far as asked. */
   private openCache = new Map<number, boolean>();
   private portCache: Map<number, Port> | null = null;
@@ -270,6 +282,10 @@ export class Game {
       const [x, y] = k.split(",").map(Number);
       this.marked.add(tileId(x, y));
     }
+    for (const k of state.paving) {
+      const [x, y] = k.split(",").map(Number);
+      this.paveSet.add(tileId(x, y));
+    }
     for (const b of state.buildings) this.occupy(b);
     this.hideTexts(specs);
     this.syncWorkers();
@@ -278,6 +294,143 @@ export class Game {
   }
 
   // --- The forest -------------------------------------------------------
+
+  isPaved(x: number, y: number): boolean {
+    const { chunk, index } = chunkOf(x, y);
+    const bits = this.state.paved.get(chunk);
+    return !!bits && (bits[index >> 3] & (1 << (index & 7))) !== 0;
+  }
+
+  isPlannedPaving(x: number, y: number): boolean {
+    return this.paveSet.has(tileId(x, y));
+  }
+
+  /** Whether cobbles can go here: cleared, dry, inside, and not built on. */
+  canPave(x: number, y: number): boolean {
+    return (
+      isKnown(x, y) &&
+      !this.isTree(x, y) &&
+      !this.isWater(x, y) &&
+      !isWall(x, y) &&
+      !isAbroad(x, y) &&
+      !this.occupancy.has(tileId(x, y)) &&
+      !this.isPaved(x, y)
+    );
+  }
+
+  /** Plans or unplans cobbles on one tile. */
+  togglePaving(x: number, y: number): "planned" | "unplanned" | "none" {
+    const id = tileId(x, y);
+    if (this.paveSet.has(id)) {
+      this.paveSet.delete(id);
+      this.state.paving.delete(key(x, y));
+      this.events.paving(x, y);
+      this.events.dirty();
+      return "unplanned";
+    }
+    if (!this.canPave(x, y)) return "none";
+    this.planPaving(x, y);
+    this.events.dirty();
+    return "planned";
+  }
+
+  private planPaving(x: number, y: number) {
+    this.paveSet.add(tileId(x, y));
+    this.state.paving.add(key(x, y));
+    this.chances++;
+    this.events.paving(x, y);
+  }
+
+  /** Plans cobbles on every free tile of a rectangle; returns how many. */
+  paveArea(x0: number, y0: number, x1: number, y1: number): number {
+    let count = 0;
+    for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
+      for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++) {
+        if (count >= balance.paveMaxTiles) break;
+        if (this.paveSet.has(tileId(x, y)) || !this.canPave(x, y)) continue;
+        this.planPaving(x, y);
+        count++;
+      }
+    if (count) this.events.dirty();
+    return count;
+  }
+
+  /** Lays one stone: the tile is cobbled. */
+  private layStone(x: number, y: number) {
+    const id = tileId(x, y);
+    this.paveClaimed.delete(id);
+    if (!this.paveSet.has(id) || this.state.stones < 1) return;
+    this.paveSet.delete(id);
+    this.state.paving.delete(key(x, y));
+    if (!this.canPave(x, y)) return this.events.paving(x, y);
+    this.state.stones--;
+    const { chunk, index } = chunkOf(x, y);
+    let bits = this.state.paved.get(chunk);
+    if (!bits) {
+      bits = new Uint8Array((CHUNK * CHUNK) / 8);
+      this.state.paved.set(chunk, bits);
+    }
+    bits[index >> 3] |= 1 << (index & 7);
+    this.events.paving(x, y);
+    this.events.supplies();
+    this.events.dirty();
+    this.checkHint();
+  }
+
+  // --- The quarry's crew ----------------------------------------------------
+
+  /** How many Waldleute work a quarry now. */
+  crewOf(b: Building): number {
+    return this.workers.filter((w) => w.job === b.id).length;
+  }
+
+  /** Puts Waldleute into a quarry or takes them out. */
+  setCrew(b: Building, crew: number) {
+    if (b.kind !== "steinbruch" || b.state !== "done") return;
+    b.crew = clamp(crew, 0, balance.maxCrew);
+    this.syncCrews();
+    this.events.building(b);
+    this.events.dirty();
+  }
+
+  /**
+   * Gives every finished quarry the Waldleute it asks for, as far as there
+   * are any: idle ones and those nearest first. The others go back to work.
+   */
+  private syncCrews() {
+    const quarries = this.state.buildings.filter(
+      (b) => b.kind === "steinbruch" && b.state === "done",
+    );
+    for (const w of this.workers)
+      if (w.job && !quarries.some((q) => q.id === w.job)) {
+        w.job = undefined;
+        this.idle(w);
+      }
+    for (const q of quarries) {
+      const crew = this.workers.filter((w) => w.job === q.id);
+      const want = Math.min(q.crew ?? 0, balance.maxCrew);
+      while (crew.length > want) {
+        const w = crew.pop() as Worker;
+        w.job = undefined;
+        this.idle(w);
+      }
+      while (crew.length < want) {
+        const free = this.workers.filter((w) => !w.job && w.phase !== "sail");
+        if (!free.length) break;
+        const cx = q.x + q.w / 2;
+        const cy = q.y + q.h / 2;
+        free.sort(
+          (a, b) =>
+            Number(!!a.task) - Number(!!b.task) ||
+            Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy),
+        );
+        const w = free[0];
+        w.job = q.id;
+        this.idle(w);
+        crew.push(w);
+      }
+    }
+  }
 
   isFelled(x: number, y: number): boolean {
     const { chunk, index } = chunkOf(x, y);
@@ -891,6 +1044,7 @@ export class Game {
     this.waysChanged(true);
     this.syncShips();
     this.syncWorkers();
+    this.syncCrews();
     this.syncRavens();
     this.events.building(b, true);
     this.events.supplies();
@@ -940,6 +1094,7 @@ export class Game {
       for (const s of this.ships.values())
         s.passengers = s.passengers.filter((p) => p !== w);
     }
+    this.syncCrews();
   }
 
   private idle(w: Worker) {
@@ -947,6 +1102,8 @@ export class Game {
     if (w.task) this.chances++;
     if (w.task?.type === "fell")
       this.claimed.delete(tileId(w.task.x, w.task.y));
+    if (w.task?.type === "pave")
+      this.paveClaimed.delete(tileId(w.task.x, w.task.y));
     w.task = undefined;
     w.route = [];
     // On board, a Waldmensch stays until the ship lands.
@@ -970,17 +1127,29 @@ export class Game {
         b.state === "site" && (crew.get(b.id) ?? 0) < balance.workersPerSite,
     );
     const trees = this.marked.size > this.claimed.size;
-    if (!sites && !trees) return false;
+    const paves =
+      this.paveSet.size > this.paveClaimed.size &&
+      this.state.stones > this.paveClaimed.size;
+    // A Waldmensch put in a quarry looks only for the way there.
+    const quarry = w.job
+      ? this.state.buildings.find((b) => b.id === w.job && b.state === "done")
+      : undefined;
+    if (w.job && !quarry) return false;
+    if (!quarry && !sites && !trees && !paves) return false;
     const sx = Math.floor(w.x);
     const sy = Math.floor(w.y);
     // Another Waldmensch just searched here in vain.
     if (
+      !quarry &&
       this.noWork?.chances === this.chances &&
       this.noWork.tiles.has(tileId(sx, sy))
     )
       return false;
     type Found =
-      { type: "fell"; x: number; y: number } | { type: "build"; b: Building };
+      | { type: "fell"; x: number; y: number }
+      | { type: "build"; b: Building }
+      | { type: "pave"; x: number; y: number }
+      | { type: "quarry"; b: Building };
     // The tiles on and around the sites that still need hands.
     const siteNear = new Map<number, Building>();
     for (const b of this.state.buildings) {
@@ -995,8 +1164,21 @@ export class Game {
       y: number,
       open: (x: number, y: number) => boolean,
     ) => {
+      if (quarry) {
+        const inside =
+          x >= quarry.x - 1 &&
+          x <= quarry.x + quarry.w &&
+          y >= quarry.y - 1 &&
+          y <= quarry.y + quarry.h;
+        return inside
+          ? { bias: -4, value: { type: "quarry", b: quarry } as Found }
+          : undefined;
+      }
       const b = sites ? siteNear.get(tileId(x, y)) : undefined;
       if (b) return { bias: -4, value: { type: "build", b } as Found };
+      const id = tileId(x, y);
+      if (paves && this.paveSet.has(id) && !this.paveClaimed.has(id))
+        return { bias: 3, value: { type: "pave", x, y } as Found };
       if (trees) {
         for (const [dx, dy] of neighbours) {
           // A marked tree is never open ground.
@@ -1016,7 +1198,7 @@ export class Game {
     // Failed searches add up until something changes.
     if (this.noWork?.chances !== this.chances)
       this.noWork = { chances: this.chances, tiles: new Set() };
-    const searched = this.noWork.tiles;
+    const searched = quarry ? new Set<number>() : this.noWork.tiles;
     const found = search(
       {
         open: (x, y) => this.open(x, y),
@@ -1040,6 +1222,15 @@ export class Game {
       end = { x: ex + 0.5 + (v.x - ex) * 0.3, y: ey + 0.5 + (v.y - ey) * 0.3 };
       w.task = { type: "fell", x: v.x, y: v.y };
       this.claimed.add(tileId(v.x, v.y));
+    } else if (v.type === "pave") {
+      end = { x: v.x + 0.5, y: v.y + 0.5 };
+      w.task = { type: "pave", x: v.x, y: v.y };
+      this.paveClaimed.add(tileId(v.x, v.y));
+    } else if (v.type === "quarry") {
+      const q = v.b;
+      // At the rock face, somewhere along the quarry's back.
+      end = { x: q.x + 0.4 + Math.random() * (q.w - 0.8), y: q.y + 0.6 };
+      w.task = { type: "quarry", id: q.id };
     } else {
       const b = v.b;
       const nx = clamp(ex, b.x, b.x + b.w - 1);
@@ -1127,6 +1318,9 @@ export class Game {
     if (!task || w.ways !== this.ways) return this.idle(w);
     if (task.type === "fell" && !this.isMarked(task.x, task.y))
       return this.idle(w);
+    if (task.type === "pave" && !this.isPlannedPaving(task.x, task.y))
+      return this.idle(w);
+    if (task.type === "quarry" && w.job !== task.id) return this.idle(w);
     const site =
       task.type === "build"
         ? this.state.buildings.find(
@@ -1146,7 +1340,9 @@ export class Game {
         }
         w.route = [];
       }
-      let left = balance.walkSpeed * dt;
+      // Cobbles make for quicker going.
+      const paved = this.isPaved(Math.floor(w.x), Math.floor(w.y));
+      let left = balance.walkSpeed * dt * (paved ? balance.pavedSpeed : 1);
       while (left > 0 && w.route.length) {
         const next = w.route[0];
         if (next.sail) {
@@ -1172,6 +1368,7 @@ export class Game {
         w.t = 0;
         if (task.type === "fell") this.face(w, task.x + 0.5, task.y + 0.5);
         else if (site) this.face(w, site.x + site.w / 2, site.y + site.h / 2);
+        else if (task.type === "quarry") this.face(w, w.x - 1, w.y - 1);
       }
       return;
     }
@@ -1182,6 +1379,14 @@ export class Game {
       this.idle(w);
       return;
     }
+    if (task.type === "pave") {
+      if (w.t < balance.paveSeconds) return;
+      this.layStone(task.x, task.y);
+      this.idle(w);
+      return;
+    }
+    // In the quarry, the work goes on; produce() counts the stones.
+    if (task.type === "quarry") return;
     if (site) {
       site.work += dt;
       if (site.work >= kinds[site.kind].work) this.finish(site);
@@ -1383,6 +1588,7 @@ export class Game {
     this.waysChanged(false);
     if (b.kind === "huette") this.syncWorkers();
     if (b.kind === "huette") this.checkSaw();
+    if (b.kind === "steinbruch") this.syncCrews();
     if (ravenKinds.includes(b.kind)) this.syncRavens();
     if (b.kind === "schiff") this.syncShips();
     if (b.kind === "damm") this.flood();
@@ -1415,6 +1621,7 @@ export class Game {
       () => this.gameIds.some((g) => this.explored(g)),
       () => this.done("schafweide"),
       () => this.done("spielhaus"),
+      () => this.done("steinbruch") || this.state.paved.size > 0,
       () => this.done("theater") || this.done("druckerei"),
       () => !!this.standing("damm") || this.state.flooded,
       () => this.done("bruecke") || this.done("schiff"),
@@ -1458,8 +1665,10 @@ export class Game {
       case 10:
         return "Das Spiel liegt frei: Unter «Bauen» steht sein Spielhaus bereit.";
       case 11:
-        return "Tipp ein Spielhaus an, und das Spiel öffnet sich in einem neuen Tab. Im Theater spielst du die Spiele an; die Druckerei druckt die Programmzettel dafür.";
+        return "Tipp ein Spielhaus an, und das Spiel öffnet sich in einem neuen Tab. Bau einen Steinbruch: Tippst du ihn an, schickst du Waldleute hinein, die Steine brechen.";
       case 12:
+        return "Mit Steinen pflastern wir Wege und Plätze: Nimm «Pflastern» und zieh über freien Boden. Auf Pflaster gehen wir schneller, und Schriften bleiben lesbar. Im Theater spielst du die Spiele an; die Druckerei druckt die Programmzettel dafür.";
+      case 13:
         return "Die Sihl liesse sich stauen. Aber was im Becken steht, geht unter.";
       default:
         return "Schwimmen können wir nicht. Über Flüsse führen Brücken; an einem See bauen wir Häfen, und Schiffe bringen uns hinüber.";
@@ -1630,6 +1839,20 @@ export class Game {
 
   private produce(dt: number) {
     const s = this.state;
+    const breaking = this.workers.filter(
+      (w) => w.task?.type === "quarry" && w.phase === "work",
+    ).length;
+    if (breaking && s.stones < balance.maxStones) {
+      this.stoneClock += dt * breaking;
+      if (this.stoneClock >= balance.stoneSeconds) {
+        this.stoneClock -= balance.stoneSeconds;
+        s.stones++;
+        // New stones may let paving go on.
+        this.chances++;
+        this.events.supplies();
+        this.events.dirty();
+      }
+    } else this.stoneClock = 0;
     const pastures = s.buildings.filter(
       (b) => b.kind === "schafweide" && b.state === "done",
     ).length;

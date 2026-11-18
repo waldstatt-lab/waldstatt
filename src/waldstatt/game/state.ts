@@ -28,6 +28,8 @@ export interface Building {
   state: "site" | "done" | "drowned";
   /** Seconds of work done. */
   work: number;
+  /** Waldleute put in a quarry. */
+  crew?: number;
 }
 
 export interface Camera {
@@ -41,8 +43,13 @@ export interface Saved {
   wood: number;
   parchment: number;
   prints: number;
+  stones: number;
   /** Felled trees: per chunk "cx,cy", a bitset of its tiles. */
   felled: Map<string, Uint8Array>;
+  /** Cobbled tiles, the same way. */
+  paved: Map<string, Uint8Array>;
+  /** Tiles planned for cobbles, as "x,y". */
+  paving: Set<string>;
   /** Trees marked for felling, as "x,y". */
   marks: Set<string>;
   buildings: Building[];
@@ -66,7 +73,10 @@ export function freshState(): Saved {
     wood: 0,
     parchment: 0,
     prints: 0,
+    stones: 0,
     felled: new Map(),
+    paved: new Map(),
+    paving: new Set(),
     marks: new Set(),
     buildings: [],
     nextId: 1,
@@ -152,6 +162,32 @@ function parse(data: unknown, gameIds: Set<string>): Saved {
     if (!bytes) throw new Error("felled bits");
     state.felled.set(key, bytes);
   }
+  // Stones and cobbles came later; older saves have none.
+  if (d.stones !== undefined) {
+    if (!isInt(d.stones, 0, 1e7)) throw new Error("stones");
+    state.stones = d.stones;
+  }
+  if (d.paved !== undefined) {
+    if (typeof d.paved !== "object" || d.paved === null)
+      throw new Error("paved");
+    for (const [key, value] of Object.entries(d.paved)) {
+      if (!/^-?\d{1,6},-?\d{1,6}$/.test(key) || typeof value !== "string")
+        throw new Error("paved entry");
+      const bytes = decode(value);
+      if (!bytes) throw new Error("paved bits");
+      state.paved.set(key, bytes);
+    }
+  }
+  if (d.paving !== undefined) {
+    if (!Array.isArray(d.paving) || d.paving.length > 40000)
+      throw new Error("paving");
+    for (let i = 0; i + 1 < d.paving.length; i += 2) {
+      const x = d.paving[i];
+      const y = d.paving[i + 1];
+      if (!isInt(x) || !isInt(y)) throw new Error("paving tile");
+      state.paving.add(`${x},${y}`);
+    }
+  }
   if (!Array.isArray(d.marks) || d.marks.length > 40000)
     throw new Error("marks");
   for (let i = 0; i + 1 < d.marks.length; i += 2) {
@@ -193,6 +229,7 @@ function parse(data: unknown, gameIds: Set<string>): Saved {
       h: b.h,
       state: b.state,
       work: b.work,
+      crew: isInt(b.crew, 0, 16) ? b.crew : undefined,
     });
   }
   if (!isInt(d.nextId, 1)) throw new Error("nextId");
@@ -235,13 +272,23 @@ export function save(state: Saved): boolean {
     const [x, y] = key.split(",").map(Number);
     marks.push(x, y);
   }
+  const paved: Record<string, string> = {};
+  for (const [key, bytes] of state.paved) paved[key] = encode(bytes);
+  const paving: number[] = [];
+  for (const key of state.paving) {
+    const [x, y] = key.split(",").map(Number);
+    paving.push(x, y);
+  }
   const data = {
     v: version,
     wood: state.wood,
     parchment: state.parchment,
     prints: state.prints,
+    stones: state.stones,
     felled,
     marks,
+    paved,
+    paving,
     buildings: state.buildings,
     nextId: state.nextId,
     flooded: state.flooded,

@@ -400,6 +400,34 @@ export function planPicture(
         sheep(ctx, x, y);
       break;
     }
+    case "steinbruch": {
+      rect(ctx, 0, 0, w, h, "#c9c2b0");
+      for (const [x, y, rw, rh, c] of [
+        [0.1, 0.1, 1.3, 0.8, "#bdb8ad"],
+        [1.3, 0.1, 1.3, 0.6, "#a29d92"],
+        [2.5, 0.1, w - 2.6, 0.9, "#bdb8ad"],
+        [0.1, 0.8, 0.7, 1.1, "#a29d92"],
+      ] as const) {
+        shadow(ctx, x, y, rw, rh, 0.15);
+        rect(ctx, x, y, rw, rh, c, "#5f5b53");
+      }
+      for (const [x, y] of [
+        [1.4, 1.6],
+        [2.1, 1.7],
+        [0.5, 2.2],
+      ])
+        rect(ctx, x, y, 0.6, 0.55, "#ddd8cc", "#6f6a60");
+      ctx.strokeStyle = "#7a4e26";
+      ctx.lineWidth = 0.08;
+      ctx.beginPath();
+      ctx.moveTo(3.0, 1.5);
+      ctx.lineTo(3.25, 1.9);
+      ctx.lineTo(3.5, 2.3);
+      ctx.moveTo(3.25, 1.9);
+      ctx.lineTo(2.6, 1.9);
+      ctx.stroke();
+      break;
+    }
     case "klause":
       shadow(ctx, 0.5, 0.5, 1.8, 1.7);
       roof(ctx, 0.5, 0.5, 1.8, 1.7, "y", "#8a7a62", "#5e5242", "#463c30");

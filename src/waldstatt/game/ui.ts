@@ -27,7 +27,7 @@ import type { Building } from "./state";
 import type { GameInfo } from "./texts";
 import { damSite, start } from "./world";
 
-type Tool = "none" | "axe" | "saw" | "demolish";
+type Tool = "none" | "axe" | "saw" | "pave" | "demolish";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -61,8 +61,11 @@ export interface UiOptions {
   moved(): void;
 }
 
-/** The largest zoom for reading, so text stays a comfortable size. */
-const readingZoom = 1.2;
+/**
+ * The largest zoom for reading: text pixels are about 1.4 screen pixels at
+ * zoom 1 in the plan, so the 12 px text reads at about 16 px.
+ */
+const readingZoom = 0.95;
 
 export class Ui {
   private tool: Tool = "none";
@@ -87,6 +90,9 @@ export class Ui {
   private placingBar: HTMLElement;
   private backBar: HTMLElement;
   private hint: HTMLElement;
+  private crewBar: HTMLElement;
+  /** The quarry whose crew the crew bar sets. */
+  private crewFor: Building | null = null;
   private live: HTMLElement;
   private confirmDialog: HTMLDialogElement;
   private menuItems: {
@@ -106,6 +112,20 @@ export class Ui {
     this.hint = need(root, "[data-hint]");
     this.live = need(root, "[data-live]");
     this.confirmDialog = need(root, "[data-confirm]");
+    this.crewBar = need(root, "[data-crew]");
+    for (const button of this.crewBar.querySelectorAll<HTMLButtonElement>(
+      "[data-crew-step]",
+    ))
+      button.addEventListener("click", () => {
+        const b = this.crewFor;
+        if (!b) return;
+        const step = Number(button.dataset.crewStep);
+        o.game.setCrew(b, (b.crew ?? 0) + step);
+        this.updateCrew(true);
+      });
+    need(this.crewBar, "[data-crew-close]").addEventListener("click", () =>
+      this.closeCrew(),
+    );
 
     for (const button of this.toolbox.querySelectorAll<HTMLButtonElement>(
       "[data-tool]",
@@ -155,6 +175,8 @@ export class Ui {
       if (!this.buildMenu.hidden || !this.mainMenu.hidden) {
         this.closeMenus(true);
         event.preventDefault();
+      } else if (this.crewFor) {
+        this.closeCrew();
       } else if (this.placing) {
         this.stopPlacing();
       } else if (this.reading) {
@@ -174,12 +196,55 @@ export class Ui {
     this.updateHint();
   }
 
-  /** Shows the tools picked up so far. */
+  /** Shows the tools picked up so far, and paving once a quarry stands. */
   items() {
     for (const tool of ["axe", "saw"] as const) {
       const button = need(this.toolbox, `[data-tool=${tool}]`);
       button.hidden = !this.o.game.state.tools[tool];
     }
+    const g = this.o.game;
+    const stones = g.done("steinbruch") || g.state.stones > 0;
+    need(this.toolbox, "[data-tool=pave]").hidden = !stones;
+    need(this.toolbox, "[data-stones]").hidden = !stones;
+  }
+
+  // --- The quarry's crew ----------------------------------------------------
+
+  private openCrew(b: Building) {
+    this.crewFor = b;
+    this.crewBar.hidden = false;
+    this.updateCrew(true);
+    need<HTMLButtonElement>(this.crewBar, "[data-crew-step='1']").focus();
+  }
+
+  private closeCrew() {
+    if (!this.crewFor) return;
+    this.crewFor = null;
+    this.crewBar.hidden = true;
+    this.mapHost().focus({ preventScroll: true });
+  }
+
+  /** Shows how many Waldleute the quarry asks for and how many are there. */
+  private updateCrew(announce = false) {
+    const b = this.crewFor;
+    if (!b) return;
+    const g = this.o.game;
+    const want = b.crew ?? 0;
+    const there = g.crewOf(b);
+    let text =
+      want === 0
+        ? "Steinbruch: niemand bricht Steine. Schick Waldleute hinein."
+        : `Steinbruch: ${want === 1 ? "ein Waldmensch bricht" : `${want} Waldleute brechen`} Steine.`;
+    if (there < want)
+      text += ` ${there === 0 ? "Niemand ist" : `Erst ${there} sind`} frei.`;
+    text += ` Vorrat: ${g.state.stones} Steine.`;
+    const p = need(this.crewBar, "[data-crew-text]");
+    if (p.textContent !== text) p.textContent = text;
+    need<HTMLButtonElement>(this.crewBar, "[data-crew-step='-1']").disabled =
+      want <= 0;
+    need<HTMLButtonElement>(this.crewBar, "[data-crew-step='1']").disabled =
+      want >= balance.maxCrew;
+    if (announce) this.announce(text);
   }
 
   private mapHost(): HTMLElement {
@@ -214,12 +279,14 @@ export class Ui {
       parchment: String(s.parchment),
       prints: String(s.prints),
       workers: String(this.o.game.workers.length),
+      stones: String(s.stones),
     };
     for (const element of this.toolbox.querySelectorAll<HTMLElement>(
       "[data-supply]",
     ))
       element.textContent = values[element.dataset.supply ?? ""] ?? "";
     if (!this.buildMenu.hidden) this.updateBuildMenu();
+    this.updateCrew();
   }
 
   // --- Tools and menus ------------------------------------------------------
@@ -247,6 +314,10 @@ export class Ui {
     if (this.tool === "demolish")
       this.announce(
         "Abreissen: ein Gebäude zweimal antippen. Die Hälfte des Holzes kommt zurück.",
+      );
+    if (this.tool === "pave")
+      this.announce(
+        "Pflastern: freien Boden antippen oder darüber ziehen. Jedes Feld braucht einen Stein.",
       );
   }
 
@@ -481,7 +552,10 @@ export class Ui {
         if (!on || this.placing || event.key === "Escape") return false;
         return on.stage.key(event, down);
       },
-      sawing: () => this.tool === "saw" && !this.placing && !this.reading,
+      sawing: () =>
+        (this.tool === "saw" || this.tool === "pave") &&
+        !this.placing &&
+        !this.reading,
       tap: (tile, pointer) => {
         if (this.placing) {
           if (pointer === "mouse") this.tryPlace(tile);
@@ -512,7 +586,7 @@ export class Ui {
       },
       activate: (tile) => {
         if (this.placing) return this.tryPlace(tile);
-        if (this.tool === "saw" && !this.reading) {
+        if ((this.tool === "saw" || this.tool === "pave") && !this.reading) {
           if (!this.sawFrom) {
             this.sawFrom = tile;
             this.o.renderer.setSaw({
@@ -540,6 +614,7 @@ export class Ui {
           this.o.renderer.setSaw(null);
         } else if (this.placing) this.stopPlacing();
         else if (this.reading) this.leaveReading();
+        else if (this.crewFor) this.closeCrew();
         else if (this.doomed) this.setDoomed(null);
         else if (this.tool !== "none") this.setTool(this.tool);
       },
@@ -547,7 +622,16 @@ export class Ui {
     };
   }
 
+  /** A dragged area: the saw marks its trees, paving plans its free tiles. */
   private sawArea(from: Tile, to: Tile) {
+    if (this.tool === "pave") {
+      const count = this.o.game.paveArea(from.x, from.y, to.x, to.y);
+      return this.announce(
+        count === 1
+          ? "Ein Feld wird gepflastert."
+          : `${count} Felder werden gepflastert.`,
+      );
+    }
     const count = this.o.game.markArea(from.x, from.y, to.x, to.y);
     this.announce(
       count === 1 ? "Ein Baum markiert." : `${count} Bäume markiert.`,
@@ -578,6 +662,13 @@ export class Ui {
       return;
     }
     if (b) return this.react(b);
+    if (this.tool === "pave") {
+      const result = g.togglePaving(tile.x, tile.y);
+      if (result === "planned") this.announce("Wird gepflastert.");
+      else if (result === "unplanned") this.announce("Pflaster gestrichen.");
+      else this.announce("Gepflastert wird nur freier, trockener Boden.");
+      return;
+    }
     // A found text: unless the axe marks one of its trees, read it.
     if (
       text &&
@@ -604,6 +695,7 @@ export class Ui {
   /** A tap on a building: play on the stage, open the game, or show how it is doing. */
   private react(b: Building) {
     if (b.state === "done" && b.kind === "theater") return this.readStage(b);
+    if (b.state === "done" && b.kind === "steinbruch") return this.openCrew(b);
     if (b.state === "done" && b.kind === "spielhaus") {
       const game = this.o.games.find((g) => g.id === b.game);
       if (game) {
@@ -622,6 +714,8 @@ export class Ui {
   building(b: Building, removed: boolean) {
     if (removed && this.doomed?.id === b.id) this.setDoomed(null);
     if (removed && this.reading?.id === b.id) this.leaveReading();
+    if (removed && this.crewFor?.id === b.id) this.closeCrew();
+    if (b.kind === "steinbruch") this.items();
     if (!this.buildMenu.hidden) this.updateBuildMenu();
   }
 
@@ -637,6 +731,7 @@ export class Ui {
       schafweide: `Pergament ${this.o.game.state.parchment} von ${balance.maxParchment}.`,
       druckerei: `Drucke ${this.o.game.state.prints} von ${balance.maxPrints}.`,
       kloster: "der Stolz der Waldstatt. Ein Rabe wohnt im Turm.",
+      steinbruch: "hier brechen Waldleute Steine.",
       klause:
         "hier lebte einst der Einsiedler Meinrad. Sein Rabe zeigt den Weg.",
       theater: "die Bühne öffnet sich, sobald ein Spielhaus steht.",

@@ -87,7 +87,7 @@ const reach = 200;
 /** Seconds the view takes to turn. */
 const turnSeconds = 0.7;
 
-type GroundKind = "meadow" | "floor" | "bank";
+type GroundKind = "meadow" | "floor" | "bank" | "cobble";
 
 /** Something upright at a place on the map. */
 interface Upright {
@@ -365,6 +365,7 @@ export class Renderer {
       meadow: pattern("meadow"),
       floor: pattern("floor"),
       bank: pattern("bank"),
+      cobble: pattern("cobble"),
     };
 
     app.stage.eventMode = "none";
@@ -729,7 +730,15 @@ export class Renderer {
         if (game.state.flooded && game.isLake(x, y)) continue;
         // A gap in the ground: the found text lies here (overlay.ts).
         const text = game.textAt(x, y);
-        if (text && isFound(text) && !game.isTree(x, y)) continue;
+        if (text && isFound(text) && !game.isTree(x, y)) {
+          if (game.isPlannedPaving(x, y))
+            g.rect(x + 0.12, y + 0.12, 0.76, 0.76).stroke({
+              width: 0.06,
+              color: 0xe8e2d0,
+              alpha: 0.85,
+            });
+          continue;
+        }
         const built = game.buildingAt(x, y);
         if (isAbroad(x, y)) {
           // Abroad: bare, dim ground beyond the palisade.
@@ -749,7 +758,8 @@ export class Renderer {
           continue;
         }
         let kind: GroundKind = "floor";
-        if (game.isWater(x, y)) kind = "bank";
+        if (game.isPaved(x, y)) kind = "cobble";
+        else if (game.isWater(x, y)) kind = "bank";
         else if (built || game.isFelled(x, y)) kind = "meadow";
         else if (!hasBaseTree(x, y)) {
           const nearStart = Math.hypot(x - start.x, y - start.y) < 4;
@@ -765,7 +775,15 @@ export class Renderer {
             color: 0xf0dfa8,
             alpha: 0.22 + hash(x, y, 83) * 0.12,
           });
-        if (!built && game.isFelled(x, y)) stumps.push([x, y]);
+        if (!built && game.isFelled(x, y) && !game.isPaved(x, y))
+          stumps.push([x, y]);
+        // Planned cobbles: a pale frame until a Waldmensch lays the stones.
+        if (game.isPlannedPaving(x, y))
+          g.rect(x + 0.12, y + 0.12, 0.76, 0.76).stroke({
+            width: 0.06,
+            color: 0xe8e2d0,
+            alpha: 0.85,
+          });
       }
     }
     for (const [x, y] of stumps) {
@@ -941,6 +959,12 @@ export class Renderer {
     } else if (!mark && marked) {
       this.addMark(chunk, x, y);
     }
+  }
+
+  /** A tile was cobbled or planned for cobbles. */
+  paving(x: number, y: number) {
+    const chunk = this.chunkAt(x, y);
+    if (chunk) chunk.dirty = true;
   }
 
   /** A hidden text was found: its shimmer gives way to the text. */

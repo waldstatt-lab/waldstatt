@@ -7,7 +7,7 @@
  */
 import { Application } from "pixi.js";
 import { href } from "../../lib/url";
-import { kinds, STAGE, texts } from "./config";
+import { kinds, STAGE, textWidth } from "./config";
 import { attachInput } from "./input";
 import { textLength, WorldLayer } from "./overlay";
 import { Renderer } from "./render";
@@ -130,6 +130,12 @@ async function start(root: HTMLElement) {
       );
     },
     hint: () => ui?.updateHint(),
+    paving: (x, y) => {
+      renderer?.paving(x, y);
+      // A text on cobbles changes its ink.
+      const t = game.textAt(x, y);
+      if (t) world?.text(t);
+    },
     text: (t, found) => {
       world?.text(t);
       renderer?.text(t);
@@ -147,14 +153,14 @@ async function start(root: HTMLElement) {
     ...(["ortstafel", "chronik"] as const).map((kind) => ({
       key: kind,
       kind,
-      w: texts[kind].w,
+      w: textWidth(kind),
       h: textLength(root, kind, undefined),
     })),
     ...games.map((g) => ({
       key: `game:${g.id}`,
       kind: "game" as const,
       game: g.id,
-      w: texts.game.w,
+      w: textWidth("game"),
       h: textLength(root, "game", g),
     })),
   ];

@@ -820,6 +820,7 @@ const heights: Record<Kind, number> = {
   druckerei: 96,
   spielhaus: 160,
   klause: 90,
+  steinbruch: 100,
   theater: 130,
   kloster: 190,
   damm: 50,
@@ -1174,6 +1175,67 @@ function klause(P: Painter) {
   const [sx, sy] = P.p(2.5, 2.6, 0);
   ellipse(P.ctx, sx, sy - 4, 7, 3.5, "#5a3c22");
   ellipse(P.ctx, sx, sy - 8, 7, 3.5, "#c9a46c");
+}
+
+/**
+ * A quarry: a cut rock face at the back, dressed blocks stacked in front, and
+ * a wooden hoist with a block on its rope.
+ */
+function steinbruch(P: Painter, w: number, d: number) {
+  const rock = {
+    top: "#bdb8ad",
+    left: "#a29d92",
+    right: "#7d796f",
+    line: "#5f5b53",
+  };
+  const block = {
+    top: "#ddd8cc",
+    left: "#c4beb1",
+    right: "#9e988b",
+    line: "#6f6a60",
+  };
+  P.poly(
+    [
+      [0, 0, 0],
+      [w, 0, 0],
+      [w, d, 0],
+      [0, d, 0],
+    ],
+    "#c9c2b0",
+  );
+  const rnd = random(9);
+  for (let i = 0; i < 160; i++) {
+    const [x, y] = P.p(rnd() * w, rnd() * d);
+    P.ctx.fillStyle =
+      rnd() < 0.5 ? "rgba(90, 85, 75, 0.4)" : "rgba(255, 250, 235, 0.4)";
+    P.ctx.fillRect(x, y, 1.6, 1.2);
+  }
+  P.shadow(0.1, 0.1, w - 0.2, 1.2, 1.4);
+  // The rock face, cut in steps.
+  for (const [u0, v0, u1, v1, z] of [
+    [0.1, 0.1, 1.4, 0.9, 46],
+    [1.3, 0.1, 2.6, 0.7, 36],
+    [2.5, 0.1, w - 0.1, 1.0, 54],
+    [0.1, 0.8, 0.8, 1.9, 28],
+  ]) {
+    P.box(u0, v0, u1, v1, 0, z, rock);
+    for (let k = 8; k < z; k += 9) {
+      P.line([u0, v1, k], [u1, v1, k], "#8a857a", 0.7);
+      P.line([u1, v0, k], [u1, v1, k], "#6a665d", 0.7);
+    }
+  }
+  // Dressed blocks waiting to be carted off.
+  P.box(1.4, 1.6, 2.0, 2.2, 0, 9, block);
+  P.box(2.1, 1.7, 2.7, 2.3, 0, 9, block);
+  P.box(1.7, 1.7, 2.3, 2.2, 9, 18, block);
+  P.box(0.5, 2.2, 1.1, 2.7, 0, 8, block);
+  // The hoist: two legs, a beam, the rope and a block.
+  const log = "#7a4e26";
+  P.line([3.0, 1.5, 0], [3.25, 1.9, 56], log, 2.6);
+  P.line([3.5, 2.3, 0], [3.25, 1.9, 56], log, 2.6);
+  P.line([3.25, 1.9, 56], [2.6, 1.9, 60], log, 2.2);
+  P.line([2.6, 1.9, 60], [2.6, 1.9, 26], "#3a2a1e", 0.8);
+  P.box(2.45, 1.75, 2.75, 2.05, 18, 26, block);
 }
 
 function druckerei(P: Painter) {
@@ -1870,6 +1932,9 @@ export function buildingPicture(
     case "klause":
       klause(P);
       break;
+    case "steinbruch":
+      steinbruch(P, w, d);
+      break;
     case "theater":
       theater(P, w, d);
       break;
@@ -1896,8 +1961,9 @@ export function buildingPicture(
 
 /** A seamless 256 × 256 texture for the ground: meadow, forest floor or bank. */
 export function groundTexture(
-  kind: "meadow" | "floor" | "bank",
+  kind: "meadow" | "floor" | "bank" | "cobble",
 ): HTMLCanvasElement {
+  if (kind === "cobble") return cobbles(256, 16, 4);
   const size = 256;
   const element = document.createElement("canvas");
   element.width = size;
@@ -1958,6 +2024,66 @@ export function groundTexture(
       ctx.fillRect(x, y, 1.5, 1.5);
     }
   }
+  return element;
+}
+
+/**
+ * Cobblestones in rows, seamless: `size` pixels square, stones `stone`
+ * pixels across, with a seed for their shades. Light and calm, with narrow
+ * joints, so dark text stays readable on them.
+ */
+export function cobbles(size: number, stone: number, seed: number) {
+  const element = document.createElement("canvas");
+  element.width = element.height = size;
+  const ctx = element.getContext("2d");
+  if (!ctx) throw new Error("2d context");
+  ctx.fillStyle = "#b8af9b";
+  ctx.fillRect(0, 0, size, size);
+  const rnd = random(seed);
+  const rows = Math.round(size / stone);
+  for (let r = 0; r < rows; r++) {
+    const shift = r % 2 ? stone / 2 : 0;
+    for (let c = -1; c <= rows; c++) {
+      const x = c * stone + shift;
+      const y = r * stone;
+      const light = 208 + Math.floor(rnd() * 18);
+      const tint = Math.floor(rnd() * 8);
+      ctx.fillStyle = `rgb(${light + tint}, ${light + 2}, ${light - 12 - tint})`;
+      ctx.beginPath();
+      ctx.roundRect(x + 0.7, y + 0.7, stone - 1.4, stone - 1.4, stone * 0.3);
+      ctx.fill();
+    }
+  }
+  return element;
+}
+
+/**
+ * The ground under a found text: a dark green forest floor, and cobbles on
+ * the paved tiles. `res` pixels per tile.
+ */
+export function textFloor(
+  w: number,
+  h: number,
+  res: number,
+  paved: (u: number, v: number) => boolean,
+): HTMLCanvasElement {
+  const element = document.createElement("canvas");
+  element.width = w * res;
+  element.height = h * res;
+  const ctx = element.getContext("2d");
+  if (!ctx) throw new Error("2d context");
+  ctx.fillStyle = "#284526";
+  ctx.fillRect(0, 0, element.width, element.height);
+  const rnd = random(w * 131 + h);
+  for (let i = 0; i < w * h * 40; i++) {
+    ctx.fillStyle =
+      rnd() < 0.5 ? "rgba(120, 160, 80, 0.18)" : "rgba(10, 25, 10, 0.25)";
+    ctx.fillRect(rnd() * element.width, rnd() * element.height, 2, 1.4);
+  }
+  const stones = cobbles(res, res / 4, 4);
+  for (let v = 0; v < h; v++)
+    for (let u = 0; u < w; u++)
+      if (paved(u, v)) ctx.drawImage(stones, u * res, v * res);
   return element;
 }
 

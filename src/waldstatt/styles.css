@@ -397,6 +397,22 @@
   transform: scale(0.03125);
   transform-origin: 0 0;
 }
+/* A found text lies straight on the forest floor (overlay.ts): a dark green
+   ground, painted with cobbles where they are laid, and two inks, each masked
+   to its tiles: light on the green, dark on the stones. */
+.wg-world > .wg-find {
+  overflow: visible;
+  background-color: #284526;
+  background-size: 100% 100%;
+}
+.wg-ink {
+  position: absolute;
+  inset: 0;
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+}
 .wg-measure {
   position: absolute;
   visibility: hidden;
@@ -404,71 +420,29 @@
 }
 .wg-sheet {
   padding: 10px 14px;
-  color: var(--wg-ink);
   font-size: 12px;
   line-height: 17px;
-}
-/* A found text's footprint: meadow round the sheet, as on cleared ground. */
-.wg-world > .wg-find {
-  overflow: visible;
-  background: var(--wg-meadow, #6f9e45);
-  background-size: 128px 128px;
-}
-.wg-sheet-scroll {
-  border-radius: 6px;
-  background:
-    linear-gradient(
-      90deg,
-      rgb(150 110 50 / 0.18),
-      transparent 8%,
-      transparent 92%,
-      rgb(150 110 50 / 0.18)
-    ),
-    var(--wg-parchment);
-  box-shadow:
-    inset 0 0 0 1px #b59c6a,
-    0 -9px 0 -2px #c4a97a,
-    0 9px 0 -2px #c4a97a,
-    0 -11px 0 -2px #8a5a32,
-    0 11px 0 -2px #8a5a32;
-}
-.wg-sheet-board {
-  border: 3px solid #5a3a20;
-  border-radius: 2px;
-  background: #c89a5a;
-  color: #2a1d12;
-}
-.wg-sheet-notice {
-  background: #f7f2e4;
-  box-shadow: inset 0 0 0 1px #b9ae94;
 }
 .wg-sheet-title {
   margin-bottom: 2px;
   font-family: var(--wg-serif);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
-  line-height: 20px;
+  line-height: 22px;
 }
 .wg-sheet-tagline {
   margin: 0 0 4px;
   font-style: italic;
 }
 .wg-sheet .prose {
-  --tw-prose-body: currentColor;
-  --tw-prose-headings: #2a1d12;
-  --tw-prose-bold: #2a1d12;
-  --tw-prose-links: #8c2b33;
-  --tw-prose-bullets: #7a5a3a;
-  --tw-prose-th-borders: #a88d5f;
-  --tw-prose-td-borders: #c9b48a;
   max-width: none;
   font-size: 12px;
   line-height: 17px;
 }
 .wg-sheet .prose h2 {
-  margin: 0.6em 0 0.15em;
+  margin: 0.7em 0 0.15em;
   font-family: var(--wg-serif);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 18px;
 }
 .wg-sheet .prose :is(p, ul, table) {
@@ -479,6 +453,42 @@
 }
 .wg-sheet .prose table {
   font-size: 11px;
+}
+/* Light ink on the green floor: cream text, golden headings. The colours are
+   set on .prose itself, where the typography plugin sets its own. Both inks
+   keep the same weight, so their lines break alike. */
+.wg-ink-light .wg-sheet,
+.wg-ink-light .wg-sheet .prose {
+  --tw-prose-body: #f3ead2;
+  --tw-prose-headings: #f2c75c;
+  --tw-prose-bold: #fff6dc;
+  --tw-prose-links: #ffd88a;
+  --tw-prose-bullets: #c9dca0;
+  --tw-prose-th-borders: #8fae6a;
+  --tw-prose-td-borders: #5f7f48;
+  color: #f3ead2;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.55);
+}
+.wg-ink-light .wg-sheet-title {
+  color: #f2c75c;
+}
+/* Dark ink on the cobbles. */
+.wg-ink-dark .wg-sheet,
+.wg-ink-dark .wg-sheet .prose {
+  --tw-prose-body: #1d1812;
+  --tw-prose-headings: #5a2410;
+  --tw-prose-bold: #000;
+  --tw-prose-links: #7a2410;
+  --tw-prose-bullets: #3a3028;
+  --tw-prose-th-borders: #3a3028;
+  --tw-prose-td-borders: #6a6052;
+  color: #1d1812;
+  /* A hairline stroke thickens the letters without moving the lines. */
+  -webkit-text-stroke: 0.3px currentColor;
+  text-shadow: none;
+}
+.wg-ink-dark .wg-sheet-title {
+  color: #5a2410;
 }
 .wg-plate {
   display: flex;

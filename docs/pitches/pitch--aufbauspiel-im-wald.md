@@ -95,6 +95,10 @@ a stock limit. The app icons are pixel art encoded as PNG at build time.
   on, after BAFU, the natural lakes, and the national border as a wooden
   palisade with bare land abroad.
   The water loads in pages of 10 × 10 km as it comes into view.
+- Texts lie straight on a dark green floor in cream and gold, wider on wide
+  screens. A Steinbruch, worked by the Waldleute put in it, gives stones; with
+  them, «Pflastern» lays cobbled paths and squares, on which texts turn to dark
+  ink and Waldleute walk faster.
 
 This is a hobby project, so the pitch sets no appetite. The game should still
 grow in playable slices, each a sensible place to stop: forest, felling and huts;

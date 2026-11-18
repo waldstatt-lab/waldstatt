@@ -4,14 +4,21 @@
  * map as it needs. The hidden texts, once found, lie under the map's canvas:
  * the ground leaves a gap on each cleared tile of a found text (render.ts),
  * so the text lies on the floor, and the trees still standing, the Waldleute
- * and the buildings stand over it. Each Spielhaus's plate with its links lies
+ * and the buildings stand over it. The text is light on a dark green floor;
+ * on cobbled tiles, a dark copy of it shows instead, so it stays readable. Each Spielhaus's plate with its links lies
  * over the canvas, in front of its house. (The theatre's stage is painted on the map:
  * stage.ts.) Pins stand upright over the map: the water names, Einsiedeln,
  * and short status labels. Nodes are cloned from the page's templates or
  * built with the DOM API, never from HTML strings.
  */
-import { TEXT_MARGIN, TEXT_SCALE, texts, type TextKind } from "./config";
-import { groundTexture } from "./art";
+import {
+  TEXT_MARGIN,
+  TEXT_SCALE,
+  texts,
+  textWidth,
+  type TextKind,
+} from "./config";
+import { textFloor } from "./art";
 import { apply, type Linear } from "./iso";
 import { isFound, type Game, type HiddenText } from "./sim";
 import type { Building } from "./state";
@@ -67,7 +74,7 @@ export function textTitle(kind: TextKind, game: GameInfo | undefined): string {
     : texts[kind].name;
 }
 
-/** The sheet of a hidden text, lying on the ground. */
+/** The text of a hidden text, lying on the ground. */
 function sheet(kind: TextKind, game: GameInfo | undefined): HTMLElement | null {
   const sections = sectionsFor(kind, game?.id);
   if (!sections.length) return null;
@@ -91,6 +98,12 @@ function sheet(kind: TextKind, game: GameInfo | undefined): HTMLElement | null {
   );
 }
 
+/** Sets or clears a layer's mask, with the prefixed property for Safari. */
+function mask(element: HTMLElement, url: string | null) {
+  element.style.maskImage = url ?? "";
+  element.style.setProperty("-webkit-mask-image", url ?? "");
+}
+
 const measured = new Map<string, number>();
 
 /**
@@ -109,7 +122,7 @@ export function textLength(
   const element = sheet(kind, game);
   if (!element) return 2;
   const box = el("div", { className: "wg-measure" });
-  element.style.width = `${(texts[kind].w - 2 * side) * TEXT_SCALE}px`;
+  element.style.width = `${(textWidth(kind) - 2 * side) * TEXT_SCALE}px`;
   box.append(element);
   root.append(box);
   const tiles = Math.ceil(element.offsetHeight / TEXT_SCALE + 2 * end);
@@ -127,6 +140,18 @@ export class WorldLayer {
   private pins: HTMLElement;
   /** By building id (plates) or text key (texts). */
   private items = new Map<number | string, Item>();
+  /** The found texts: their two inks and the cobbles they were painted for. */
+  private finds = new Map<
+    string,
+    {
+      element: HTMLElement;
+      light: HTMLElement;
+      dark: HTMLElement;
+      paved: string | null;
+    }
+  >();
+  private pending = new Set<HiddenText>();
+  private paveTimer = 0;
   private waterPins: (Pin & { basin: boolean })[] = [];
   private placePins: Pin[] = [];
   private toasts = new Map<number, { pin: Pin; until: number }>();
@@ -145,8 +170,6 @@ export class WorldLayer {
     this.floor = el("div", { className: "wg-world wg-floor" });
     this.floor.setAttribute("role", "region");
     this.floor.setAttribute("aria-label", "Schriften im Wald");
-    const meadow = groundTexture("meadow").toDataURL();
-    this.floor.style.setProperty("--wg-meadow", `url(${meadow})`);
     this.pins = el("div", { className: "wg-pins" });
     this.pins.setAttribute("aria-hidden", "true");
     host.prepend(this.floor);
@@ -231,21 +254,88 @@ export class WorldLayer {
 
   /**
    * Lays a found text under the ground; the ground's gaps over its cleared
-   * tiles show it.
+   * tiles show it. Called again when its tiles are cobbled.
    */
   text(t: HiddenText) {
-    if (!isFound(t) || this.items.has(t.key)) return;
-    const content = sheet(t.kind, this.gameInfo(t.game));
-    if (!content) return;
-    const { side, end } = margins(t.kind);
-    const element = el("div", { className: "wg-flat wg-find" });
-    content.style.position = "absolute";
-    content.style.left = `${side * TEXT_SCALE}px`;
-    content.style.top = `${end * TEXT_SCALE}px`;
-    content.style.width = `${(t.w - 2 * side) * TEXT_SCALE}px`;
-    content.style.height = `${(t.h - 2 * end) * TEXT_SCALE}px`;
-    element.append(content);
-    this.add(t.key, element, { x: t.x, y: t.y, w: t.w, h: t.h }, this.floor);
+    if (!isFound(t)) return;
+    if (!this.finds.has(t.key)) {
+      const game = this.gameInfo(t.game);
+      const light = sheet(t.kind, game);
+      const dark = sheet(t.kind, game);
+      if (!light || !dark) return;
+      const { side, end } = margins(t.kind);
+      const element = el("div", { className: "wg-flat wg-find" });
+      const layer = (content: HTMLElement, ink: "light" | "dark") => {
+        content.style.position = "absolute";
+        content.style.left = `${side * TEXT_SCALE}px`;
+        content.style.top = `${end * TEXT_SCALE}px`;
+        content.style.width = `${(t.w - 2 * side) * TEXT_SCALE}px`;
+        content.style.height = `${(t.h - 2 * end) * TEXT_SCALE}px`;
+        const wrap = el("div", { className: `wg-ink wg-ink-${ink}` }, content);
+        element.append(wrap);
+        return wrap;
+      };
+      const lightLayer = layer(light, "light");
+      const darkLayer = layer(dark, "dark");
+      // The dark copy is only for the eye; the light one is read out.
+      darkLayer.setAttribute("aria-hidden", "true");
+      darkLayer.hidden = true;
+      this.finds.set(t.key, {
+        element,
+        light: lightLayer,
+        dark: darkLayer,
+        paved: null,
+      });
+      this.add(t.key, element, { x: t.x, y: t.y, w: t.w, h: t.h }, this.floor);
+    }
+    this.pending.add(t);
+    if (!this.paveTimer)
+      this.paveTimer = window.setTimeout(() => this.repave(), 200);
+  }
+
+  /**
+   * Paints the floor under the texts whose cobbles changed and shows each
+   * ink where it reads: light on the green, dark on the stones.
+   */
+  private repave() {
+    this.paveTimer = 0;
+    for (const t of this.pending) {
+      const find = this.finds.get(t.key);
+      if (!find) continue;
+      const paved = (u: number, v: number) =>
+        this.game.isPaved(t.x + u, t.y + v);
+      let signature = "";
+      for (let v = 0; v < t.h; v++)
+        for (let u = 0; u < t.w; u++) signature += paved(u, v) ? "1" : "0";
+      if (signature === find.paved) continue;
+      find.paved = signature;
+      const floor = textFloor(t.w, t.h, TEXT_SCALE, paved);
+      find.element.style.backgroundImage = `url(${floor.toDataURL()})`;
+      const any = signature.includes("1");
+      find.dark.hidden = !any;
+      if (!any) {
+        mask(find.light, null);
+        continue;
+      }
+      // Four mask pixels per tile, so the inks change within a quarter tile.
+      const masks = (["light", "dark"] as const).map((ink) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = t.w * 4;
+        canvas.height = t.h * 4;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#fff";
+          for (let v = 0; v < t.h; v++)
+            for (let u = 0; u < t.w; u++)
+              if (paved(u, v) === (ink === "dark"))
+                ctx.fillRect(u * 4, v * 4, 4, 4);
+        }
+        return `url(${canvas.toDataURL()})`;
+      });
+      mask(find.light, masks[0]);
+      mask(find.dark, masks[1]);
+    }
+    this.pending.clear();
   }
 
   /** The rectangle a text covers, in tiles, without its margins. */

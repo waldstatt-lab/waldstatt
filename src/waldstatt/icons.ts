@@ -27,9 +27,31 @@ const colors: Record<string, string> = {
   o: "#0f2c18",
   g: "#1c3420",
   r: "#a8323a",
+  N: "#9aa0a6",
+  M: "#5f646b",
 };
 
 export const icons: Record<string, string[]> = {
+  stones: [
+    "....AAA.....",
+    "...AANNA....",
+    "..ANNNNNM...",
+    "..MNNNNMM.A.",
+    ".AAMMMM..ANA",
+    "ANNNA...ANNM",
+    "NNNNNM..MNMM",
+    ".MMMM.......",
+  ],
+  pave: [
+    "AANAANAANAA.",
+    "NNMNNMNNMNN.",
+    "MMMMMMMMMMM.",
+    ".AANAANAANAA",
+    ".NNMNNMNNMNN",
+    ".MMMMMMMMMMM",
+    "AANAANAANAA.",
+    "NNMNNMNNMNN.",
+  ],
   wood: [
     "...DDDDDDDD.",
     "..DWWWWWWWEE",
