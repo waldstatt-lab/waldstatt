@@ -65,8 +65,8 @@ export class People {
     const s = g.state;
     // The first pair, by the fire, with a little food.
     if (!s.people.length && s.nextPerson === 1) {
-      g.addPerson({ sex: "f", age: 22, x: start.x + 0.2, y: start.y + 0.6 });
-      g.addPerson({ sex: "m", age: 24, x: start.x + 0.8, y: start.y + 0.4 });
+      g.addPerson({ sex: "f", age: 18, x: start.x + 0.2, y: start.y + 0.6 });
+      g.addPerson({ sex: "m", age: 20, x: start.x + 0.8, y: start.y + 0.4 });
       s.stock.meat = balance.startFood;
       s.seen.add("meat");
       s.seen.add("wood");
@@ -159,7 +159,8 @@ export class People {
     const born: Worker[] = [];
     for (const w of people) {
       w.age += years;
-      w.hunger += dt;
+      // Children eat less.
+      w.hunger += dt * (w.age < balance.workingAge ? balance.childAppetite : 1);
       if (w.hunger >= balance.mealSeconds && this.fed(w.x, w.y)) this.eat(w);
       if (w.age >= w.life) dead.push([w, "age"]);
       else if (w.hunger >= balance.mealSeconds + balance.starveSeconds)

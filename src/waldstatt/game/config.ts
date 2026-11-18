@@ -53,7 +53,7 @@ export const balance = {
   /** Reach of food, churches and the Kloster, in tiles (1 km). */
   reach: 20,
   /** Seconds of play per year of a Waldmensch's life. */
-  yearSeconds: 30,
+  yearSeconds: 40,
   /** Children work from this age on. */
   workingAge: 14,
   /** Women and men have children between these ages. */
@@ -61,9 +61,11 @@ export const balance = {
   /** A life ends of age somewhere between these years. */
   lifeYears: [60, 80] as const,
   /** Seconds between meals; after them, a Waldmensch is hungry. */
-  mealSeconds: 30,
+  mealSeconds: 45,
+  /** Children get hungry this much as fast as adults. */
+  childAppetite: 0.5,
   /** Seconds a hungry Waldmensch survives without a meal. */
-  starveSeconds: 180,
+  starveSeconds: 240,
   /** Seconds, on average, between a woman's children while food is plenty. */
   birthSeconds: 70,
   /** The shortest time between two children of one woman. */
@@ -80,7 +82,7 @@ export const balance = {
   /** The fire in the first clearing gives shelter to two. */
   fireBeds: 2,
   /** What lies by the fire at the start. */
-  startFood: 24,
+  startFood: 30,
   /** While overcrowded, the years pass this much faster. */
   crowdedAgeing: 1.5,
 
@@ -519,9 +521,9 @@ export interface Recipe {
 export const recipes: Partial<Record<Kind, Recipe>> = {
   schafweide: { takes: {}, makes: { parchment: 1 }, seconds: 12 },
   getreidehof: { takes: {}, makes: { grain: 1 }, seconds: 6 },
-  viehhof: { takes: {}, makes: { meat: 1 }, seconds: 12 },
+  viehhof: { takes: {}, makes: { meat: 1 }, seconds: 15 },
   muehle: { takes: { grain: 1 }, makes: { flour: 1 }, seconds: 5 },
-  baeckerei: { takes: { flour: 1 }, makes: { bread: 3 }, seconds: 8 },
+  baeckerei: { takes: { flour: 1 }, makes: { bread: 2 }, seconds: 8 },
   brauerei: { takes: { grain: 1 }, makes: { beer: 1 }, seconds: 8 },
   steinbruch: { takes: {}, makes: { stones: 1 }, seconds: 5 },
   druckerei: {

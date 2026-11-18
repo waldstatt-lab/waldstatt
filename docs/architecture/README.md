@@ -149,7 +149,9 @@ and what a building makes is in stock at once (`economy.ts`). The producing
 buildings take a crew of up to four: the Schafweide (parchment), Getreidehof
 (grain), Viehhof (meat), Mühle (grain to flour, only on a river bank),
 Bäckerei (flour to bread), Brauerei (grain to beer), Steinbruch (stones) and
-Druckerei (parchment and wood to books). A new one asks for a full crew;
+Druckerei (parchment and wood to books). One Waldmensch at a Viehhof feeds
+about three; one in the chain of Getreidehof, Mühle and Bäckerei about five.
+A new one asks for a full crew;
 tapping a finished one opens its card with − and + to change it. Crews are
 filled every second from the idle and the nearest adults, so Waldleute who come
 of age or become free join them, always leaving one free to fell and build;
@@ -163,11 +165,12 @@ pale frame until they are paved.
 
 **The Waldleute live** (`people.ts`). Each is a person with a position, an
 age, a sex, hunger and work; children (under 14) do not work, and a year
-passes in 30 seconds of play. The game starts with a woman and a man by a fire
-in the first clearing, with some meat. Waldleute eat a meal every 30 seconds:
+passes in 40 seconds of play. The game starts with a woman of 18 and a man of
+20 by a fire in the first clearing, with 30 meat. Waldleute eat a meal every
+45 seconds, children every 90:
 within 1 km of a Viehhof or a Bäckerei, or of the fire until the first of
 them stands, food reaches them where they are; farther out, a hungry
-Waldmensch leaves their work and walks back. Three minutes hungry, or old enough
+Waldmensch leaves their work and walks back. Four minutes hungry, or old enough
 (60 to 80 years), they die. A woman and a man of the right age have children
 now and then while food is plenty, sooner with beer in stock, born by the
 nearest house. Motivation sets how often: below 50 % with its square (a quarter
