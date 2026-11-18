@@ -9,7 +9,7 @@ import { Application } from "pixi.js";
 import { setIseLogo } from "./art";
 import iseLogoUrl from "./ise-logo.png?url";
 import { href } from "../../lib/url";
-import { kinds, STAGE, textWidth } from "./config";
+import { kinds, placing, STAGE, textWidth } from "./config";
 import { attachInput } from "./input";
 import { textLength, WorldLayer } from "./overlay";
 import { Renderer } from "./render";
@@ -18,7 +18,7 @@ import { Game, type Events, type TextSpec } from "./sim";
 import { clearSaved, keep, load, save, whenClosed } from "./state";
 import { readGames } from "./texts";
 import { Ui } from "./ui";
-import { loadPages, onPage, town } from "./world";
+import { loadPages, onPage, start as clearing, town } from "./world";
 
 const root = document.querySelector<HTMLElement>("[data-wg]");
 if (root)
@@ -52,11 +52,20 @@ async function start(root: HTMLElement) {
 
   const games = readGames();
   const { state, problem } = await load(new Set(games.map((g) => g.id)));
-  // The water round Einsiedeln, where the texts lie hidden, and round the view.
-  const reach = 130;
+  // The water as far out as the texts may lie hidden: the games' scrolls
+  // round the first clearing, the town's texts round the Klosterplatz; and
+  // round the view.
+  const reach = placing.far.max + 80;
+  const near = placing.town.max + 40;
   const c = state.camera;
   await Promise.all([
-    loadPages(town.x - reach, town.y - reach, town.x + reach, town.y + reach),
+    loadPages(
+      clearing.x - reach,
+      clearing.y - reach,
+      clearing.x + reach,
+      clearing.y + reach,
+    ),
+    loadPages(town.x - near, town.y - near, town.x + near, town.y + near),
     loadPages(c.x - 40, c.y - 40, c.x + 40, c.y + 40),
   ]);
   // The ISE AG's logo, for its forge, before anything is painted.

@@ -666,8 +666,8 @@ export class Game {
 
   /**
    * Lays each text where this forest's seed puts it: the Ortstafel and the
-   * Chronik within 1 km of the Klosterplatz, the games' scrolls 1.5 to 5 km
-   * out, on dry land outside the Sihlsee's basin and clear of each other and
+   * Chronik within 1 km of the Klosterplatz, the games' scrolls 6 to 12 km
+   * from the first clearing, on dry land outside the Sihlsee's basin and clear of each other and
    * the first clearing. Positions are saved; sizes follow the current text.
    */
   private hideTexts(specs: TextSpec[]) {
@@ -705,6 +705,8 @@ export class Game {
       for (let ty = y - 1; ty <= y + h; ty++)
         for (let tx = x - 1; tx <= x + w; tx++)
           if (
+            // Only where the water is known: unknown ground might be a river.
+            !isKnown(tx, ty) ||
             isRiver(tx, ty) ||
             isNaturalLake(tx, ty) ||
             isWall(tx, ty) ||
@@ -717,7 +719,10 @@ export class Game {
       return true;
     };
     for (const spec of fresh) {
-      const range = placing[texts[spec.kind].where];
+      const where = texts[spec.kind].where;
+      const range = placing[where];
+      // The town's texts round the Klosterplatz, the games round the start.
+      const centre = where === "far" ? start : town;
       // Each text has its own sequence, so adding a game moves no other text.
       let seed = this.state.seed;
       for (const c of spec.key)
@@ -731,8 +736,8 @@ export class Game {
         const r = Math.sqrt(
           range.min ** 2 + rnd() * ((range.max + grow) ** 2 - range.min ** 2),
         );
-        const x = Math.round(town.x + Math.cos(angle) * r - spec.w / 2);
-        const y = Math.round(town.y + Math.sin(angle) * r - spec.h / 2);
+        const x = Math.round(centre.x + Math.cos(angle) * r - spec.w / 2);
+        const y = Math.round(centre.y + Math.sin(angle) * r - spec.h / 2);
         if (free(x, y, spec.w, spec.h)) at = { x, y };
       }
       if (!at) continue;

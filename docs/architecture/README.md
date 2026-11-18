@@ -247,7 +247,8 @@ and only the toolbox stays at the bottom. The deaths are counted in the save.
 **Content on the map.** The texts are not built; they lie hidden under the
 forest and are explored by felling it. The Ortstafel (the name) and the
 Chronik (the about texts) lie within 1 km of the Klosterplatz, each game's
-scroll (its whole Markdown, controls included) 1.5 to 5 km from it, on dry land
+scroll (its whole Markdown, controls included) 6 to 12 km from the first
+clearing, on dry land
 outside the Sihlsee's basin. Where exactly is chosen at random for each new
 forest from a seed and saved. A hidden text lies under unbroken forest:
 its tiles always carry a tree, its ground shimmers pale, and motes of light

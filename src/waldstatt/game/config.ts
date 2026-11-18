@@ -567,7 +567,10 @@ export const texts: Record<
     /** Width in tiles on narrow screens and on wide ones. */
     w: { narrow: number; wide: number };
     style: "board" | "scroll";
-    /** Where it lies: within 1 km of the Klosterplatz, or 1.5 to 5 km out. */
+    /**
+     * Where it lies: within 1 km of the Klosterplatz, or 6 to 12 km from
+     * the first clearing.
+     */
     where: "town" | "far";
   }
 > = {
@@ -606,7 +609,7 @@ export function textWidth(kind: TextKind): number {
 /** Distances of hidden texts from the Klosterplatz, in tiles. */
 export const placing = {
   town: { min: 0, max: 20 },
-  far: { min: 30, max: 100 },
+  far: { min: 120, max: 240 },
   /** Free tiles kept round each text and round the first clearing. */
   gap: 3,
 };
