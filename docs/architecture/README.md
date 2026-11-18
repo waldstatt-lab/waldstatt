@@ -212,10 +212,12 @@ explored.
 shows red, «Zuerst die Bäume fällen». A building chosen in the menu appears in
 the middle of the view, drawn above the trees and reddish where it cannot
 stand, with a small card on it: its name and costs, and why it cannot stand
-there. There is no bar or dialog. Chosen with the mouse, it follows the pointer
-and a click builds; Escape or a right click stops. By touch or keyboard, a drag
-that starts on it or a tap elsewhere moves it (other drags still pan), and the
-card's «Bauen» or Enter builds it; its × or Escape stops. Some have rules of their own: a church
+there. There is no bar or dialog. How it is placed follows how it was chosen. With
+the mouse it follows the pointer and a click builds; with the keyboard (from
+the menu or the «:» finder) it starts at the keyboard cursor, follows it, and
+Enter builds; both show only a slim label and stop with Escape (or a right
+click). By touch, a drag that starts on it or a tap elsewhere moves it (other
+drags still pan), and its card carries «Bauen» and ×. Some have rules of their own: a church
 stands more than 1 km from every other church and Kloster not under water, a
 graveyard right beside a church or the Kloster, the ISE AG in the first
 clearing, the Mühle on a river bank. The build menu shows each building as a
@@ -368,7 +370,8 @@ the saw or paving at the cursor; Enter or Space applies the tool or opens a
 building, Escape cancels (`input.ts`). Anywhere outside text fields and
 dialogs, a, s, p and x choose Axt, Säge, Pflastern and Abreissen, b opens
 Bauen and m the menu, which lists these keys. «/» opens a finder over the
-texts found so far and jumps to the one chosen; «:» one over commands:
+starting point (`start`) and the texts found so far and jumps to the one
+chosen; «:» one over commands:
 `tool:…` for the tools at hand, `build:…` for the buildings the menu shows,
 `lichtung`, `bauen`, `menü` and `neu-beginnen`. Both match fuzzily, ignoring
 accents, and take arrows or Tab, Enter and Escape. While the view is turned onto the stage,

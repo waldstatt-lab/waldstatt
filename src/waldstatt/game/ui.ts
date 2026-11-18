@@ -43,6 +43,7 @@ import type { GameInfo } from "./texts";
 import { damSite, start } from "./world";
 
 type Tool = "none" | "axe" | "saw" | "pave" | "demolish";
+type PlaceMode = "mouse" | "keys" | "touch";
 
 /** An entry of the finder: what it shows, a hint, and what it does. */
 interface FinderItem {
@@ -129,14 +130,20 @@ export class Ui {
     at?: Tile;
     /** Where the building was taken, from the tile it is placed by. */
     hold?: Tile;
-    /** Chosen with the mouse: it follows the pointer, and a click builds. */
-    mouse?: boolean;
+    /**
+     * How it was chosen: with the mouse it follows the pointer and a click
+     * builds; with the keyboard it follows the cursor and Enter builds; by
+     * touch it is dragged or tapped into place and the card's «Bauen» builds.
+     */
+    mode: PlaceMode;
     /** Its card: why it cannot stand here, and «Bauen». */
     note?: HTMLElement;
     build?: HTMLButtonElement;
   } | null = null;
   /** The kind of pointer last pressed: "mouse", "touch" or "pen". */
   private pointerKind = "mouse";
+  /** The keyboard cursor's tile, once the keyboard moved it. */
+  private keyCursor: Tile | null = null;
   private sawFrom: Tile | null = null;
   /** The building torn down by the next tap with the Abreissen tool. */
   private doomed: Building | null = null;
@@ -661,13 +668,20 @@ export class Ui {
     if (focusMap) this.mapHost().focus({ preventScroll: true });
   }
 
-  /** The texts found so far, to jump to and read. */
+  /** The starting point and the texts found so far, to jump to. */
   private textItems(): FinderItem[] {
-    return this.o.game.hidden.filter(isFound).map((t) => ({
-      label: this.o.world.title(t),
-      hint: isExplored(t) ? "liegt frei" : "teilweise frei",
-      run: () => this.readText(t),
-    }));
+    return [
+      {
+        label: "start",
+        hint: "zur ersten Lichtung",
+        run: () => this.menuAction("home"),
+      },
+      ...this.o.game.hidden.filter(isFound).map((t) => ({
+        label: this.o.world.title(t),
+        hint: isExplored(t) ? "liegt frei" : "teilweise frei",
+        run: () => this.readText(t),
+      })),
+    ];
   }
 
   /** Commands: the tools at hand, the buildings in the menu, and more. */
@@ -704,7 +718,7 @@ export class Ui {
         run: () => {
           const now = g.unavailable(entry.kind, entry.game);
           if (now) return this.announce(`${name}: ${now}`);
-          this.startPlacing(entry.kind, entry.game);
+          this.startPlacing(entry.kind, entry.game, "keys");
         },
       });
     }
@@ -871,10 +885,14 @@ export class Ui {
             const why = this.o.game.unavailable(kind, game);
             if (why) return this.announce(`${this.label(kind, game)}: ${why}`);
             this.closeMenus();
-            // Chosen with the mouse (not the keyboard, whose click has no
-            // detail): the building follows the mouse.
-            const mouse = event.detail > 0 && this.pointerKind === "mouse";
-            this.startPlacing(kind, game, mouse);
+            // The keyboard's click has no detail; a pointer's says which.
+            const mode: PlaceMode =
+              event.detail === 0
+                ? "keys"
+                : this.pointerKind === "mouse"
+                  ? "mouse"
+                  : "touch";
+            this.startPlacing(kind, game, mode);
           });
           const item = el("li", {}, button);
           items.append(item);
@@ -951,16 +969,17 @@ export class Ui {
   // --- Placing ----------------------------------------------------------------
 
   /**
-   * Starts placing a building. A card on it names it and its costs and says
-   * why it cannot stand where it is. With the mouse it follows the pointer
-   * and a click builds; by touch it is dragged or tapped into place, and the
-   * card's «Bauen» builds; × or Escape stops.
+   * Starts placing a building. A slim card on it names it and its costs and
+   * says why it cannot stand where it is. With the mouse it follows the
+   * pointer and a click builds; with the keyboard it follows the cursor and
+   * Enter builds; Escape stops either. Only by touch does the card carry
+   * «Bauen» and ×, as the building is dragged or tapped into place.
    */
-  private startPlacing(kind: Kind, game?: string, mouse = false) {
+  private startPlacing(kind: Kind, game?: string, mode: PlaceMode = "touch") {
     if (this.reading) this.leaveReading();
     this.setDoomed(null);
     this.closeCard();
-    this.placing = { kind, game, mouse: mouse && kind !== "damm" };
+    this.placing = { kind, game, mode };
     this.mapHost().dataset.mode = "place";
     const text = this.placingText();
     const note = el("p", { className: "wg-card-note" });
@@ -985,9 +1004,8 @@ export class Ui {
     const card = el(
       "div",
       {
-        className: this.placing.mouse
-          ? "wg-place-card wg-place-mouse"
-          : "wg-place-card",
+        className:
+          mode === "touch" ? "wg-place-card" : "wg-place-card wg-place-slim",
       },
       el("p", { className: "wg-card-title" }, text),
       build,
@@ -1006,6 +1024,9 @@ export class Ui {
       r.centerOn(damSite.x + damSite.w / 2, damSite.y + damSite.h / 2);
       this.o.moved();
       this.ghostAt({ x: damSite.x, y: damSite.y });
+    } else if (mode === "keys" && this.keyCursor) {
+      // Where the keyboard cursor is.
+      this.ghostAt(this.keyCursor);
     } else {
       const box = this.mapHost().getBoundingClientRect();
       const centre = r.screenToTile(box.width / 2, box.height / 2);
@@ -1037,14 +1058,15 @@ export class Ui {
     const at = this.anchor(tile);
     const spot = this.o.game.placement(kind, at.x, at.y);
     this.o.renderer.setGhost(spot, { kind, game });
-    const { note, build, mouse } = this.placing;
+    const { note, build, mode } = this.placing;
     if (build) build.disabled = !spot.ok;
     if (note) {
-      const text = spot.ok
-        ? mouse
-          ? "Klick: bauen · Esc: abbrechen"
-          : ""
-        : (spot.reason ?? "Hier nicht.");
+      const ready: Record<PlaceMode, string> = {
+        mouse: "Klick: bauen · Esc: abbrechen",
+        keys: "Eingabetaste: bauen · Esc: abbrechen",
+        touch: "",
+      };
+      const text = spot.ok ? ready[mode] : (spot.reason ?? "Hier nicht.");
       if (note.textContent !== text) note.textContent = text;
       note.hidden = !text;
     }
@@ -1108,8 +1130,8 @@ export class Ui {
         !this.reading,
       grab: (tile) => {
         const p = this.placing;
-        // With the mouse it follows the pointer anyway.
-        if (!p?.at || p.kind === "damm" || p.mouse) return false;
+        // Only by touch is it dragged; otherwise it follows pointer or cursor.
+        if (!p?.at || p.kind === "damm" || p.mode !== "touch") return false;
         const at = this.anchor(p.at);
         const spot = this.o.game.placement(p.kind, at.x, at.y);
         const inside =
@@ -1129,7 +1151,7 @@ export class Ui {
         if (this.placing) {
           // With the mouse a click builds. By touch, a tap on the building
           // leaves it and anywhere else moves it there; «Hier bauen» builds.
-          if (this.placing.mouse) return this.tryPlace(tile);
+          if (this.placing.mode !== "touch") return this.tryPlace(tile);
           const hold = this.placing.hold;
           this.placing.hold = undefined;
           if (!hold) this.ghostAt(tile);
@@ -1141,7 +1163,7 @@ export class Ui {
       },
       // With a mouse, the building being placed follows the pointer.
       hover: (tile) => {
-        if (this.placing && !this.placing.hold) this.ghostAt(tile);
+        if (this.placing?.mode === "mouse") this.ghostAt(tile);
       },
       saw: (from, to, done) => {
         this.o.renderer.setSaw(
@@ -1150,6 +1172,7 @@ export class Ui {
         if (done) this.sawArea(from, to);
       },
       cursor: (tile) => {
+        this.keyCursor = tile;
         this.o.renderer.setCursor(tile);
         if (this.placing) this.ghostAt(tile);
         if (this.sawFrom)

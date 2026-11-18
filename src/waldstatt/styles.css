@@ -421,15 +421,20 @@
   }
 }
 
-/* The card on a building being placed. With a mouse the building follows the
-   pointer and a click builds, so the card lets clicks through and has no
-   buttons. */
+/* The card on a building being placed. With a mouse or the keyboard it is a
+   slim label without buttons that lets clicks through: the building follows
+   the pointer or the cursor, and a click or Enter builds. Only by touch does
+   it carry «Bauen» and ×. */
 .wg-cards > .wg-card.wg-place-card {
   grid-template-columns: 1fr auto auto;
   align-items: center;
 }
 .wg-place-card .wg-card-title {
   grid-column: 1;
+}
+.wg-place-card .wg-button,
+.wg-place-card .wg-card-close {
+  grid-column: auto;
 }
 .wg-place-card .wg-button {
   min-height: 2rem;
@@ -438,11 +443,11 @@
 .wg-place-card .wg-card-note {
   grid-column: 1 / -1;
 }
-.wg-cards > .wg-card.wg-place-mouse {
+.wg-cards > .wg-card.wg-place-slim {
   pointer-events: none;
 }
-.wg-place-mouse .wg-button,
-.wg-place-mouse .wg-card-close {
+.wg-place-slim .wg-button,
+.wg-place-slim .wg-card-close {
   display: none;
 }
 
