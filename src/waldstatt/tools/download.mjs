@@ -1,5 +1,6 @@
-// Downloads swisstopo's GeoPackages for waters.mjs once and keeps them, unzipped,
-// in node_modules/.cache/waldstatt-games-waters. Unzipping needs `unzip`.
+// Downloads the data for waters.mjs once and keeps it, unzipped, in
+// node_modules/.cache/waldstatt-games-waters: swisstopo's GeoPackages and
+// BAFU's stream orders. Unzipping needs `unzip`.
 import { spawnSync } from "node:child_process";
 import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, rename } from "node:fs/promises";
@@ -10,10 +11,10 @@ import { pipeline } from "node:stream/promises";
 export const cache = path.resolve("node_modules/.cache/waldstatt-games-waters");
 
 /**
- * The path of a GeoPackage from a zip at `url`, downloaded and unzipped if it
- * is not in the cache yet. `file` is the GeoPackage's name inside the zip.
+ * The path of a file from a zip at `url`, downloaded and unzipped if it is
+ * not in the cache yet. `file` is the file's name inside the zip.
  */
-export async function geoPackage(url, file) {
+export async function unzipped(url, file) {
   const target = path.join(cache, file);
   if (existsSync(target)) return target;
   await mkdir(cache, { recursive: true });

@@ -27,7 +27,7 @@ the map. Its folder `src/waldstatt/` holds:
 | `Forest.astro` | The still picture: the start of the generated forest as SVG, shown until the game is ready and instead of it |
 | `Icon.astro`, `icons.ts` | Pixel icons as colour grids for the toolbox, the Waldmensch's portrait and the app icon |
 | `png.ts` | A small PNG encoder for the app icons at build time |
-| `tools/waters.mjs`, `tools/gpkg.mjs`, `tools/download.mjs` | Generate the water data from swisstopo's GeoPackages; see below |
+| `tools/waters.mjs`, `tools/gpkg.mjs`, `tools/shapefile.mjs`, `tools/download.mjs` | Generate the water data from swisstopo's GeoPackages and BAFU's stream orders; see below |
 | `game/waters.ts` | Generated: the index of the water pages (which have a file, which lie wholly in Switzerland), the Sihlsee basin, the dam's site and the page format |
 | `data/water-pages.json` | Generated: Switzerland's waters and border in pages of 10 × 10 km, in tiles; one long line, ignored by Prettier |
 | `game/config.ts` | The balance table: costs, footprints, build times, speeds, stock limits, the hidden texts and where they lie |
@@ -58,9 +58,9 @@ Alp's west bank. The map is isometric: tiles are 2:1
 diamonds, so north lies to the upper right. The forest is generated per tile
 from a fixed seed, mostly firs with patches of broadleaf trees, so every visitor
 starts in the same forest and only changes are saved. The map covers all of
-Switzerland, and its waters are real, from swissTLM3D: every watercourse 7 km
-long or more, whole from source to mouth, and the natural lakes from 0.03 km².
-Rivers from 14 km long are drawn wide, the others as brooks, as layered blue
+Switzerland, and its waters are real, from swissTLM3D: rivers and brooks from
+Strahler stream order 5 on, after BAFU, and the natural lakes from 0.03 km².
+Rivers from order 6 on are drawn wide, the others as brooks, as layered blue
 strokes with sandy banks; lakes as their shores. The Sihlsee is a reservoir, so
 it is only a basin: until the visitor's dam floods it, the Sihl and its brooks
 run through the valley along the lake axes the data records. Other reservoirs,
@@ -69,7 +69,7 @@ national border is a wooden palisade, with gaps only where water crosses it;
 beyond it lies the land abroad, bare and dim, where nobody walks or builds.
 
 The waters come in pages of 10 × 10 km (200 × 200 tiles), one file each, about
-2 kB gzipped and at most 7 kB. The pages round Einsiedeln and round the saved
+1 kB gzipped and at most 3 kB. The pages round Einsiedeln and round the saved
 view load before the game starts, as the hidden texts are placed by them;
 others load, four at a time, when a chunk of ground in them comes into view.
 A page is rasterized into tiles once it arrives: water, the lake each tile
@@ -85,14 +85,19 @@ most.
 
 **The water data.** `node src/waldstatt/tools/waters.mjs`
 downloads swisstopo's swissTLM3D (about 5 GB zipped, 11 GB unzipped) and
-swissBOUNDARIES3D as GeoPackages from data.geo.admin.ch, once, into
+swissBOUNDARIES3D as GeoPackages from data.geo.admin.ch, and BAFU's
+«Flussordnungszahl nach Strahler» (FLOZ, a shapefile, open use), once, into
 `node_modules/.cache/waldstatt-games-waters/`; unzipping needs `unzip`. It
-reads them with Node's built-in `node:sqlite` and writes `game/waters.ts` and
-`data/water-pages.json` in a few seconds. Watercourses are chosen by their
-length, summed over their water body number (`gewiss_nr`), and their pieces,
-culverts included, are joined into lines whichever way each was drawn; stream
-order is not used, as the data records none and computing it over braided
-channels, canals and lake axes inflates it. Lake areas are the land cover's
+reads them with Node's built-in `node:sqlite` and a small shapefile reader and
+writes `game/waters.ts` and `data/water-pages.json` in about 15 seconds.
+swissTLM3D records no stream order, and computing one over its braided
+channels, canals and lake axes inflates it; BAFU computed FLOZ on the older
+VECTOR25 network. So each piece of swissTLM3D takes the order of the nearest
+FLOZ segment of the same watercourse, matched by its water body number
+(`gewiss_nr`, `GEWISSNR`) at the piece's midpoint; a watercourse FLOZ does not
+know takes the order of a river within 60 m. Kept pieces, culverts included,
+are joined into lines per watercourse and width, whichever way each was
+drawn. Lake areas are the land cover's
 standing waters, named after the shore lines that cover the same box; a lake
 with a Staudamm or Staumauer within 100 m of its shore is a reservoir. The
 border is Switzerland's area without Liechtenstein, with Büsingen and Campione
@@ -100,7 +105,7 @@ as holes. Everything is simplified (rivers to 12.5 m, lakes to 17.5 m, the
 border to 25 m), rounded to a tenth of a tile and cut into pages; lines reach
 two tiles past their page so strokes meet at its edges. The endpoint
 `waters/[page].json.ts` serves each page as its own file. The site itself never
-contacts swisstopo. The game's menu credits swisstopo.
+contacts swisstopo or BAFU. The game's menu credits both.
 
 **Play.** The tools lie on the ground and are picked up with a tap: the axe
 in the first clearing, beside the Waldmensch; the saw, once a hut stands and
@@ -231,7 +236,7 @@ and the previews play no demonstration. Screen-reader users and search engines c
 content: accepted in ADR 0002. The page weighs about
 10 kB of HTML, a 130 kB script (most of it PixiJS, which loads its WebGL parts
 as further chunks) and 20 kB of styles, gzipped; the water follows in pages of
-about 2 kB.
+about 1 kB.
 
 ## Routes
 

@@ -91,8 +91,9 @@ a stock limit. The app icons are pixel art encoded as PNG at build time.
   preview plays in 3D on the stage; tapping the stage turns the view top-down
   onto the 2D preview with its signs.
 - The map covers all of Switzerland with the detail it had around Einsiedeln,
-  from swisstopo's swissTLM3D: every watercourse from 7 km long, the natural
-  lakes, and the national border as a wooden palisade with bare land abroad.
+  from swisstopo's swissTLM3D: rivers and brooks from Strahler stream order 5
+  on, after BAFU, the natural lakes, and the national border as a wooden
+  palisade with bare land abroad.
   The water loads in pages of 10 × 10 km as it comes into view.
 
 This is a hobby project, so the pitch sets no appetite. The game should still

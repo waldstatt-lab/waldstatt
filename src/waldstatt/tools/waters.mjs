@@ -1,20 +1,21 @@
 // Generates the waters of Switzerland and its border for the Waldstatt, in game
-// tiles, from swisstopo's swissTLM3D (rivers, lakes, dams) and
-// swissBOUNDARIES3D (the border):
+// tiles, from swisstopo's swissTLM3D (rivers, lakes, dams), swissBOUNDARIES3D
+// (the border) and BAFU's stream orders after Strahler (FLOZ):
 //
 //   node src/waldstatt/tools/waters.mjs
 //
 // It writes ../game/waters.ts, the small index the page loads with the game,
 // and ../data/water-pages.json, one page per 10 km square, which the endpoint
 // src/pages/waters/[page].json.ts serves as separate files.
-// The GeoPackages (about 5 GB zipped, 11 GB unzipped) are downloaded once into
+// The data (about 5 GB zipped, 11 GB unzipped) is downloaded once into
 // node_modules/.cache/waldstatt-games-waters; unzipping needs `unzip`.
-// Data: © swisstopo.
+// Data: © swisstopo; stream orders: BAFU (open use).
 //
 // One tile is 50 m; tile (0, 0) is the Klosterplatz Einsiedeln, north is −y.
-// Watercourses 7 km long or more are kept whole, from source to mouth, as the
-// named rivers and brooks around Einsiedeln were before; shorter brooks are
-// left out. Natural lakes are kept from 0.03 km²; reservoirs, found by the
+// Rivers and brooks are kept from Strahler stream order 5 on. swissTLM3D
+// records no order, and BAFU computed it on the older VECTOR25 network, so
+// each piece of swissTLM3D takes the order of the nearest FLOZ piece of the
+// same watercourse (both carry its water body number). Natural lakes are kept from 0.03 km²; reservoirs, found by the
 // dams at their shores, are left out and their rivers run through along the
 // lake axes, except the Sihlsee, which stays the basin that the game's dam
 // floods.
@@ -22,8 +23,9 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import * as prettier from "prettier";
-import { geoPackage } from "./download.mjs";
+import { unzipped } from "./download.mjs";
 import { geometry } from "./gpkg.mjs";
+import { polylines, records } from "./shapefile.mjs";
 
 const here = (file) => fileURLToPath(new URL(file, import.meta.url));
 const indexFile = here("../game/waters.ts");
@@ -33,9 +35,9 @@ const origin = [2699650, 1220350];
 const metresPerTile = 50;
 /** Tiles per page side: 10 km. */
 const PAGE = 200;
-/** Watercourses kept, and those drawn wide rather than as brooks, by length. */
-const minLength = 7_000;
-const wideLength = 14_000;
+/** Stream orders kept, and from which on rivers are drawn wide, not as brooks. */
+const minOrder = 5;
+const wideOrder = 6;
 const minLakeArea = 30_000;
 const basinName = "Sihlsee";
 
@@ -203,14 +205,14 @@ function clipLine(line, r) {
 // --- Sources ------------------------------------------------------------------
 
 const tlm = new DatabaseSync(
-  await geoPackage(
+  await unzipped(
     "https://data.geo.admin.ch/ch.swisstopo.swisstlm3d/swisstlm3d_2026-02/swisstlm3d_2026-02_2056_5728.gpkg.zip",
     "SWISSTLM3D_2026_LV95_LN02.gpkg",
   ),
   { readOnly: true },
 );
 const boundaries = new DatabaseSync(
-  await geoPackage(
+  await unzipped(
     "https://data.geo.admin.ch/ch.swisstopo.swissboundaries3d/swissboundaries3d_2026-01/swissboundaries3d_2026-01_2056_5728.gpkg.zip",
     "swissBOUNDARIES3D_1_5_LV95_LN02.gpkg",
   ),
@@ -356,46 +358,144 @@ const inReservoir = (x, y) =>
       inRing(x, y, r.ring),
   );
 
-// --- Rivers: whole watercourses from 7 km long ----------------------------------------
+// --- Rivers: stream orders from BAFU on swissTLM3D's lines ------------------------------
 
-console.log("Rivers …");
-const rows = () =>
-  tlm
-    .prepare(
-      "select id, objektart, verlauf, name, gewiss_nr, geom from tlm_gewaesser_fliessgewaesser where objektart in ('Fliessgewaesser', 'Seeachse') and gewiss_nr is not null",
-    )
-    .iterate();
-const lengths = new Map();
-for (const row of rows()) {
-  if (row.objektart !== "Fliessgewaesser") continue;
-  const line = geometry(row.geom).lines[0];
-  let length = 0;
+console.log("Stream orders …");
+const flozUrl =
+  "https://www.bafu.admin.ch/dam/de/sd-web/beh3IJKG3bLy/flussordnungszahlenflozfuerdasdigitalegewaessernetzderschweiz.zip";
+const flozLines = await polylines(await unzipped(flozUrl, "FLOZ.shp"));
+const flozRecords = await records(await unzipped(flozUrl, "FLOZ.dbf"), [
+  "FLOZ",
+  "GEWISSNR",
+]);
+// The highest order of each watercourse, to skip those that never reach minOrder.
+const maxOrder = new Map();
+flozRecords.forEach((r) => {
+  const water = Number(r.GEWISSNR);
+  maxOrder.set(water, Math.max(maxOrder.get(water) ?? 0, Number(r.FLOZ)));
+});
+// FLOZ's segments in 500 m cells: by watercourse, and those from minOrder on
+// for pieces whose watercourse FLOZ does not know.
+const CELL = 500;
+const cellKey = (water, e, n) =>
+  `${water}|${Math.floor(e / CELL)},${Math.floor(n / CELL)}`;
+const cells = new Map();
+const addToCell = (k, segment) => {
+  const list = cells.get(k);
+  if (list) list.push(segment);
+  else cells.set(k, [segment]);
+};
+flozLines.forEach((lines, i) => {
+  if (!lines) return;
+  const order = Number(flozRecords[i].FLOZ);
+  const water = Number(flozRecords[i].GEWISSNR);
+  const own = (maxOrder.get(water) ?? 0) >= minOrder;
+  if (!own && order < minOrder) return;
+  for (const line of lines)
+    for (let j = 1; j < line.length; j++) {
+      const [ax, ay] = line[j - 1];
+      const [bx, by] = line[j];
+      const segment = { order, ax, ay, bx, by };
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      if (own) addToCell(cellKey(water, mx, my), segment);
+      if (order >= minOrder) addToCell(cellKey("*", mx, my), segment);
+    }
+});
+const toSegment = (px, py, s) => {
+  const dx = s.bx - s.ax;
+  const dy = s.by - s.ay;
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((px - s.ax) * dx + (py - s.ay) * dy) / (dx * dx + dy * dy || 1),
+    ),
+  );
+  return Math.hypot(px - (s.ax + t * dx), py - (s.ay + t * dy));
+};
+/** The order of the nearest FLOZ segment of `water` within `reach` cells, and its distance. */
+function nearest(water, e, n, reach) {
+  const cx = Math.floor(e / CELL);
+  const cy = Math.floor(n / CELL);
+  let best = { order: 0, d: Infinity };
+  for (let y = cy - reach; y <= cy + reach; y++)
+    for (let x = cx - reach; x <= cx + reach; x++)
+      for (const s of cells.get(`${water}|${x},${y}`) ?? []) {
+        const d = toSegment(e, n, s);
+        if (d < best.d) best = { order: s.order, d };
+      }
+  return best;
+}
+/**
+ * A swissTLM3D piece's order: from its own watercourse, or, for one FLOZ does
+ * not know (newer, or without a number), from a river within 60 m.
+ */
+function orderOf(water, line) {
+  // The point halfway along the piece.
+  let total = 0;
   for (let i = 1; i < line.length; i++)
-    length += Math.hypot(
+    total += Math.hypot(
       line[i][0] - line[i - 1][0],
       line[i][1] - line[i - 1][1],
     );
-  lengths.set(row.gewiss_nr, (lengths.get(row.gewiss_nr) ?? 0) + length);
+  let walked = 0;
+  let mid = line[0];
+  for (let i = 1; i < line.length; i++) {
+    const step = Math.hypot(
+      line[i][0] - line[i - 1][0],
+      line[i][1] - line[i - 1][1],
+    );
+    if (walked + step >= total / 2) {
+      const t = (total / 2 - walked) / (step || 1);
+      mid = [
+        line[i - 1][0] + (line[i][0] - line[i - 1][0]) * t,
+        line[i - 1][1] + (line[i][1] - line[i - 1][1]) * t,
+      ];
+      break;
+    }
+    walked += step;
+  }
+  // A watercourse FLOZ knows keeps its own orders, even below minOrder, so a
+  // brook's mouth does not take the river's.
+  if (maxOrder.has(water)) {
+    if ((maxOrder.get(water) ?? 0) < minOrder) return 0;
+    const own = nearest(water, mid[0], mid[1], 2);
+    return own.d < 1000 ? own.order : 0;
+  }
+  const any = nearest("*", mid[0], mid[1], 1);
+  return any.d < 60 ? any.order : 0;
 }
-// Whole watercourses, culverts included so they stay unbroken, and the lake
-// axes only where a reservoir is left out, so the river runs through its
-// valley.
+
+console.log("Rivers …");
+// Culverts included, so rivers stay unbroken, and the lake axes only where a
+// reservoir is left out, so the river runs through its valley.
 const pieces = [];
-for (const row of rows()) {
-  const length = lengths.get(row.gewiss_nr) ?? 0;
-  if (length < minLength) continue;
-  const line = geometry(row.geom).lines[0].map(toTile);
+const orders = {};
+for (const row of tlm
+  .prepare(
+    "select objektart, name, gewiss_nr, geom from tlm_gewaesser_fliessgewaesser where objektart in ('Fliessgewaesser', 'Seeachse')",
+  )
+  .iterate()) {
+  const raw = geometry(row.geom).lines[0];
+  const order = orderOf(row.gewiss_nr ?? -1, raw);
+  orders[order] = (orders[order] ?? 0) + 1;
+  if (order < minOrder) continue;
+  const line = raw.map(toTile);
   if (row.objektart === "Seeachse") {
     const [mx, my] = line[Math.floor(line.length / 2)];
     if (!inReservoir(mx, my)) continue;
   }
+  const wide = order >= wideOrder;
   pieces.push({
-    water: row.gewiss_nr,
+    // Joined only with pieces of the same watercourse and width.
+    water: `${row.gewiss_nr ?? `n${row.name}`}:${wide}`,
     name: local(row.name),
-    wide: length >= wideLength,
+    wide,
     line,
   });
 }
+console.log("  swissTLM3D pieces by order", orders);
 // Joins the pieces of one watercourse end to end, whichever way each was
 // drawn, wherever exactly two of them meet. Half a metre is close enough.
 const pointKey = ([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`;
@@ -440,7 +540,7 @@ const rivers = joined
   .map((r) => ({ ...r, points: round(simplify(r.points, 0.25)) }))
   .filter((r) => r.points.length >= 2);
 console.log(
-  `  ${[...lengths.values()].filter((l) => l >= minLength).length} watercourses, ${rivers.length} lines, ${rivers.reduce((n, r) => n + r.points.length, 0)} points`,
+  `  ${rivers.length} lines, ${rivers.reduce((n, r) => n + r.points.length, 0)} points`,
 );
 
 // --- The dam's site: where the Sihl leaves the basin at its north end -------------------
