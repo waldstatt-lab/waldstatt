@@ -4,6 +4,8 @@ status: accepted
 date: 2026-11-18
 amends:
   - 0003-save-the-waldstatt-in-indexeddb.md
+amended-by:
+  - 0005-keep-the-waldstatt-keymap-in-a-settings-database.md
 sources:
   - src/waldstatt/game/saves.ts
   - src/waldstatt/game/savesDialog.ts
@@ -13,6 +15,11 @@ sources:
 ---
 
 # 0004 — Keep named Waldstatt saves in a database of their own, and as files
+
+**Amended by [ADR 0005](0005-keep-the-waldstatt-keymap-in-a-settings-database.md):**
+the keymap lives in a third database, `waldstatt-games-settings`, which
+«Neu beginnen» and loading leave alone; the tell's list of database names
+grows by it.
 
 ## Context
 

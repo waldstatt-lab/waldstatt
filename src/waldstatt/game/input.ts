@@ -4,11 +4,15 @@
  * fingers or another mouse button pan; while placing, a drag that starts on
  * the building being placed moves it); pinching and the wheel zoom; a tap is
  * a short press without movement. Keys are handled only while the map has
- * focus: arrows or h j k l move the cursor one tile along the squares'
- * edges, again and again while held, and the view glides after it; with
- * Shift they pan smoothly; + and − zoom; v starts a rectangle (the saw's or
- * paving's) at the cursor; Enter or Space applies; Escape cancels.
+ * focus, by the keymap (keys.ts): the movement keys (arrows, h j k l and
+ * s e i u by default) move the cursor one tile along the squares' edges,
+ * again and again while held, and the view glides after it; digits typed
+ * before give a count, so «10» and then → moves ten tiles; with Shift they
+ * pan smoothly; + and − zoom; v starts a selection (the saw's or paving's)
+ * at the cursor and o jumps to its other corner; Enter or Space applies;
+ * Escape drops a count or cancels.
  */
+import { actionFor, directions, isModifier, normal } from "./keys";
 import type { Renderer } from "./render";
 
 export interface Tile {
@@ -36,6 +40,13 @@ export interface MapHandlers {
   activate(tile: Tile): void;
   /** v: a rectangle starts at the cursor, for the saw or paving. */
   visual(tile: Tile): void;
+  /**
+   * o: the selection's corners swap; returns the corner the cursor jumps
+   * to, or null without a selection.
+   */
+  other(tile: Tile): Tile | null;
+  /** The count typed before a movement, or null once it is used or dropped. */
+  count(n: number | null): void;
   cancel(): void;
   /** The view moved, e.g. to save the camera. */
   moved(): void;
@@ -198,27 +209,31 @@ export function attachInput(
     }
   });
 
-  /** The steps along the tiles, by key; with Shift, the directions to pan on screen. */
-  const directions: Record<string, [number, number]> = {
-    ArrowLeft: [-1, 0],
-    ArrowRight: [1, 0],
-    ArrowUp: [0, -1],
-    ArrowDown: [0, 1],
-    h: [-1, 0],
-    l: [1, 0],
-    k: [0, -1],
-    j: [0, 1],
-  };
-  /** The keys held to move the cursor or pan, and since when. */
-  const held = new Map<string, { pan: boolean; since: number; next: number }>();
+  /** The keys held to move the cursor or pan, which way, and since when. */
+  const held = new Map<
+    string,
+    { d: [number, number]; pan: boolean; since: number; next: number }
+  >();
   let loop = 0;
   let last = 0;
+  /** The count typed before a movement, such as 10 for «10» and then →. */
+  let count = 0;
+  const maxCount = 9999;
 
-  const step = (direction: [number, number]) => {
+  const setCount = (n: number) => {
+    if (n === count) return;
+    count = n;
+    handlers.count(n || null);
+  };
+
+  const step = (direction: [number, number], by = 1) => {
     cursor ??= centreTile();
-    // Along the squares' edges, one tile at a time, so every tile is
-    // reached: → and ← along x, ↑ and ↓ along y.
-    cursor = { x: cursor.x + direction[0], y: cursor.y + direction[1] };
+    // Along the squares' edges, so every tile is reached: → and ← along x,
+    // ↑ and ↓ along y.
+    cursor = {
+      x: cursor.x + direction[0] * by,
+      y: cursor.y + direction[1] * by,
+    };
     keepInView(cursor);
     handlers.cursor(cursor);
   };
@@ -229,14 +244,12 @@ export function attachInput(
     last = now;
     let panX = 0;
     let panY = 0;
-    for (const [key, h] of held) {
-      const d = directions[key.length === 1 ? key.toLowerCase() : key];
-      if (!d) continue;
+    for (const h of held.values()) {
       if (h.pan) {
-        panX += d[0];
-        panY += d[1];
+        panX += h.d[0];
+        panY += h.d[1];
       } else if (now >= h.next) {
-        step(d);
+        step(h.d);
         // A pause after the first step, then steady steps.
         h.next = now + (now - h.since < 100 ? 220 : 85);
       }
@@ -248,12 +261,6 @@ export function attachInput(
     loop = held.size ? requestAnimationFrame(tick) : 0;
   };
 
-  const release = (key: string) => {
-    held.delete(key);
-    held.delete(key.toLowerCase());
-    held.delete(key.toUpperCase());
-  };
-
   host.addEventListener("keydown", (event) => {
     // Keys on something inside the map, such as a link in a text, are theirs.
     if (event.target !== host) return;
@@ -262,50 +269,77 @@ export function attachInput(
       event.preventDefault();
       return;
     }
-    const direction =
-      directions[event.key.length === 1 ? event.key.toLowerCase() : event.key];
+    // Digits make a count for the next movement; a lone 0 is nothing.
+    // (Shift is allowed: some layouts, such as AZERTY, need it for digits.)
+    if (/^[0-9]$/.test(event.key)) {
+      if (event.key !== "0" || count)
+        setCount(Math.min(maxCount, count * 10 + Number(event.key)));
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "Escape") {
+      // Escape drops a count first, as in vim.
+      if (count) setCount(0);
+      else handlers.cancel();
+      return;
+    }
+    const action = actionFor(event.key);
+    const direction = action && directions[action];
     if (direction) {
       event.preventDefault();
+      const by = count || 1;
+      setCount(0);
       // The keyboard's own repeat is ignored: the loop sets the pace.
-      if (event.repeat || held.has(event.key)) return;
+      const key = normal(event.key);
+      if (event.repeat || held.has(key)) return;
       const now = performance.now();
       const pan = event.shiftKey;
-      held.set(event.key, { pan, since: now, next: now + 220 });
-      if (!pan) step(direction);
+      held.set(key, { d: direction, pan, since: now, next: now + 220 });
+      if (!pan) step(direction, by);
       if (!loop) {
         last = now;
         loop = requestAnimationFrame(tick);
       }
       return;
     }
-    if (event.key === "+" || event.key === "=") {
+    // Any other key drops the count.
+    if (!isModifier(event.key)) setCount(0);
+    if (action === "zoomIn") {
       event.preventDefault();
       zoomCentre(1.25);
-    } else if (event.key === "-" || event.key === "_") {
+    } else if (action === "zoomOut") {
       event.preventDefault();
       zoomCentre(0.8);
-    } else if (event.key === "v") {
+    } else if (action === "visual") {
       event.preventDefault();
       cursor ??= centreTile();
       handlers.cursor(cursor);
       handlers.visual(cursor);
-    } else if (event.key === "Enter" || event.key === " ") {
+    } else if (action === "other") {
+      event.preventDefault();
+      cursor ??= centreTile();
+      const to = handlers.other(cursor);
+      if (to) {
+        cursor = to;
+        keepInView(cursor);
+        handlers.cursor(cursor);
+      }
+    } else if (action === "apply") {
       event.preventDefault();
       cursor ??= centreTile();
       handlers.cursor(cursor);
       handlers.activate(cursor);
-    } else if (event.key === "Escape") {
-      handlers.cancel();
     }
   });
 
   host.addEventListener("keyup", (event) => {
-    release(event.key);
+    held.delete(normal(event.key));
     if (event.key === "Shift") for (const h of held.values()) h.pan = false;
     if (event.target === host) handlers.key(event, false);
   });
   host.addEventListener("blur", () => {
     held.clear();
+    setCount(0);
     handlers.release();
   });
 
@@ -351,6 +385,15 @@ export function attachInput(
     cursor: () => cursor,
     clearCursor() {
       cursor = null;
+    },
+    /**
+     * Moves the keyboard cursor with a jump of the view, such as to the
+     * first clearing or onto a text; nothing while only a pointer is used.
+     */
+    follow(tile: Tile) {
+      if (!cursor) return;
+      cursor = { ...tile };
+      handlers.cursor(cursor);
     },
   };
 }

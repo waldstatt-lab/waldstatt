@@ -236,6 +236,12 @@ export class WorldLayer {
     return this.games.find((g) => g.id === id);
   }
 
+  /** A found text's readable ink and its copy for cobbles, for the text mode. */
+  inks(key: string): { light: HTMLElement; dark: HTMLElement } | null {
+    const find = this.finds.get(key);
+    return find ? { light: find.light, dark: find.dark } : null;
+  }
+
   title(t: HiddenText): string {
     return textTitle(t.kind, this.gameInfo(t.game));
   }

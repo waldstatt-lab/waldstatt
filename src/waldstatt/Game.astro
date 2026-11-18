@@ -63,14 +63,9 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
     aria-describedby="wg-map-help"
     hidden
   ></div>
-  <p id="wg-map-help" hidden>
-    Pfeiltasten oder h, j, k, l bewegen die Auswahl, mit Umschalt verschieben
-    sie die Karte; Plus und Minus zoomen. Die Eingabetaste wendet das Werkzeug
-    an oder tippt an, was unter der Auswahl liegt; v beginnt ein Rechteck für
-    Säge oder Pflaster. a, s, p und x wählen Axt, Säge, Pflastern und Abreissen,
-    b öffnet Bauen, m das Menü, Schrägstrich springt zum Start oder zu
-    gefundenen Schriften, Doppelpunkt Befehle. Escape bricht ab.
-  </p>
+  <!-- The keys from the keymap, written by ui.ts. -->
+  <p id="wg-map-help" data-map-help hidden></p>
+  <p class="wg-panel wg-count" data-count aria-hidden="true" hidden></p>
 
   <div class="wg-panel wg-resources" data-resources data-ready-show hidden>
     <p class="wg-name">{meta.name}</p>
@@ -161,11 +156,12 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
           Neu beginnen …
         </button>
       </li>
-      <li class="wg-keys">
-        Tasten: a Axt · s Säge · p Pflastern · x Abreissen · b Bauen · m Menü ·
-        v Auswahl · / Start und Schriften · : Befehle, auch «wälder» · h j k l
-        bewegen
+      <li>
+        <button type="button" class="wg-button" data-act="keys">
+          Tasten …
+        </button>
       </li>
+      <li class="wg-keys" data-keys-help></li>
       <li class="wg-credit">
         Gewässer und Landesgrenze: Bundesamt für Landestopografie swisstopo
         (swissTLM3D, swissBOUNDARIES3D); Flussordnungszahlen: Bundesamt für
@@ -305,6 +301,30 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
       />
     </div>
     <p class="wg-saves-status" data-saves-status></p>
+    <form method="dialog" class="wg-actions">
+      <button class="wg-button">Schliessen</button>
+    </form>
+  </dialog>
+
+  <dialog
+    class="wg-dialog wg-keymap"
+    data-keys
+    aria-labelledby="wg-keymap-title"
+  >
+    <h2 id="wg-keymap-title">Tasten</h2>
+    <p>
+      Eine Aktion kann mehrere Tasten haben, eine Taste gehört zu einer Aktion.
+      Im Text gelten eigene Tasten: Sie gehen dort vor, und Umschalt zählt, «G»
+      ist nicht «g». Escape, Tab und die Ziffern bleiben fest: Ziffern vor einer
+      Bewegung, wie «10» und dann «→», bewegen so viele Felder oder Zeilen weit.
+    </p>
+    <div class="wg-keymap-groups" data-keys-list></div>
+    <p class="wg-keymap-status" data-keys-status></p>
+    <div class="wg-actions">
+      <button type="button" class="wg-button" data-keys-reset>
+        Standard …
+      </button>
+    </div>
     <form method="dialog" class="wg-actions">
       <button class="wg-button">Schliessen</button>
     </form>

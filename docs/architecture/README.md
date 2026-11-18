@@ -50,7 +50,10 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/render.ts` | PixiJS: the ground in tile units under the view's projection (textured tiles in chunks of 16 × 16 with gaps where found texts lie, rivers, lakes, the top-down art, the stage, placing, sawing and cursor overlays), and trees, buildings, Waldleute and the tools on the ground upright on top, sorted back to front, with the ravens and the motes over hidden texts above; the camera's flights and the turn between the views |
 | `game/overlay.ts` | The HTML lying on the map under the same projection: found texts under the canvas; upright pins for water names, Einsiedeln and status labels; and the measuring of texts that sets their footprint |
 | `game/stage.ts` | The theatre's stage in two canvases: the preview standing on the stage in 3D for the isometric view, and, turned top-down, the preview in 2D with a status line and wooden signs for the programme, the keys and the real game, on the amphitheatre's floor |
-| `game/input.ts` | Pointer, touch, wheel and keyboard input on the map |
+| `game/input.ts` | Pointer, touch, wheel and keyboard input on the map, with counts before a movement |
+| `game/keys.ts` | The keymap ([ADR 0005](decisions/0005-keep-the-waldstatt-keymap-in-a-settings-database.md)): each action's keys, the defaults, conflict checks, and keeping it in the database `waldstatt-games-settings` |
+| `game/keysDialog.ts` | The dialog «Tasten»: each action's keys, removing one, adding the next key pressed, and the defaults |
+| `game/textCursor.ts` | The text mode on a text read top-down, as vim's normal and visual modes: a block cursor moved by characters, lines, words, gg and G with counts, selections by character (v) or line (V), o, and copying, drawn as CSS highlights |
 | `game/ui.ts` | The HTML interface, reading on the map, and announcements |
 | `game/preview.ts`, `previewMoto.ts`, `previewCar.ts` | The previews' rules, copied from the studio website and repainted as a stage set, each with its scene in 2D and in 3D |
 | `game/main.ts` | Start-up, saving and the service worker registration |
@@ -351,7 +354,7 @@ Pages sites share one origin (the games save under `moto-devil/` and
 `car-drive/` in `localStorage`), so the save is validated on load, a broken
 save starts a new forest with a notice, and «Neu beginnen» deletes the
 database and any old keys starting with `waldstatt-games/`, but not the saved
-forests below. The installed app
+forests below nor the keymap in `waldstatt-games-settings` (ADR 0005). The installed app
 asks the browser to keep its storage. Each tab holds the database open; when
 one tab resets the forest or loads another, the others let go of it and stop
 saving, so they cannot write their old forest back, and say so. If the database does not open
@@ -394,18 +397,53 @@ opens the file picker straight from the key or tap, as browsers require. The
 finder knows the saved forests from the start of the page and after each
 change in the dialog; one saved in another tab shows after a reload.
 
-**Access.** The map is a focusable `role="application"`: arrow keys or h, j,
-k, l move a cursor tile along the squares' edges (→ and ← along x, ↑ and ↓
+**Access.** The map is a focusable `role="application"`. Keys follow a keymap
+that visitors change in the dialog «Tasten» (ADR 0005); by default arrow keys,
+h, j, k, l or s, e, i, u (the Neo layout's left, right, down, up) move a cursor
+tile along the squares' edges (→ and ← along x, ↑ and ↓
 along y, so every tile is reached), at an even pace while held, and the view glides after it once it leaves the middle half of the
-screen; with Shift they pan smoothly; + and − zoom; v starts a rectangle for
-the saw or paving at the cursor; Enter or Space applies the tool or opens a
-building, Escape cancels (`input.ts`). Anywhere outside text fields and
-dialogs, a, s, p and x choose Axt, Säge, Pflastern and Abreissen, b opens
-Bauen and m the menu, which lists these keys. «/» opens a finder over the
+screen; digits typed before a movement are a count, so «10» and then → moves
+ten tiles, and a badge shows the count until it is used or Escape drops it;
+with Shift they pan smoothly; + and − zoom; v starts a rectangle for
+the saw or paving at the cursor and o jumps to its other corner, as in vim;
+Enter or Space applies the tool or opens a
+building, Escape cancels (`input.ts`). Jumps of the view take the cursor
+along: to the first clearing (`/start`, `:lichtung`, the menu), and onto a
+text or the stage unless it is on it already. Turning back from a text leaves
+the cursor where it is: the view returns to where it was if the cursor did
+not move, and otherwise turns onto the cursor. Anywhere outside text fields and
+dialogs, a, g, p and x choose Axt, Säge, Pflastern and Abreissen, b opens
+Bauen and m the menu, which lists these keys and opens «Tasten». The map's
+description and the menu's list are written from the keymap. In «Tasten»,
+each action can have several keys, but a key only one action: adding a key
+another action has is refused, naming it. Escape, Tab, the digits and keys
+with Ctrl, Alt or Cmd cannot be bound.
+
+**Text mode.** On a text already read top-down (after «/», or Enter on it),
+Enter with the keyboard cursor on the text starts the text mode: the cursor
+becomes a text cursor, as in vim's normal mode (`textCursor.ts`), a block on
+the text's first character.
+By default h, j, k, l and the arrows move it by characters and lines, w, b and
+e by words, gg to the start and G to the last line, each as often as the
+count typed before («5gg» and «5G» go to the fifth line). v selects
+characters and V whole lines; o jumps to the selection's other end, y or
+Ctrl+C copies it and returns to the start of the selection. Escape steps back
+one level at a time: out of the selection, out of the text mode (the map
+cursor shows again), and then out of the top-down view. Lines are the lines as they wrap, found from
+the characters' boxes; a new block parts words. The view pans after the
+cursor. Lines and words reached are announced. The cursor and the selection
+are CSS highlights on both inks; a browser without them shows the document
+selection. The text mode's keys are a scope of their own in the keymap, where
+Shift counts, and go before the others while it is on: b moves back a word
+instead of opening Bauen. Map movement keys rest; zooming, the tools, the
+menus and the finders still work. With a mouse there is no text mode. The keymap is kept in the database
+`waldstatt-games-settings`, which resets and loading leave alone. A menu
+closed with Escape returns focus to where it was opened from: its button when
+clicked, the map when its key or the finder opened it. «/» opens a finder over the
 starting point (`start`) and the texts found so far and jumps to the one
 chosen; «:» one over commands:
 `tool:…` for the tools at hand, `build:…` for the buildings the menu shows,
-`lichtung`, `bauen`, `menü`, `wälder` and `neu-beginnen`, and `wald:…` for
+`lichtung`, `bauen`, `menü`, `wälder`, `tasten` and `neu-beginnen`, and `wald:…` for
 the saved forests (see below). Both match fuzzily, ignoring
 accents, and take arrows or Tab, Enter and Escape. While the view is turned onto the stage,
 the keys from the game's controls play it instead. Every tool, menu item and

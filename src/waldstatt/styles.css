@@ -538,6 +538,109 @@
   display: none;
 }
 
+/* The keymap (keysDialog.ts): each action with its keys, × and «+ Taste». */
+.wg-keymap {
+  width: min(36rem, calc(100vw - 1.5rem));
+  overflow: auto;
+}
+.wg-keymap h3 {
+  margin-bottom: 0.35rem;
+  font-family: var(--wg-serif);
+  font-weight: 700;
+}
+.wg-keymap-groups {
+  display: grid;
+  gap: 0.75rem;
+}
+.wg-keymap-list {
+  display: grid;
+  gap: 0.35rem;
+}
+.wg-keymap-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-wood-light);
+}
+.wg-keymap-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+@media (min-width: 40rem) {
+  .wg-keymap-row {
+    grid-template-columns: 11rem 1fr auto;
+  }
+  .wg-keymap-keys {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+.wg-keymap-key {
+  display: inline-flex;
+  align-items: center;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+}
+.wg-keymap-key kbd {
+  min-width: 1.75rem;
+  padding: 0.1rem 0.4rem;
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  text-align: center;
+}
+.wg-keymap-remove {
+  min-width: 2rem;
+  min-height: 2rem;
+  border-left: 2px solid var(--wg-wood-edge);
+  font-weight: 700;
+  cursor: pointer;
+}
+.wg-keymap-remove:hover {
+  background: var(--wg-parchment-dark);
+}
+.wg-keymap-none {
+  font-size: 0.875rem;
+  opacity: 0.85;
+}
+.wg-keymap .wg-keymap-add {
+  min-height: 2.25rem;
+  padding: 0.2rem 0.6rem;
+}
+.wg-keymap-status:empty {
+  display: none;
+}
+
+/* The text mode's cursor and selection on a text read top-down
+   (textCursor.ts), as CSS highlights over both inks. */
+::highlight(wg-visual) {
+  background-color: rgb(227 176 75 / 0.45);
+}
+::highlight(wg-caret) {
+  background-color: var(--wg-focus);
+  color: var(--wg-forest);
+}
+
+/* The count typed before a movement, as vim shows it. */
+.wg-count {
+  position: absolute;
+  right: max(0.75rem, env(safe-area-inset-right));
+  bottom: max(4.5rem, env(safe-area-inset-bottom));
+  min-width: 2.5rem;
+  padding: 0.25rem 0.6rem;
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  text-align: center;
+}
+
 /* --- Texts and the stage lying on the map --------------------------------- */
 
 /* The world layer is in tile units under the view's projection (overlay.ts);

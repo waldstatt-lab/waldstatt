@@ -9,7 +9,8 @@
  * Spielhaus with beer opens its game in a new tab, a ruin is repaired, other
  * buildings show a short status label, and tearing down takes a second tap.
  * Only «Neu beginnen» and the saved forests in the menu (savesDialog.ts) ask
- * first. Nodes are created with the DOM API, never from HTML strings.
+ * first. Keys follow the keymap (keys.ts), and the help texts list its keys.
+ * Nodes are created with the DOM API, never from HTML strings.
  */
 import { buildingPicture } from "./art";
 import {
@@ -27,8 +28,18 @@ import {
   type Kind,
 } from "./config";
 import type { MapHandlers, Tile } from "./input";
+import {
+  actionFor,
+  firstKey,
+  keyLabel,
+  keysOf,
+  keySpoken,
+  onChange as onKeysChange,
+  type Action,
+} from "./keys";
 import { PLAN } from "./iso";
 import type { WorldLayer } from "./overlay";
+import { TextCursor } from "./textCursor";
 import type { Renderer } from "./render";
 import {
   compass,
@@ -93,6 +104,11 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return element;
 }
 
+/** An action's first letter key, as vim names it, or else its first key. */
+const letterKey = (action: Action) =>
+  keysOf(action).find((key) => key.length === 1 && key !== " ") ??
+  firstKey(action);
+
 function need<T extends Element = HTMLElement>(
   root: ParentNode,
   selector: string,
@@ -113,6 +129,8 @@ export interface UiOptions {
   reset(): void;
   /** Opens the saved forests. */
   saves(): void;
+  /** Opens the keymap. */
+  keys(): void;
   /** The finder's commands for the saved forests. */
   saveCommands(): FinderItem[];
   moved(): void;
@@ -159,6 +177,21 @@ export class Ui {
     back: { x: number; y: number; zoom: number };
     /** The zoom the view turned to; well below it, the view turns back. */
     zoom: number;
+    /**
+     * The keyboard cursor before the view turned: while it stays there, the
+     * view turns back to where it was; moved, the view turns back onto it.
+     */
+    cursor: Tile | null;
+  } | null = null;
+  /**
+   * The text mode on a text read top-down with the keyboard (textCursor.ts),
+   * and whether its cursor shows yet.
+   */
+  private textMode: { cursor: TextCursor; shown: boolean } | null = null;
+  /** The map's keyboard cursor, once input is attached. */
+  private input: {
+    cursor(): Tile | null;
+    follow(tile: Tile): void;
   } | null = null;
   private suppliesDirty = true;
 
@@ -200,6 +233,8 @@ export class Ui {
     drawn: boolean;
   }[] = [];
   private menuGroups: { element: HTMLElement; kinds: Kind[] }[] = [];
+  /** Where focus goes back to when an open menu closes with Escape. */
+  private menuBack: HTMLElement | null = null;
 
   constructor(private o: UiOptions) {
     const root = o.root;
@@ -220,6 +255,20 @@ export class Ui {
     };
     this.attachFinder();
     this.attachShortcuts();
+    // Ctrl+C copies the text mode's selection, as y does.
+    document.addEventListener("copy", (event) => {
+      const text = this.textMode?.cursor.selectedText();
+      if (!text || document.activeElement !== this.mapHost()) return;
+      event.clipboardData?.setData("text/plain", text);
+      event.preventDefault();
+      this.announce("Kopiert.");
+    });
+    this.describeKeys();
+    onKeysChange(() => {
+      this.describeKeys();
+      // The placing card names the key that builds.
+      if (this.placing?.at) this.ghostAt(this.placing.at);
+    });
 
     for (const button of this.toolbox.querySelectorAll<HTMLButtonElement>(
       "[data-tool]",
@@ -242,7 +291,8 @@ export class Ui {
         "[data-act]",
       )?.dataset.act;
       if (!action) return;
-      if (action !== "zoom-in" && action !== "zoom-out") this.closeMenus();
+      // Back to where the menu was opened from, so a dialog returns there too.
+      if (action !== "zoom-in" && action !== "zoom-out") this.closeMenus(true);
       this.menuAction(action);
     });
     need(this.backBar, "button").addEventListener("click", () =>
@@ -452,6 +502,11 @@ export class Ui {
     set(card.note, note);
   }
 
+  /** The map's input, so that jumps of the view take the cursor along. */
+  useInput(input: { cursor(): Tile | null; follow(tile: Tile): void }) {
+    this.input = input;
+  }
+
   private mapHost(): HTMLElement {
     return need(this.o.root, "[data-map]");
   }
@@ -471,6 +526,9 @@ export class Ui {
 
   frame() {
     const r = this.o.renderer;
+    // The text cursor shows once the view has turned onto the text.
+    if (this.textMode && !this.textMode.shown && !r.flying)
+      this.textMode.shown = this.textMode.cursor.show();
     if (this.reading && !r.flying) {
       // Zooming in and out a little stays in the plan; only from a certain
       // height, half the reading zoom, does the view turn back to the map.
@@ -548,10 +606,21 @@ export class Ui {
     this.announce(names[this.tool]);
   }
 
-  private toggleMenu(menu: HTMLElement, button: HTMLButtonElement) {
+  /**
+   * Opens or closes a menu. Escape closes it and returns focus to `back`:
+   * the button when it was clicked, the map when a key or the finder
+   * opened it from there.
+   */
+  private toggleMenu(
+    menu: HTMLElement,
+    button: HTMLButtonElement,
+    back: HTMLElement = button,
+  ) {
     const open = menu.hidden;
-    this.closeMenus();
+    // Closed by its key from inside, focus goes back as with Escape.
+    this.closeMenus(!open && menu.contains(document.activeElement));
     if (!open) return;
+    this.menuBack = back;
     if (menu === this.buildMenu) {
       this.o.game.state.fresh = false;
       this.unlocked();
@@ -572,13 +641,82 @@ export class Ui {
         this.toolbox,
         `[data-open=${name}]`,
       );
-      if (!menu.hidden && focusButton) button.focus();
+      if (!menu.hidden && focusButton) {
+        const back = this.menuBack;
+        // Not into the menu itself, nor onto something gone or hidden.
+        if (back?.isConnected && back.getClientRects().length)
+          back.focus({ preventScroll: true });
+        else button.focus();
+      }
       menu.hidden = true;
       button.setAttribute("aria-expanded", "false");
     }
   }
 
   // --- Keyboard shortcuts and the finder ----------------------------------------
+
+  /**
+   * Writes the keys into the map's description for screen readers and into
+   * the menu's list, from the keymap, again after each change.
+   */
+  private describeKeys() {
+    const said = (a: Action) =>
+      keysOf(a).map(keySpoken).join(" oder ") || "keine Taste";
+    need(this.o.root, "[data-map-help]").textContent = [
+      `${said("left")}, ${said("right")}, ${said("up")} und ${said("down")} bewegen die Auswahl nach links, rechts, oben und unten; Ziffern davor bewegen so viele Felder weit, mit Umschalt verschieben sie die Karte.`,
+      `${said("zoomIn")} und ${said("zoomOut")} zoomen.`,
+      `${said("apply")} wendet das Werkzeug an oder tippt an, was unter der Auswahl liegt; ${said("visual")} beginnt ein Rechteck für Säge oder Pflaster, ${said("other")} springt zu seiner anderen Ecke.`,
+      `${said("axe")}, ${said("saw")}, ${said("pave")} und ${said("demolish")} wählen Axt, Säge, Pflastern und Abreissen, ${said("build")} öffnet Bauen, ${said("menu")} das Menü, ${said("texts")} springt zum Start oder zu gefundenen Schriften, ${said("commands")} öffnet Befehle.`,
+      `Liest du eine Schrift von oben, macht ${said("apply")} auf ihr die Auswahl zum Textcursor, bis Escape: ${said("textLeft")}, ${said("textRight")}, ${said("textUp")} und ${said("textDown")} bewegen ihn um Zeichen und Zeilen, ${said("wordNext")}, ${said("wordBack")} und ${said("wordEnd")} um Wörter, zweimal ${said("textStart")} zum Anfang, ${said("textEnd")} zur letzten Zeile, Ziffern davor so oft; ${said("textVisual")} wählt Zeichen aus, ${said("textVisualLine")} Zeilen, ${said("textOther")} springt zum anderen Ende, ${said("textCopy")} kopiert.`,
+      "Escape bricht ab. Im Menü unter «Tasten» lassen sich die Tasten ändern.",
+    ].join(" ");
+    const keys = (a: Action) => keysOf(a).map(keyLabel).join(" ");
+    const moves = (["left", "right", "up", "down"] as const)
+      .map(keys)
+      .filter(Boolean);
+    const short: [Action, string][] = [
+      ["visual", "Auswahl"],
+      ["other", "andere Ecke"],
+      ["axe", "Axt"],
+      ["saw", "Säge"],
+      ["pave", "Pflastern"],
+      ["demolish", "Abreissen"],
+      ["build", "Bauen"],
+      ["menu", "Menü"],
+      ["texts", "Start und Schriften"],
+      ["commands", "Befehle"],
+    ];
+    need(this.o.root, "[data-keys-help]").textContent = [
+      ...(moves.length
+        ? [`${moves.join(", ")} bewegen, Ziffern davor so weit`]
+        : []),
+      ...short
+        .filter(([a]) => keysOf(a).length)
+        .map(([a, n]) => `${keys(a)} ${n}`),
+      `im Text: ${(
+        [
+          "textLeft",
+          "textDown",
+          "textUp",
+          "textRight",
+          "wordNext",
+          "wordBack",
+          "wordEnd",
+          "textStart",
+          "textEnd",
+          "textVisual",
+          "textVisualLine",
+          "textOther",
+          "textCopy",
+        ] as const
+      )
+        .map((a) => (a === "textStart" ? letterKey(a).repeat(2) : letterKey(a)))
+        .filter(Boolean)
+        .join(" ")}`,
+    ]
+      .join(" · ")
+      .replace(/^/, "Tasten: ");
+  }
 
   /**
    * Letters for the tools and menus, as long as nothing else takes them: a
@@ -593,17 +731,23 @@ export class Ui {
       if (!this.finder.element.hidden || this.reading?.stage) return;
       const button = (name: string) =>
         need<HTMLButtonElement>(this.toolbox, `[data-open=${name}]`);
-      const actions: Record<string, () => void> = {
-        a: () => this.setTool("axe"),
-        s: () => this.setTool("saw"),
-        p: () => this.setTool("pave"),
-        x: () => this.setTool("demolish"),
-        b: () => this.toggleMenu(this.buildMenu, button("build")),
-        m: () => this.toggleMenu(this.mainMenu, button("menu")),
-        "/": () => this.openFinder("/"),
-        ":": () => this.openFinder(":"),
+      // Escape on a menu opened by key returns where the key was pressed.
+      const back =
+        target instanceof HTMLElement && target !== document.body
+          ? target
+          : this.mapHost();
+      const actions: Partial<Record<Action, () => void>> = {
+        axe: () => this.setTool("axe"),
+        saw: () => this.setTool("saw"),
+        pave: () => this.setTool("pave"),
+        demolish: () => this.setTool("demolish"),
+        build: () => this.toggleMenu(this.buildMenu, button("build"), back),
+        menu: () => this.toggleMenu(this.mainMenu, button("menu"), back),
+        texts: () => this.openFinder("/"),
+        commands: () => this.openFinder(":"),
       };
-      const act = actions[event.key];
+      const action = actionFor(event.key);
+      const act = action && actions[action];
       if (!act) return;
       event.preventDefault();
       act();
@@ -739,6 +883,7 @@ export class Ui {
           this.toggleMenu(
             this.buildMenu,
             need<HTMLButtonElement>(this.toolbox, "[data-open=build]"),
+            this.mapHost(),
           ),
       },
       {
@@ -748,12 +893,18 @@ export class Ui {
           this.toggleMenu(
             this.mainMenu,
             need<HTMLButtonElement>(this.toolbox, "[data-open=menu]"),
+            this.mapHost(),
           ),
       },
       {
         label: "wälder",
         hint: "speichern, laden, als Datei",
         run: () => this.menuAction("saves"),
+      },
+      {
+        label: "tasten",
+        hint: "welche Taste was tut",
+        run: () => this.menuAction("keys"),
       },
       ...this.o.saveCommands(),
       {
@@ -825,6 +976,7 @@ export class Ui {
     if (action === "home") {
       if (this.reading) this.leaveReading();
       r.centerOn(start.x + 0.5, start.y + 0.5);
+      this.input?.follow({ x: start.x, y: start.y });
       this.o.moved();
     } else if (action === "zoom-in") {
       r.zoomAt(1.25, box.width / 2, box.height / 2);
@@ -834,6 +986,8 @@ export class Ui {
       this.o.moved();
     } else if (action === "saves") {
       this.o.saves();
+    } else if (action === "keys") {
+      this.o.keys();
     } else if (action === "reset") {
       void this.confirm({
         title: "Neu beginnen?",
@@ -1075,7 +1229,7 @@ export class Ui {
     if (note) {
       const ready: Record<PlaceMode, string> = {
         mouse: "Klick: bauen · Esc: abbrechen",
-        keys: "Eingabetaste: bauen · Esc: abbrechen",
+        keys: `${firstKey("apply")}: bauen · Esc: abbrechen`,
         touch: "",
       };
       const text = spot.ok ? ready[mode] : (spot.reason ?? "Hier nicht.");
@@ -1132,6 +1286,28 @@ export class Ui {
       },
       release: () => this.o.stage()?.stage.release(),
       key: (event, down) => {
+        if (this.textMode) {
+          if (!down) return false;
+          if (this.textMode.cursor.key(event)) return true;
+          // Escape leaves the text mode; a second one turns the view back.
+          if (event.key === "Escape") {
+            this.stopTextMode();
+            this.announce("Textmodus beendet.");
+            return true;
+          }
+          // The map's own keys rest in the text; zooming, the tools, the
+          // menus and the finders still work.
+          const action = actionFor(event.key);
+          return (
+            action === "left" ||
+            action === "right" ||
+            action === "up" ||
+            action === "down" ||
+            action === "visual" ||
+            action === "other" ||
+            action === "apply"
+          );
+        }
         const on = this.playing();
         if (!on || this.placing || event.key === "Escape") return false;
         return on.stage.key(event, down);
@@ -1185,7 +1361,8 @@ export class Ui {
       },
       cursor: (tile) => {
         this.keyCursor = tile;
-        this.o.renderer.setCursor(tile);
+        // In the text mode the text cursor shows instead.
+        this.o.renderer.setCursor(this.textMode ? null : tile);
         if (this.placing) this.ghostAt(tile);
         if (this.sawFrom)
           this.o.renderer.setSaw({
@@ -1209,10 +1386,34 @@ export class Ui {
           x1: tile.x,
           y1: tile.y,
         });
-        this.announce("Auswahl. Bewegen, dann Eingabetaste.");
+        this.announce(
+          `Auswahl. Bewegen, ${firstKey("other")} für die andere Ecke, dann ${firstKey("apply")}.`,
+        );
+      },
+      other: (tile) => {
+        const from = this.sawFrom;
+        if (!from) {
+          this.announce("Keine Auswahl.");
+          return null;
+        }
+        this.sawFrom = tile;
+        return from;
+      },
+      count: (n) => {
+        const shown = need(this.o.root, "[data-count]");
+        shown.textContent = n === null ? "" : String(n);
+        shown.hidden = n === null;
       },
       activate: (tile) => {
         if (this.placing) return this.tryPlace(tile);
+        // On the text read top-down, the key starts the text mode.
+        const read = this.reading;
+        if (
+          read &&
+          !read.stage &&
+          this.o.game.textAt(tile.x, tile.y)?.key === read.id
+        )
+          return this.startTextMode(read.id as string);
         if ((this.tool === "saw" || this.tool === "pave") && !this.reading) {
           if (!this.sawFrom) {
             this.sawFrom = tile;
@@ -1223,7 +1424,7 @@ export class Ui {
               y1: tile.y,
             });
             this.announce(
-              "Erste Ecke gesetzt. Pfeiltasten, dann Eingabetaste für die zweite.",
+              `Erste Ecke gesetzt. Bewegen, dann ${firstKey("apply")} für die zweite.`,
             );
           } else {
             const from = this.sawFrom;
@@ -1482,17 +1683,93 @@ export class Ui {
       // A long text starts at its top; the rest is a pan away.
       y = area.y + (usable.h / 2 - 24) / (PLAN * zoom);
     }
+    // A cursor outside the area, as after a jump with «/», goes where the
+    // view looks, before the view moves clear of the bars; one on it stays.
+    const look = { x: Math.floor(area.x + area.w / 2), y: Math.floor(y) };
+    const at = this.input?.cursor();
+    if (
+      at &&
+      !(
+        at.x >= area.x &&
+        at.x < area.x + area.w &&
+        at.y >= area.y &&
+        at.y < area.y + area.h
+      )
+    )
+      this.input?.follow(look);
     y += shift / zoom;
     this.reading = {
       id,
       stage,
       back: this.reading?.back ?? { ...r.camera },
       zoom,
+      cursor: this.reading ? this.reading.cursor : (at ?? null),
     };
     r.flyTo({ x: area.x + area.w / 2, y, zoom, plan: 1 });
     this.backBar.hidden = false;
     this.o.moved();
+    this.stopTextMode();
+    // With the keyboard on a text, the key that applies starts the text mode.
+    if (!stage && this.input?.cursor())
+      what += ` ${firstKey("apply")} auf der Schrift: Textmodus.`;
     this.announce(`${what} Escape oder «Zurück zur Karte» kehrt zurück.`);
+  }
+
+  /**
+   * The text mode on the text read top-down: the keyboard cursor becomes a
+   * text cursor (textCursor.ts) until Escape.
+   */
+  private startTextMode(key: string) {
+    const inks = this.o.world.inks(key);
+    if (!inks || this.textMode) return;
+    this.textMode = {
+      cursor: new TextCursor({
+        light: inks.light,
+        dark: inks.dark,
+        announce: (text) => this.announce(text),
+        reveal: (box) => this.reveal(box),
+      }),
+      shown: false,
+    };
+    this.o.renderer.setCursor(null);
+    const k = letterKey;
+    this.announce(
+      `Textmodus: ${k("textLeft")} ${k("textDown")} ${k("textUp")} ${k("textRight")}, ${k("wordNext")}, ${k("wordBack")} und ${k("wordEnd")} bewegen, ${k("textVisual")} und ${k("textVisualLine")} wählen aus, ${k("textCopy")} kopiert. Escape beendet ihn.`,
+    );
+  }
+
+  private stopTextMode() {
+    if (!this.textMode) return;
+    this.textMode.cursor.destroy();
+    this.textMode = null;
+    this.o.renderer.setCursor(this.input?.cursor() ?? null);
+  }
+
+  /**
+   * Pans the plan so that a box on the screen, the text cursor, stays clear
+   * of the back button and the toolbox; past an edge, by a good stretch.
+   */
+  private reveal(box: DOMRect) {
+    const host = this.mapHost().getBoundingClientRect();
+    const top = host.top + 90;
+    const bottom = host.bottom - 110;
+    const left = host.left + 24;
+    const right = host.right - 24;
+    const dy =
+      box.bottom > bottom
+        ? host.top + host.height * 0.55 - box.top
+        : box.top < top
+          ? host.top + host.height * 0.45 - box.bottom
+          : 0;
+    const dx =
+      box.right > right
+        ? right - box.right
+        : box.left < left
+          ? left - box.left
+          : 0;
+    if (!dx && !dy) return;
+    this.o.renderer.pan(dx, dy);
+    this.o.moved();
   }
 
   /**
@@ -1501,15 +1778,22 @@ export class Ui {
    */
   private leaveReading(zoomedOut = false) {
     if (!this.reading) return;
-    const back = this.reading.back;
+    const { back, cursor } = this.reading;
     this.reading = null;
+    this.stopTextMode();
     this.o.stage()?.stage.release();
     this.backBar.hidden = true;
     const r = this.o.renderer;
+    // The cursor stays. Where it was when the view turned, the view turns
+    // back to where it was; moved there, as by a jump with «/», onto it.
+    const now = this.input?.cursor();
+    const moved = now && (now.x !== cursor?.x || now.y !== cursor?.y);
     this.o.renderer.flyTo(
       zoomedOut
         ? { x: r.camera.x, y: r.camera.y, zoom: r.camera.zoom, plan: 0 }
-        : { ...back, plan: 0 },
+        : moved
+          ? { x: now.x + 0.5, y: now.y + 0.5, zoom: back.zoom, plan: 0 }
+          : { ...back, plan: 0 },
     );
     this.o.moved();
     this.mapHost().focus({ preventScroll: true });

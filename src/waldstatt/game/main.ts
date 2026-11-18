@@ -12,6 +12,8 @@ import iseLogoUrl from "./ise-logo.png?url";
 import { href } from "../../lib/url";
 import { kinds, placing, STAGE, textWidth } from "./config";
 import { attachInput } from "./input";
+import { load as loadKeys } from "./keys";
+import { KeysDialog } from "./keysDialog";
 import { textLength, WorldLayer } from "./overlay";
 import { Renderer } from "./render";
 import { Stage } from "./stage";
@@ -235,6 +237,7 @@ async function start(root: HTMLElement) {
   );
   world = new WorldLayer(host, game, games);
   let saves: SavesDialog | undefined;
+  let keys: KeysDialog | undefined;
   ui = new Ui({
     root,
     game,
@@ -248,6 +251,7 @@ async function start(root: HTMLElement) {
       void clearSaved().then(() => window.location.reload());
     },
     saves: () => void saves?.open(),
+    keys: () => keys?.open(),
     saveCommands: () => saves?.commands() ?? [],
     moved: scheduleSave,
   });
@@ -269,8 +273,14 @@ async function start(root: HTMLElement) {
         );
     },
   });
+  keys = new KeysDialog({
+    root,
+    confirm: (o) => shown.confirm(o),
+    announce: (text) => shown.announce(text),
+  });
+  void loadKeys();
   syncStage();
-  attachInput(host, renderer, ui.handlers());
+  ui.useInput(attachInput(host, renderer, ui.handlers()));
 
   for (const element of root.querySelectorAll<HTMLElement>("[data-ready-show]"))
     element.hidden = false;
