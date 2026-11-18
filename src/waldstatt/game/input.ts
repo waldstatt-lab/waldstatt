@@ -4,8 +4,10 @@
  * fingers or another mouse button pan; while placing, a drag that starts on
  * the building being placed moves it); pinching and the wheel zoom; a tap is
  * a short press without movement. Keys are handled only while the map has
- * focus: arrows move the cursor tile, Shift and arrows pan, + and − zoom,
- * Enter or Space applies, Escape cancels.
+ * focus: arrows or h j k l move the cursor one tile along the squares'
+ * edges, again and again while held, and the view glides after it; with
+ * Shift they pan smoothly; + and − zoom; v starts a rectangle (the saw's or
+ * paving's) at the cursor; Enter or Space applies; Escape cancels.
  */
 import type { Renderer } from "./render";
 
@@ -32,6 +34,8 @@ export interface MapHandlers {
   saw(from: Tile, to: Tile, done: boolean): void;
   cursor(tile: Tile): void;
   activate(tile: Tile): void;
+  /** v: a rectangle starts at the cursor, for the saw or paving. */
+  visual(tile: Tile): void;
   cancel(): void;
   /** The view moved, e.g. to save the camera. */
   moved(): void;
@@ -194,6 +198,62 @@ export function attachInput(
     }
   });
 
+  /** The steps along the tiles, by key; with Shift, the directions to pan on screen. */
+  const directions: Record<string, [number, number]> = {
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+    h: [-1, 0],
+    l: [1, 0],
+    k: [0, -1],
+    j: [0, 1],
+  };
+  /** The keys held to move the cursor or pan, and since when. */
+  const held = new Map<string, { pan: boolean; since: number; next: number }>();
+  let loop = 0;
+  let last = 0;
+
+  const step = (direction: [number, number]) => {
+    cursor ??= centreTile();
+    // Along the squares' edges, one tile at a time, so every tile is
+    // reached: → and ← along x, ↑ and ↓ along y.
+    cursor = { x: cursor.x + direction[0], y: cursor.y + direction[1] };
+    keepInView(cursor);
+    handlers.cursor(cursor);
+  };
+
+  /** Moves and pans while keys are held: steps at an even pace, pans smoothly. */
+  const tick = (now: number) => {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    let panX = 0;
+    let panY = 0;
+    for (const [key, h] of held) {
+      const d = directions[key.length === 1 ? key.toLowerCase() : key];
+      if (!d) continue;
+      if (h.pan) {
+        panX += d[0];
+        panY += d[1];
+      } else if (now >= h.next) {
+        step(d);
+        // A pause after the first step, then steady steps.
+        h.next = now + (now - h.since < 100 ? 220 : 85);
+      }
+    }
+    if (panX || panY) {
+      renderer.pan(-panX * 900 * dt, -panY * 900 * dt);
+      handlers.moved();
+    }
+    loop = held.size ? requestAnimationFrame(tick) : 0;
+  };
+
+  const release = (key: string) => {
+    held.delete(key);
+    held.delete(key.toLowerCase());
+    held.delete(key.toUpperCase());
+  };
+
   host.addEventListener("keydown", (event) => {
     // Keys on something inside the map, such as a link in a text, are theirs.
     if (event.target !== host) return;
@@ -202,24 +262,20 @@ export function attachInput(
       event.preventDefault();
       return;
     }
-    const steps: Record<string, [number, number]> = {
-      ArrowLeft: [-1, 0],
-      ArrowRight: [1, 0],
-      ArrowUp: [0, -1],
-      ArrowDown: [0, 1],
-    };
-    const step = steps[event.key];
-    if (step) {
+    const direction =
+      directions[event.key.length === 1 ? event.key.toLowerCase() : event.key];
+    if (direction) {
       event.preventDefault();
-      if (event.shiftKey) {
-        renderer.pan(-step[0] * 160, -step[1] * 160);
-        handlers.moved();
-        return;
+      // The keyboard's own repeat is ignored: the loop sets the pace.
+      if (event.repeat || held.has(event.key)) return;
+      const now = performance.now();
+      const pan = event.shiftKey;
+      held.set(event.key, { pan, since: now, next: now + 220 });
+      if (!pan) step(direction);
+      if (!loop) {
+        last = now;
+        loop = requestAnimationFrame(tick);
       }
-      cursor ??= centreTile();
-      cursor = { x: cursor.x + step[0], y: cursor.y + step[1] };
-      keepInView(cursor);
-      handlers.cursor(cursor);
       return;
     }
     if (event.key === "+" || event.key === "=") {
@@ -228,6 +284,11 @@ export function attachInput(
     } else if (event.key === "-" || event.key === "_") {
       event.preventDefault();
       zoomCentre(0.8);
+    } else if (event.key === "v") {
+      event.preventDefault();
+      cursor ??= centreTile();
+      handlers.cursor(cursor);
+      handlers.visual(cursor);
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       cursor ??= centreTile();
@@ -239,9 +300,14 @@ export function attachInput(
   });
 
   host.addEventListener("keyup", (event) => {
+    release(event.key);
+    if (event.key === "Shift") for (const h of held.values()) h.pan = false;
     if (event.target === host) handlers.key(event, false);
   });
-  host.addEventListener("blur", () => handlers.release());
+  host.addEventListener("blur", () => {
+    held.clear();
+    handlers.release();
+  });
 
   function zoomCentre(factor: number) {
     const box = host.getBoundingClientRect();
@@ -249,20 +315,33 @@ export function attachInput(
     handlers.moved();
   }
 
-  /** Pans so the cursor stays at least three tiles inside the screen. */
+  /**
+   * Keeps the cursor in the middle half of the screen: the view glides after
+   * it as soon as it leaves, rather than jumping when it nears the edge.
+   */
   function keepInView(tile: Tile) {
     const box = host.getBoundingClientRect();
-    const margin = 3;
-    const a = renderer.screenToTile(0, 0);
-    const b = renderer.screenToTile(box.width, box.height - 90);
-    let dx = 0;
-    let dy = 0;
-    if (tile.x < a.x + margin) dx = tile.x - (a.x + margin);
-    if (tile.x + 1 > b.x - margin) dx = tile.x + 1 - (b.x - margin);
-    if (tile.y < a.y + margin) dy = tile.y - (a.y + margin);
-    if (tile.y + 1 > b.y - margin) dy = tile.y + 1 - (b.y - margin);
-    if (dx || dy) {
-      renderer.centerOn(renderer.camera.x + dx, renderer.camera.y + dy);
+    // Where the view is going, not where it is mid-glide.
+    const aim = renderer.aim;
+    const shift = {
+      x: aim.x - renderer.camera.x,
+      y: aim.y - renderer.camera.y,
+    };
+    const p = renderer.tileToScreen(
+      tile.x + 0.5 - shift.x,
+      tile.y + 0.5 - shift.y,
+    );
+    // The middle half, above the toolbox.
+    const left = box.width * 0.25;
+    const right = box.width * 0.75;
+    const top = box.height * 0.25;
+    const bottom = box.height * 0.75 - 45;
+    const sx = p.x < left ? p.x - left : p.x > right ? p.x - right : 0;
+    const sy = p.y < top ? p.y - top : p.y > bottom ? p.y - bottom : 0;
+    if (sx || sy) {
+      const from = renderer.screenToTile(box.width / 2, box.height / 2);
+      const to = renderer.screenToTile(box.width / 2 + sx, box.height / 2 + sy);
+      renderer.glideTo(aim.x + to.x - from.x, aim.y + to.y - from.y);
       handlers.moved();
     }
   }

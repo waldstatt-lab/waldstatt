@@ -314,6 +314,8 @@ export class Renderer {
   /** The view: 0 isometric, 1 top-down plan. */
   private plan = 0;
   private L: Linear = projection(0);
+  /** Where the camera glides, e.g. after the keyboard cursor. */
+  private glide: { x: number; y: number } | null = null;
   private flight: {
     from: { x: number; y: number; zoom: number; plan: number };
     to: { x: number; y: number; zoom: number; plan: number };
@@ -553,12 +555,20 @@ export class Renderer {
     return { x: o.x, y: o.y, zoom: o.z, L: this.L, plan: ease(this.plan) };
   }
 
+  /** Where a point in tiles lies on screen now, in pixels. */
+  tileToScreen(x: number, y: number): { x: number; y: number } {
+    const o = this.offset();
+    const p = apply(this.L, x, y);
+    return { x: o.x + p.x * o.z, y: o.y + p.y * o.z };
+  }
+
   screenToTile(sx: number, sy: number): { x: number; y: number } {
     const o = this.offset();
     return invert(this.L, (sx - o.x) / o.z, (sy - o.y) / o.z);
   }
 
   pan(dx: number, dy: number) {
+    this.glide = null;
     const z = this.camera.zoom;
     const d = invert(this.L, dx / z, dy / z);
     this.camera.x -= d.x;
@@ -573,7 +583,18 @@ export class Renderer {
     this.camera.y += before.y - after.y;
   }
 
+  /** Glides the camera to centre on (x, y). */
+  glideTo(x: number, y: number) {
+    this.glide = { x, y };
+  }
+
+  /** Where the camera is gliding to, or where it is. */
+  get aim(): { x: number; y: number } {
+    return this.glide ?? { x: this.camera.x, y: this.camera.y };
+  }
+
   centerOn(x: number, y: number) {
+    this.glide = null;
     this.camera.x = x;
     this.camera.y = y;
   }
@@ -642,6 +663,17 @@ export class Renderer {
 
   frame(dt: number) {
     this.time += dt;
+    if (this.glide && !this.flight) {
+      // Most of the way in about a third of a second, smoothly.
+      const k = this.still() ? 1 : 1 - Math.exp(-dt * 7);
+      this.camera.x += (this.glide.x - this.camera.x) * k;
+      this.camera.y += (this.glide.y - this.camera.y) * k;
+      if (
+        Math.abs(this.glide.x - this.camera.x) < 0.01 &&
+        Math.abs(this.glide.y - this.camera.y) < 0.01
+      )
+        this.glide = null;
+    }
     if (this.flight) {
       const f = this.flight;
       f.t = Math.min(1, f.t + dt / turnSeconds);

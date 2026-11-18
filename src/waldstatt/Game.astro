@@ -64,9 +64,12 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
     hidden
   ></div>
   <p id="wg-map-help" hidden>
-    Pfeiltasten bewegen die Auswahl, Umschalt mit Pfeiltasten verschiebt die
-    Karte, Plus und Minus zoomen. Die Eingabetaste wendet das Werkzeug an oder
-    tippt an, was unter der Auswahl liegt. Escape bricht ab.
+    Pfeiltasten oder h, j, k, l bewegen die Auswahl, mit Umschalt verschieben
+    sie die Karte; Plus und Minus zoomen. Die Eingabetaste wendet das Werkzeug
+    an oder tippt an, was unter der Auswahl liegt; v beginnt ein Rechteck für
+    Säge oder Pflaster. a, s, p und x wählen Axt, Säge, Pflastern und Abreissen,
+    b öffnet Bauen, m das Menü, Schrägstrich sucht gefundene Schriften,
+    Doppelpunkt Befehle. Escape bricht ab.
   </p>
 
   <div class="wg-panel wg-resources" data-resources data-ready-show hidden>
@@ -80,6 +83,31 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
         </li>
       ))}
     </ul>
+  </div>
+
+  <div
+    class="wg-panel wg-finder"
+    data-finder
+    role="dialog"
+    aria-label="Suchen"
+    hidden
+  >
+    <div class="wg-finder-row">
+      <span class="wg-finder-prefix" data-finder-prefix aria-hidden="true">
+        /
+      </span>
+      <input
+        type="text"
+        data-finder-input
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="wg-finder-list"
+        aria-autocomplete="list"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </div>
+    <ul id="wg-finder-list" role="listbox" data-finder-list></ul>
   </div>
 
   <div class="wg-back" data-back hidden>
@@ -127,6 +155,10 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
         <button type="button" class="wg-button" data-act="reset">
           Neu beginnen …
         </button>
+      </li>
+      <li class="wg-keys">
+        Tasten: a Axt · s Säge · p Pflastern · x Abreissen · b Bauen · m Menü ·
+        v Auswahl · / Schriften · : Befehle · h j k l bewegen
       </li>
       <li class="wg-credit">
         Gewässer und Landesgrenze: Bundesamt für Landestopografie swisstopo

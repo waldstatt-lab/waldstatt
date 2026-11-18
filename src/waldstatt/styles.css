@@ -271,6 +271,79 @@
 .wg-main .wg-button {
   width: 100%;
 }
+.wg-keys {
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+@media (hover: none) {
+  .wg-keys {
+    display: none;
+  }
+}
+
+/* The finder, «/» and «:», like a command line at the top. */
+.wg-finder {
+  position: absolute;
+  top: max(4.25rem, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(30rem, calc(100vw - 1.5rem));
+  padding: 0.5rem;
+}
+.wg-finder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+}
+.wg-finder-prefix {
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+}
+.wg-finder-row input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  outline: none;
+}
+.wg-finder ul {
+  max-height: min(18rem, 50vh);
+  overflow: auto;
+  margin-top: 0.4rem;
+}
+.wg-finder-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.2rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.wg-finder-item[aria-selected="true"] {
+  background: var(--wg-amber);
+  color: var(--wg-ink);
+}
+.wg-finder-hint {
+  opacity: 0.75;
+  font-family: var(--wg-sans, inherit);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.wg-finder-empty {
+  padding: 0.3rem 0.5rem;
+  opacity: 0.8;
+}
+
 .wg-credit {
   font-size: 0.75rem;
   opacity: 0.8;

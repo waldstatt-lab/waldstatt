@@ -360,9 +360,18 @@ ignoring `Vary` because those URLs carry content hashes. On the first visit the
 page hands the worker the files it already loaded, so the next start works
 offline. The worker is not registered in development.
 
-**Access.** The map is a focusable `role="application"`: arrow keys move a
-cursor tile, Shift and arrows pan, + and − zoom, Enter or Space applies the tool
-or opens a building, Escape cancels. While the view is turned onto the stage,
+**Access.** The map is a focusable `role="application"`: arrow keys or h, j,
+k, l move a cursor tile along the squares' edges (→ and ← along x, ↑ and ↓
+along y, so every tile is reached), at an even pace while held, and the view glides after it once it leaves the middle half of the
+screen; with Shift they pan smoothly; + and − zoom; v starts a rectangle for
+the saw or paving at the cursor; Enter or Space applies the tool or opens a
+building, Escape cancels (`input.ts`). Anywhere outside text fields and
+dialogs, a, s, p and x choose Axt, Säge, Pflastern and Abreissen, b opens
+Bauen and m the menu, which lists these keys. «/» opens a finder over the
+texts found so far and jumps to the one chosen; «:» one over commands:
+`tool:…` for the tools at hand, `build:…` for the buildings the menu shows,
+`lichtung`, `bauen`, `menü` and `neu-beginnen`. Both match fuzzily, ignoring
+accents, and take arrows or Tab, Enter and Escape. While the view is turned onto the stage,
 the keys from the game's controls play it instead. Every tool, menu item and
 link is a real button or link with a German name; status, finished buildings,
 the stage's status while somebody plays, and events such as births, deaths

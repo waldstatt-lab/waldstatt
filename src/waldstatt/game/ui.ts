@@ -44,6 +44,43 @@ import { damSite, start } from "./world";
 
 type Tool = "none" | "axe" | "saw" | "pave" | "demolish";
 
+/** An entry of the finder: what it shows, a hint, and what it does. */
+interface FinderItem {
+  label: string;
+  hint?: string;
+  run(): void;
+}
+
+/** Lower case, without accents: «Säge» matches «sage». */
+const plain = (text: string) =>
+  text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+
+/**
+ * How well a query matches a label, as in a fuzzy finder: its letters in
+ * order, anywhere; more for letters in a row and at word starts, less for
+ * gaps. −1 if it does not match.
+ */
+function fuzzy(query: string, label: string): number {
+  const q = plain(query.trim());
+  const t = plain(label);
+  if (!q) return 0;
+  let score = 0;
+  let at = 0;
+  let run = 0;
+  for (const c of q) {
+    const i = t.indexOf(c, at);
+    if (i < 0) return -1;
+    run = i === at ? run + 1 : 0;
+    const start = i === 0 || /[:\s-]/.test(t[i - 1]);
+    score += 1 + run * 2 + (start ? 3 : 0) - Math.min(3, i - at) * 0.3;
+    at = i + 1;
+  }
+  return score - t.length * 0.01;
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   props: Partial<HTMLElementTagNameMap[K]> = {},
@@ -133,6 +170,16 @@ export class Ui {
   } | null = null;
   private live: HTMLElement;
   private confirmDialog: HTMLDialogElement;
+  /** The finder: «/» for the texts found, «:» for commands. */
+  private finder: {
+    element: HTMLElement;
+    input: HTMLInputElement;
+    list: HTMLElement;
+    prefix: HTMLElement;
+    items: FinderItem[];
+    shown: FinderItem[];
+    selected: number;
+  };
   private menuItems: {
     kind: Kind;
     game?: string;
@@ -151,6 +198,17 @@ export class Ui {
     this.backBar = need(root, "[data-back]");
     this.live = need(root, "[data-live]");
     this.confirmDialog = need(root, "[data-confirm]");
+    this.finder = {
+      element: need(root, "[data-finder]"),
+      input: need<HTMLInputElement>(root, "[data-finder-input]"),
+      list: need(root, "[data-finder-list]"),
+      prefix: need(root, "[data-finder-prefix]"),
+      items: [],
+      shown: [],
+      selected: 0,
+    };
+    this.attachFinder();
+    this.attachShortcuts();
 
     for (const button of this.toolbox.querySelectorAll<HTMLButtonElement>(
       "[data-tool]",
@@ -507,6 +565,234 @@ export class Ui {
       menu.hidden = true;
       button.setAttribute("aria-expanded", "false");
     }
+  }
+
+  // --- Keyboard shortcuts and the finder ----------------------------------------
+
+  /**
+   * Letters for the tools and menus, as long as nothing else takes them: a
+   * text field, a dialog, the finder, or the stage while somebody plays.
+   */
+  private attachShortcuts() {
+    document.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey) return;
+      if (event.altKey) return;
+      const target = event.target as HTMLElement;
+      if (target.closest("input, textarea, select, dialog[open], a")) return;
+      if (!this.finder.element.hidden || this.reading?.stage) return;
+      const button = (name: string) =>
+        need<HTMLButtonElement>(this.toolbox, `[data-open=${name}]`);
+      const actions: Record<string, () => void> = {
+        a: () => this.setTool("axe"),
+        s: () => this.setTool("saw"),
+        p: () => this.setTool("pave"),
+        x: () => this.setTool("demolish"),
+        b: () => this.toggleMenu(this.buildMenu, button("build")),
+        m: () => this.toggleMenu(this.mainMenu, button("menu")),
+        "/": () => this.openFinder("/"),
+        ":": () => this.openFinder(":"),
+      };
+      const act = actions[event.key];
+      if (!act) return;
+      event.preventDefault();
+      act();
+    });
+  }
+
+  private attachFinder() {
+    const f = this.finder;
+    f.input.addEventListener("input", () => this.filterFinder());
+    f.input.addEventListener("keydown", (event) => {
+      const move = (by: number) => {
+        event.preventDefault();
+        if (!f.shown.length) return;
+        f.selected = (f.selected + by + f.shown.length) % f.shown.length;
+        this.markFinder();
+      };
+      if (event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey))
+        move(1);
+      else if (
+        event.key === "ArrowUp" ||
+        (event.key === "Tab" && event.shiftKey)
+      )
+        move(-1);
+      else if (event.key === "Enter") {
+        event.preventDefault();
+        this.runFinder(f.shown[f.selected]);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closeFinder(true);
+      } else if (event.key === "Backspace" && !f.input.value) {
+        // Like a command line: deleting the prefix leaves it.
+        event.preventDefault();
+        this.closeFinder(true);
+      }
+    });
+    f.input.addEventListener("blur", () => {
+      // Clicking an item happens before the blur closes the finder.
+      window.setTimeout(() => {
+        if (!f.element.contains(document.activeElement)) this.closeFinder();
+      }, 150);
+    });
+  }
+
+  /** Opens the finder: «/» for the texts found, «:» for commands. */
+  private openFinder(mode: "/" | ":") {
+    this.closeMenus();
+    this.closeCard();
+    const f = this.finder;
+    f.prefix.textContent = mode;
+    f.input.value = "";
+    f.input.setAttribute(
+      "aria-label",
+      mode === "/" ? "Schrift suchen" : "Befehl suchen",
+    );
+    f.items = mode === "/" ? this.textItems() : this.commandItems();
+    f.element.hidden = false;
+    this.filterFinder();
+    f.input.focus();
+  }
+
+  private closeFinder(focusMap = false) {
+    const f = this.finder;
+    if (f.element.hidden) return;
+    f.element.hidden = true;
+    if (focusMap) this.mapHost().focus({ preventScroll: true });
+  }
+
+  /** The texts found so far, to jump to and read. */
+  private textItems(): FinderItem[] {
+    return this.o.game.hidden.filter(isFound).map((t) => ({
+      label: this.o.world.title(t),
+      hint: isExplored(t) ? "liegt frei" : "teilweise frei",
+      run: () => this.readText(t),
+    }));
+  }
+
+  /** Commands: the tools at hand, the buildings in the menu, and more. */
+  private commandItems(): FinderItem[] {
+    const g = this.o.game;
+    const items: FinderItem[] = [];
+    const tools: [Tool, string, boolean][] = [
+      ["axe", "axt", g.state.tools.axe],
+      ["saw", "säge", g.state.tools.saw],
+      ["pave", "pflastern", g.state.seen.has("stones")],
+      ["demolish", "abreissen", true],
+    ];
+    for (const [tool, name, have] of tools)
+      if (have)
+        items.push({
+          label: `tool:${name}`,
+          run: () => {
+            if (this.tool !== tool) this.setTool(tool);
+          },
+        });
+    items.push({
+      label: "tool:keins",
+      run: () => {
+        if (this.tool !== "none") this.setTool(this.tool);
+      },
+    });
+    for (const entry of this.menuItems) {
+      if (!g.shown(entry.kind, entry.game)) continue;
+      const name = this.label(entry.kind, entry.game);
+      const why = g.unavailable(entry.kind, entry.game);
+      items.push({
+        label: `build:${name.toLowerCase().replace(/\s+/g, "-")}`,
+        hint: why ?? this.costText(kinds[entry.kind].cost),
+        run: () => {
+          const now = g.unavailable(entry.kind, entry.game);
+          if (now) return this.announce(`${name}: ${now}`);
+          this.startPlacing(entry.kind, entry.game);
+        },
+      });
+    }
+    items.push(
+      {
+        label: "lichtung",
+        hint: "zur ersten Lichtung",
+        run: () => this.menuAction("home"),
+      },
+      {
+        label: "bauen",
+        hint: "das Bauen-Menü",
+        run: () =>
+          this.toggleMenu(
+            this.buildMenu,
+            need<HTMLButtonElement>(this.toolbox, "[data-open=build]"),
+          ),
+      },
+      {
+        label: "menü",
+        hint: "das Menü",
+        run: () =>
+          this.toggleMenu(
+            this.mainMenu,
+            need<HTMLButtonElement>(this.toolbox, "[data-open=menu]"),
+          ),
+      },
+      {
+        label: "neu-beginnen",
+        hint: "fragt zuerst",
+        run: () => this.menuAction("reset"),
+      },
+    );
+    return items;
+  }
+
+  /** Keeps the items that match what is typed, best first. */
+  private filterFinder() {
+    const f = this.finder;
+    const query = f.input.value;
+    f.shown = f.items
+      .map((item) => ({ item, score: fuzzy(query, item.label) }))
+      .filter((m) => m.score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .map((m) => m.item);
+    f.selected = 0;
+    f.list.replaceChildren(
+      ...(f.shown.length
+        ? f.shown.map((item, i) => {
+            const option = el(
+              "li",
+              { id: `wg-finder-${i}`, className: "wg-finder-item" },
+              el("span", {}, item.label),
+              el("span", { className: "wg-finder-hint" }, item.hint ?? ""),
+            );
+            option.setAttribute("role", "option");
+            option.addEventListener("pointerdown", (event) => {
+              event.preventDefault();
+              this.runFinder(item);
+            });
+            return option;
+          })
+        : [
+            el(
+              "li",
+              { className: "wg-finder-empty" },
+              f.items.length ? "Nichts passt." : "Noch nichts gefunden.",
+            ),
+          ]),
+    );
+    this.markFinder();
+  }
+
+  private markFinder() {
+    const f = this.finder;
+    f.list.querySelectorAll<HTMLElement>("[role=option]").forEach((o, i) => {
+      o.setAttribute("aria-selected", String(i === f.selected));
+      if (i === f.selected) o.scrollIntoView({ block: "nearest" });
+    });
+    if (f.shown.length)
+      f.input.setAttribute("aria-activedescendant", `wg-finder-${f.selected}`);
+    else f.input.removeAttribute("aria-activedescendant");
+  }
+
+  private runFinder(item: FinderItem | undefined) {
+    if (!item) return;
+    this.closeFinder(true);
+    item.run();
   }
 
   private menuAction(action: string) {
@@ -873,6 +1159,22 @@ export class Ui {
             x1: tile.x,
             y1: tile.y,
           });
+      },
+      visual: (tile) => {
+        if (this.placing || this.reading) return;
+        if (this.tool !== "saw" && this.tool !== "pave") {
+          if (!this.o.game.state.tools.saw)
+            return this.announce("Ohne Säge gibt es keine Auswahl.");
+          this.setTool("saw");
+        }
+        this.sawFrom = tile;
+        this.o.renderer.setSaw({
+          x0: tile.x,
+          y0: tile.y,
+          x1: tile.x,
+          y1: tile.y,
+        });
+        this.announce("Auswahl. Bewegen, dann Eingabetaste.");
       },
       activate: (tile) => {
         if (this.placing) return this.tryPlace(tile);
