@@ -52,8 +52,11 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/overlay.ts` | The HTML lying on the map under the same projection: found texts under the canvas; upright pins for water names, Einsiedeln and status labels; and the measuring of texts that sets their footprint |
 | `game/stage.ts` | The theatre's stage in two canvases: the preview standing on the stage in 3D for the isometric view, and, turned top-down, the preview in 2D with a status line and wooden signs for the programme, the keys and the real game, on the amphitheatre's floor |
 | `game/input.ts` | Pointer, touch, wheel and keyboard input on the map, with counts before a movement |
-| `game/keys.ts` | The keymap ([ADR 0005](decisions/0005-keep-the-waldstatt-keymap-in-a-settings-database.md)): each action's keys, the defaults, conflict checks, and keeping it in the database `waldstatt-games-settings` |
-| `game/keysDialog.ts` | The dialog «Tasten»: each action's keys, removing one, adding the next key pressed, and the defaults |
+| `game/commands.ts` | The commands ([ADR 0006](decisions/0006-make-waldstatt-actions-commands-that-keys-bind-to.md)): the registry, reading commands and chains, running them with a count, macros, and recording |
+| `game/commandSet.ts` | Every command of the game and what it does through the interface |
+| `game/keymap.ts` | The keymap ([ADR 0005](decisions/0005-keep-the-waldstatt-keymap-in-a-settings-database.md), ADR 0006): key names, the default bindings, contexts and their expressions, the visitor's layer and macros, checking JSON, converting version 1, and keeping it in the database `waldstatt-games-settings` |
+| `game/dispatch.ts` | The key dispatcher: counts, sequences, contexts, held movements and Shift to pan |
+| `game/keysDialog.ts` | The dialog «Tasten»: the bindings by context, recording a new one, the macros, and the keymap as JSON and as a file |
 | `game/textCursor.ts` | The text mode on a text read top-down, as vim's normal and visual modes: a block cursor moved by characters, lines, words, gg and G with counts, selections by character (v) or line (V), o, and copying, drawn as CSS highlights |
 | `game/ui.ts` | The HTML interface, reading on the map, and announcements |
 | `game/preview.ts`, `previewMoto.ts`, `previewCar.ts` | The previews' rules, copied from the studio website and repainted as a stage set, each with its scene in 2D and in 3D |
@@ -236,7 +239,7 @@ half the building's costs as far as it is worn, rounded up, paid at once;
 Waldleute then work on it from beside it like a site, scaffolded with a bar,
 and a full repair takes as long as building it. A ruin cannot be repaired or
 rebuilt; it stands, weighing on motivation, until it is cleared away with
-«Abreissen», the card's «Wegräumen» or `:wegräumen:ruinen`, which needs a
+«Abreissen», the card's «Wegräumen» or `:clear:ruins`, which needs a
 Recyclinghof within 10 km, gives nothing back and takes four times its
 building work. A building that is one of a kind cannot be built again while
 its ruin stands. The Recyclinghof (Handwerk, 30 Holz and 20 Steine)
@@ -424,78 +427,138 @@ offer a JSON file, `waldstatt-<name>-<day>.json`, with `format:
 bytes in base64. «Wald aus Datei …» reads such a file of at most 32 MB, checks
 it like the save, adds it to the list under its name (numbered if the name is
 taken) and offers to load it. Snapshots and files of another save version are
-refused. The «:» finder has the same actions: `wald:speichern`,
-`wald:herunterladen`, `wald:aus-datei`, and `wald:laden:…`,
-`wald:herunterladen:…` and `wald:löschen:…` for each saved forest, named in
-lower case with hyphens and hinted with the time it was saved. Each opens the
-dialog first, so its status line and confirmations show; `wald:aus-datei`
-opens the file picker straight from the key or tap, as browsers require. The
-finder knows the saved forests from the start of the page and after each
-change in the dialog; one saved in another tab shows after a reload.
+refused. The same actions are commands: `forest:open`, `forest:save`,
+`forest:download`, `forest:from-file`, and `forest:load:…`,
+`forest:download-saved:…` and `forest:delete:…` for each saved forest, named
+in lower case with hyphens. Each opens the dialog first, so its status line
+and confirmations show; `forest:from-file` opens the file picker straight
+from the key or tap, as browsers require. The commands know the saved
+forests from the start of the page and after each change in the dialog; one
+saved in another tab shows after a reload.
 
-**Access.** The map is a focusable `role="application"`. Keys follow a keymap
-that visitors change in the dialog «Tasten» (ADR 0005); by default arrow keys,
-h, j, k, l or s, e, i, u (the Neo layout's left, right, down, up) move a cursor
-tile along the squares' edges (→ and ← along x, ↑ and ↓
-along y, so every tile is reached), at an even pace while held, and the view glides after it once it leaves the middle half of the
-screen; digits typed before a movement are a count, so «10» and then → moves
-ten tiles, and a badge shows the count until it is used or Escape drops it;
-with Shift they pan smoothly; + and − zoom; v starts a rectangle for
-Holzhacken with the saw or for paving at the cursor and o jumps to its other corner, as in vim;
-with those tools Enter or Space also begins a rectangle and closes it, and
-closing it on the tile it began on marks or unmarks one tree; otherwise Enter or
-Space applies the tool or opens a building, Escape cancels (`input.ts`). Jumps of the view take the cursor
-along: to the first clearing (`/start`, `:lichtung`, the menu), and onto a
-text or the stage unless it is on it already. Turning back from a text leaves
-the cursor where it is: the view returns to where it was if the cursor did
-not move, and otherwise turns onto the cursor. Anywhere outside text fields and
-dialogs, a, p, r and x choose Holzhacken, Pflastern, Reparieren and Abreissen, b opens
-Bauen and m the menu, which lists these keys and opens «Tasten». The map's
-description and the menu's list are written from the keymap. In «Tasten»,
-each action can have several keys, but a key only one action: adding a key
-another action has is refused, naming it. Escape, Tab, the digits and keys
-with Ctrl, Alt or Cmd cannot be bound.
+**Commands, keys and macros** ([ADR 0006](decisions/0006-make-waldstatt-actions-commands-that-keys-bind-to.md),
+[pitch](../pitches/pitch--befehle-und-tasten.md)). Everything
+the keyboard and the «:» finder do is a command in one registry
+(`commands.ts`, `commandSet.ts`), named by colon segments: English
+namespaces and verbs, names of things as the game names them, in lower case
+with hyphens. Each describes itself in German, says why it cannot run now,
+and says how a count combines with it. They are: `left`, `right`, `up`,
+`down` (with a number of tiles), `zoom:in`, `zoom:out`, `goto:start` and
+`goto:<text>`; `enter` (what Enter does at the cursor: apply the tool, open a
+building, place the building being placed, begin or close an area, start the
+text mode on a text read), `selection:start`, `selection:other`,
+`selection:confirm` and `selection:cancel`; `tool:holzhacken`,
+`tool:pflastern`, `tool:reparieren`, `tool:abreissen` and `tool:none`, which
+choose rather than toggle; `menu:build`, `menu:main`, `find:texts`,
+`find:commands`, `keys:open` and `game:reset`; `build:<building>`;
+`repair:all`, `repair:worn`, `repair:crumbling`, `repair:under:<n>` and
+`repair:chosen` (the building whose card was open when the finder opened,
+the open card's, or the one under the keyboard cursor), which order as many
+repairs as the stock pays for, the most worn first, and `clear:ruins`;
+`card:repair`, `crew:more` and `crew:less` for an open card; the text mode's
+`text:…`; the saved forests' `forest:…`; and `macro:record`, `macro:replay`,
+`macro:run:<name>` and `macro:delete:<name>`. A count typed before a key
+replaces a command's default number or multiplies a given one (`20` then ↑
+is `up:20`; `2` then a key bound to `up:20` is `up:40`), runs a repeatable
+command so many times (`crew:more`, `zoom:in`), or is dropped.
+
+A **macro** is a chain of commands joined by `;`, such as
+`tool:holzhacken;selection:start;up:10;right:10;selection:confirm` or
+`build:hütte;enter;right:3`. It runs all its steps at once, in order, and
+stops at the first that cannot run, saying which and why; what already
+happened stays, and it never waits for the Waldleute's work. A count runs the
+whole chain that many times. Commands that open a menu, a finder or a dialog,
+or change keys or macros, cannot be steps. A macro has at most 200 steps and
+a run at most 10,000, and a macro cannot run itself, directly or through
+another. q (`macro:record`) starts a recording, shown in a badge «● Aufnahme»:
+every command run meanwhile by key or finder is written down, even one that
+fails there (it may work where the macro runs), its count folded in and moves
+in a row added up (`20` then ↑ is `up:20`), but not pointer input or the steps
+inside a macro run. q again stops it and asks for
+a name: named, it is kept and runs as `macro:run:<name>`; without, it stays
+the last macro, which @ (`macro:replay`) runs.
+
+**Keys** (`keymap.ts`, `dispatch.ts`): the keymap binds keys and sequences of
+keys to commands or chains, in sections by context, in the shape of the Zed
+editor's keymap. The contexts are `map` (always), `placing`, `reading` (a
+text or the stage turned top-down), `text` (the text mode) and `card` (a
+building's card is open), and expressions of them with `&&`, `||`, `!` and
+parentheses. Of the bindings that apply, the innermost context wins (`text`
+and `card` over `placing` and `reading` over `map`), then the visitor's over
+the default, then the later. Keys are named `left`, `enter`, `space`,
+`shift-up`, `f1`, and characters as typed (`g`, `G`, `+`); a sequence is keys
+joined by spaces (`g g`). After a key that begins a longer sequence bound in
+the current contexts, the dispatcher waits up to a second for the next one,
+and a badge shows the keys so far. Digits typed first make a count, shown in
+the same badge until it is used or Escape drops it. A letter typed with Shift
+that is not bound as such counts as the letter, and a movement with Shift
+pans the view smoothly instead; movements held down step at an even pace,
+the text cursor follows the keyboard's own repeat, and other commands run
+once per press. Keys on the map go to the dispatcher; on a card or its
+buttons, too; elsewhere on the page outside text fields and dialogs, only
+commands that work anywhere run (the tools, menus, finders and macro
+recording). Escape, Tab, the digits and keys with Ctrl, Alt or Cmd cannot be
+bound. The defaults: arrows, h j k l and s e i u (the Neo layout's left,
+right, down, up) move the cursor on the map outside the text mode, v and o
+select, Enter and Space are `enter`, + = − _ zoom, a p r x choose the tools,
+b and m open Bauen and the menu, / and : the finders, q records and @
+replays; in the text mode h j k l and the arrows, w b e, g g, G, v V, o and
+y; on a card r repairs and + ↑ − ↓ change the crew. The map's description
+for screen readers and the menu's key list are written from the keymap.
+
+**Tasten.** The dialog «Tasten» (`keysDialog.ts`, from the menu or
+`:keys:open`) lists the bindings in force by context, each with its keys, its
+command and what it does, and × (a default is taken away with `null`). «+
+Bindung» records a key or a sequence and takes a command or chain, checked
+and described as it is typed, and a context; keys already bound there ask
+before they are replaced. The macros are listed with their steps, to edit,
+add or delete. «Als JSON bearbeiten» shows the visitor's own bindings and
+macros as JSON, `{"bindings": [{"context": …, "bindings": {keys: command or
+null}}], "macros": {name: steps}}`; «Übernehmen» checks it and lists each
+problem with its line, «Herunterladen» saves it as `waldstatt-tasten.json`
+and «Aus Datei …» reads one back. «Standard» brings the default bindings
+back after asking and keeps the macros. The visitor's keymap and macros are
+kept as version 2 in the database `waldstatt-games-settings`, which resets
+and loading leave alone; a keymap of version 1 (keys per action) is
+converted once. Everything read back, typed or loaded is checked: its size,
+shape, contexts, keys and every command and step.
+
+**Access.** The map is a focusable `role="application"`. The keyboard cursor
+moves along the squares' edges (→ and ← along x, ↑ and ↓ along y, so every
+tile is reached), and the view glides after it once it leaves the middle half
+of the screen (`input.ts`). Jumps of the view take the cursor along: to the
+first clearing (`/start`, `:goto:start`, the menu), and onto a text or the
+stage unless it is on it already. Turning back from a text leaves the cursor
+where it is: the view returns to where it was if the cursor did not move,
+and otherwise turns onto the cursor. Escape cancels one thing at a time. A
+menu closed with Escape returns focus to where it was opened from: its button
+when clicked, the map when its key or the finder opened it.
 
 **Text mode.** On a text already read top-down (after «/», or Enter on it),
 Enter with the keyboard cursor on the text starts the text mode: the cursor
 becomes a text cursor, as in vim's normal mode (`textCursor.ts`), a block on
-the text's first character.
-By default h, j, k, l and the arrows move it by characters and lines, w, b and
-e by words, gg to the start and G to the last line, each as often as the
-count typed before («5gg» and «5G» go to the fifth line). v selects
-characters and V whole lines; o jumps to the selection's other end, y or
-Ctrl+C copies it and returns to the start of the selection. Escape steps back
-one level at a time: out of the selection, out of the text mode (the map
-cursor shows again), and then out of the top-down view. Lines are the lines as they wrap, found from
-the characters' boxes; a new block parts words. The view pans after the
-cursor. Lines and words reached are announced. The cursor and the selection
-are CSS highlights on both inks; a browser without them shows the document
-selection. The text mode's keys are a scope of their own in the keymap, where
-Shift counts, and go before the others while it is on: b moves back a word
-instead of opening Bauen. Map movement keys rest; zooming, the tools, the
-menus and the finders still work. With a mouse there is no text mode. A
-building's card, opened with Enter on it or a tap, is a third scope: while it
-is open, r orders its repair instead of choosing the tool, and on a producing
-building + or ↑ put one Waldmensch more into its crew and − or ↓ one fewer,
-instead of zooming or moving the cursor; the keys work with focus on the map
-or on the card's buttons. The keymap is kept in the database
-`waldstatt-games-settings`, which resets and loading leave alone. A menu
-closed with Escape returns focus to where it was opened from: its button when
-clicked, the map when its key or the finder opened it. «/» opens a finder over the
-starting point (`start`) and the texts found so far and jumps to the one
-chosen; «:» one over commands:
-`tool:…` for the tools at hand (`tool:holzhacken`, whether with the axe or the
-saw), `build:…` for the buildings the menu shows,
-`lichtung`, `bauen`, `menü`, `wälder`, `tasten` and `neu-beginnen`, `wald:…` for
-the saved forests (see below), and `reparieren:…`, which choose finished
-buildings by condition: `baufällig`, `abgenutzt`, `alle`, `unter-5` to
-`unter-50` in points, or any number typed, such as «rep 30», and
-`ausgewähltes-gebäude`, the building whose card was open when the finder
-opened, or else the one under the keyboard cursor. Each hints how
-many buildings and what it costs, and orders as many as the stock pays for,
-the most worn first. `wegräumen:ruinen` clears away every ruin within reach of
-a Recyclinghof. Both match fuzzily, ignoring
-accents, and take arrows or Tab, Enter and Escape. While the view is turned onto the stage,
+the text's first character, driven by the `text:…` commands: by characters
+and lines, by words, to the start (g g) and to the last line (G), each as
+often as the count typed before («5gg» and «5G» go to the fifth line). v
+selects characters and V whole lines; o jumps to the selection's other end,
+y or Ctrl+C copies it and returns to the start of the selection. Escape
+steps back one level at a time: out of the selection, out of the text mode
+(the map cursor shows again), and then out of the top-down view. Lines are
+the lines as they wrap, found from the characters' boxes; a new block parts
+words. The view pans after the cursor. Lines and words reached are
+announced. The cursor and the selection are CSS highlights on both inks; a
+browser without them shows the document selection. With a mouse there is no
+text mode.
+
+**The finders.** «/» opens a finder over the starting point and the texts
+found so far (the `goto` commands) and jumps to the one chosen; «:» one over
+every command, each with what it does and the key bound to it, matched
+fuzzily by its id, ignoring accents, and by the words of its description;
+commands that cannot run now show greyed with the reason. What is typed runs
+as it is when it reads as a command or a chain (`up:20`,
+`build:hütte;enter;right:3`), and a number after a partial id fills the
+command that takes one («rep 30» is `repair:under:30`). Both take arrows or
+Tab, Enter and Escape. While the view is turned onto the stage,
 the keys from the game's controls play it instead. Every tool, menu item and
 link is a real button or link with a German name; status, finished buildings,
 the stage's status while somebody plays, and events such as births, deaths

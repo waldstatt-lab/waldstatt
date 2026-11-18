@@ -7,6 +7,7 @@
  * each opens the dialog, so what happens shows there. Nodes are created with the DOM API; names are
  * set as text, never as HTML.
  */
+import type { ForestCommands } from "./commandSet";
 import {
   cleanName,
   download,
@@ -41,11 +42,6 @@ function need<T extends Element = HTMLElement>(
 
 const when = new Intl.DateTimeFormat("de-CH", {
   dateStyle: "medium",
-  timeStyle: "short",
-});
-
-const short = new Intl.DateTimeFormat("de-CH", {
-  dateStyle: "short",
   timeStyle: "short",
 });
 
@@ -102,59 +98,30 @@ export class SavesDialog {
   }
 
   /**
-   * Commands for the «:» finder, as its buttons do: save, download, read a
-   * file, and load, download or delete each saved forest. Each opens the
-   * dialog first.
+   * The `forest:…` commands (commandSet.ts), as the dialog's buttons do:
+   * save, download, read a file, and load, download or delete a saved
+   * forest. Each opens the dialog first, so what happens shows there.
    */
-  commands(): { label: string; hint?: string; run(): void }[] {
-    const slug = (name: string) => name.toLowerCase().replace(/\s+/g, "-");
-    const then = (run: () => unknown) => () => {
+  forestCommands(): ForestCommands {
+    const then = (run: () => unknown) => {
       void this.open().then(run);
     };
-    return [
-      {
-        label: "wald:speichern",
-        hint: "unter einem Namen",
-        run: () => {
-          void this.open();
-          this.name.focus();
-        },
+    return {
+      names: () => this.entries.map((e) => e.name),
+      save: () => {
+        void this.open();
+        this.name.focus();
       },
-      {
-        label: "wald:herunterladen",
-        hint: "diesen Wald als Datei",
-        run: then(() => this.downloadCurrent()),
+      download: () => then(() => this.downloadCurrent()),
+      // The file picker opens only straight from the key or tap.
+      fromFile: () => {
+        void this.open();
+        this.file.click();
       },
-      {
-        label: "wald:aus-datei",
-        hint: "einen Wald aus einer Datei",
-        // The file picker opens only straight from the key or tap.
-        run: () => {
-          void this.open();
-          this.file.click();
-        },
-      },
-      ...this.entries.flatMap((e) => {
-        const hint = `gespeichert ${short.format(e.at)}`;
-        return [
-          {
-            label: `wald:laden:${slug(e.name)}`,
-            hint,
-            run: then(() => this.load(e.name)),
-          },
-          {
-            label: `wald:herunterladen:${slug(e.name)}`,
-            hint,
-            run: then(() => this.downloadSaved(e.name)),
-          },
-          {
-            label: `wald:löschen:${slug(e.name)}`,
-            hint,
-            run: then(() => this.delete(e.name)),
-          },
-        ];
-      }),
-    ];
+      load: (name) => then(() => this.load(name)),
+      downloadSaved: (name) => then(() => this.downloadSaved(name)),
+      delete: (name) => then(() => this.delete(name)),
+    };
   }
 
   private downloadCurrent() {

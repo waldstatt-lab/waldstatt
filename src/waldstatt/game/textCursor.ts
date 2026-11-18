@@ -8,9 +8,24 @@
  * found from the characters' boxes, so the text's layout needs no model of
  * its own. The cursor and the selection are drawn as CSS highlights on both
  * inks of the text (overlay.ts); a browser without them shows the document
- * selection instead. The keys come from the keymap (keys.ts).
+ * selection instead. The `text:…` commands drive it (commandSet.ts); their
+ * keys, counts and «g g» come from the keymap and the dispatcher.
  */
-import { textActionFor, type Action } from "./keys";
+/** What the text mode does, one per `text:…` command. */
+export type TextAction =
+  | "textLeft"
+  | "textRight"
+  | "textUp"
+  | "textDown"
+  | "wordNext"
+  | "wordBack"
+  | "wordEnd"
+  | "textStart"
+  | "textEnd"
+  | "textVisual"
+  | "textVisualLine"
+  | "textOther"
+  | "textCopy";
 
 /** One character the text shows, where it lies in the page. */
 interface Char {
@@ -45,9 +60,6 @@ export class TextCursor {
   private mode: Mode = "normal";
   /** Where j and k aim across the lines, as a share of the text's width. */
   private want: number | null = null;
-  private count = 0;
-  /** The first press of «gg» was made. */
-  private pendingStart = false;
 
   constructor(private o: TextCursorOptions) {}
 
@@ -84,42 +96,22 @@ export class TextCursor {
     return true;
   }
 
+  /** Escape: leaves a selection; false if there was none. */
+  escape(): boolean {
+    if (this.mode === "normal") return false;
+    this.mode = "normal";
+    this.draw();
+    this.o.announce("Auswahl beendet.");
+    return true;
+  }
+
   /**
-   * A key pressed while the text mode is on; true if it was taken. Digits
-   * make a count; Escape is taken only to leave a selection.
+   * Runs an action of the text mode with a count (the `text:…` commands);
+   * false while the text is not laid out yet.
    */
-  key(event: KeyboardEvent): boolean {
-    if (event.key === "Escape") {
-      this.count = 0;
-      this.pendingStart = false;
-      if (this.mode === "normal") return false;
-      this.mode = "normal";
-      this.draw();
-      this.o.announce("Auswahl beendet.");
-      return true;
-    }
-    if (/^[0-9]$/.test(event.key)) {
-      if (event.key !== "0" || this.count)
-        this.count = Math.min(9999, this.count * 10 + Number(event.key));
-      return true;
-    }
-    const action = textActionFor(event.key);
-    if (!action) {
-      this.count = 0;
-      this.pendingStart = false;
-      return false;
-    }
-    if (!this.build()) return true;
-    const count = this.count;
-    this.count = 0;
-    if (action === "textStart" && !this.pendingStart) {
-      // The first «g» of «gg»; the count waits for the second.
-      this.pendingStart = true;
-      this.count = count;
-      return true;
-    }
-    this.pendingStart = false;
-    if (!event.repeat || action !== "textCopy") this.act(action, count);
+  run(action: TextAction, count: number): boolean {
+    if (!this.build()) return false;
+    this.act(action, count);
     return true;
   }
 
@@ -289,7 +281,7 @@ export class TextCursor {
 
   // --- Actions ----------------------------------------------------------------
 
-  private act(action: Action, count: number) {
+  private act(action: TextAction, count: number) {
     const chars = this.chars as Char[];
     const times = Math.max(1, count);
     let at = this.caret;

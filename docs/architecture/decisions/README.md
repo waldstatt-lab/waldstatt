@@ -37,5 +37,5 @@ does not prove correctness.
 | [0002 — Make the Waldstatt a browser game that gates its content](0002-make-the-waldstatt-a-browser-game.md) | accepted; amends 0001; amended by 0003 |
 | [0003 — Save the Waldstatt in IndexedDB](0003-save-the-waldstatt-in-indexeddb.md) | accepted; amends 0002; amended by 0004 |
 | [0004 — Keep named Waldstatt saves in a database of their own, and as files](0004-keep-named-waldstatt-saves-and-files.md) | accepted; amends 0003; amended by 0005 |
-| [0005 — Let visitors bind the Waldstatt's keys, kept in a settings database](0005-keep-the-waldstatt-keymap-in-a-settings-database.md) | accepted; amends 0004 |
-| [0006 — Make the Waldstatt's actions named commands that keys bind to](0006-make-waldstatt-actions-commands-that-keys-bind-to.md) | proposed; would amend 0005 |
+| [0005 — Let visitors bind the Waldstatt's keys, kept in a settings database](0005-keep-the-waldstatt-keymap-in-a-settings-database.md) | accepted; amends 0004; amended by 0006 |
+| [0006 — Make the Waldstatt's actions named commands that keys bind to](0006-make-waldstatt-actions-commands-that-keys-bind-to.md) | accepted; amends 0005 |

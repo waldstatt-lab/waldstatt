@@ -46,4 +46,4 @@ What this pitch explicitly does not include.
 | [Leben in der Waldstatt – food, people, faith and a forest that grows back](pitch--leben-in-der-waldstatt.md) | implemented |
 | [Wälder speichern, laden und als Datei mitnehmen](pitch--waelder-speichern.md) | implemented |
 | [Verfall und Reparatur – buildings wear, fall into ruins and are repaired](pitch--verfall-und-reparatur.md) | implemented |
-| [Befehle und Tasten – every action a named command that keys bind to, and macros](pitch--befehle-und-tasten.md) | shaped |
+| [Befehle und Tasten – every action a named command that keys bind to, and macros](pitch--befehle-und-tasten.md) | implemented |

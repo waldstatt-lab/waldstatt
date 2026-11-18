@@ -12,7 +12,9 @@ import iseLogoUrl from "./ise-logo.png?url";
 import { href } from "../../lib/url";
 import { kinds, placing, STAGE, textWidth } from "./config";
 import { attachInput } from "./input";
-import { load as loadKeys } from "./keys";
+import { Commands } from "./commands";
+import { registerCommands } from "./commandSet";
+import { load as loadKeys } from "./keymap";
 import { KeysDialog } from "./keysDialog";
 import { textLength, WorldLayer } from "./overlay";
 import { Renderer } from "./render";
@@ -238,6 +240,7 @@ async function start(root: HTMLElement) {
   world = new WorldLayer(host, game, games);
   let saves: SavesDialog | undefined;
   let keys: KeysDialog | undefined;
+  const commands = new Commands((text) => ui?.announce(text));
   ui = new Ui({
     root,
     game,
@@ -252,7 +255,7 @@ async function start(root: HTMLElement) {
     },
     saves: () => void saves?.open(),
     keys: () => keys?.open(),
-    saveCommands: () => saves?.commands() ?? [],
+    commands,
     moved: scheduleSave,
   });
   const shown = ui;
@@ -273,12 +276,19 @@ async function start(root: HTMLElement) {
         );
     },
   });
+  registerCommands(commands, shown, () => saves?.forestCommands());
   keys = new KeysDialog({
     root,
+    commands,
     confirm: (o) => shown.confirm(o),
     announce: (text) => shown.announce(text),
   });
-  void loadKeys();
+  // Every command a stored keymap names is checked against those registered.
+  const why = (text: string) => {
+    const parsed = commands.parse(text);
+    return "error" in parsed ? parsed.error : undefined;
+  };
+  void loadKeys(why);
   syncStage();
   ui.useInput(attachInput(host, renderer, ui.handlers()));
 

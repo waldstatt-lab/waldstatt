@@ -340,6 +340,9 @@
   background: var(--wg-amber);
   color: var(--wg-ink);
 }
+.wg-finder-unavailable {
+  opacity: 0.6;
+}
 .wg-finder-hint {
   min-width: 0;
   overflow: hidden;
@@ -563,46 +566,42 @@
   display: grid;
   gap: 0.35rem;
 }
-.wg-keymap-row {
+.wg-keymap-row,
+.wg-keymap-macro {
   display: grid;
-  grid-template-columns: minmax(8rem, 1fr) auto;
+  grid-template-columns: minmax(3rem, auto) 1fr auto;
   align-items: center;
-  gap: 0.35rem 0.5rem;
+  gap: 0.35rem 0.6rem;
   padding: 0.35rem 0.5rem;
   border: 2px solid var(--wg-wood-edge);
   border-radius: 0.25rem;
   background: var(--wg-wood-light);
 }
 .wg-keymap-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  grid-column: 1 / -1;
-  grid-row: 2;
-}
-@media (min-width: 40rem) {
-  .wg-keymap-row {
-    grid-template-columns: 11rem 1fr auto;
-  }
-  .wg-keymap-keys {
-    grid-column: auto;
-    grid-row: auto;
-  }
-}
-.wg-keymap-key {
-  display: inline-flex;
-  align-items: center;
+  justify-self: start;
+  min-width: 1.75rem;
+  padding: 0.1rem 0.4rem;
   border: 2px solid var(--wg-wood-edge);
   border-radius: 0.25rem;
   background: var(--wg-parchment);
   color: var(--wg-ink);
-}
-.wg-keymap-key kbd {
-  min-width: 1.75rem;
-  padding: 0.1rem 0.4rem;
   font-family: ui-monospace, monospace;
   font-weight: 700;
   text-align: center;
+  white-space: nowrap;
+}
+.wg-keymap-name {
+  display: grid;
+  min-width: 0;
+}
+.wg-keymap-name code,
+.wg-keymap-macro input {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+.wg-keymap-what {
+  font-size: 0.85rem;
+  opacity: 0.85;
 }
 .wg-keymap-remove {
   min-width: 2rem;
@@ -614,13 +613,59 @@
 .wg-keymap-remove:hover {
   background: var(--wg-parchment-dark);
 }
-.wg-keymap-none {
-  font-size: 0.875rem;
-  opacity: 0.85;
+.wg-keymap-macro {
+  grid-template-columns: minmax(5rem, 9rem) 1fr auto auto;
 }
-.wg-keymap .wg-keymap-add {
-  min-height: 2.25rem;
-  padding: 0.2rem 0.6rem;
+.wg-keymap-macro input,
+.wg-keymap-json textarea {
+  min-width: 0;
+  padding: 0.25rem 0.4rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+  font: inherit;
+}
+.wg-keymap-json textarea {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+.wg-keymap-json summary {
+  font-family: var(--wg-serif);
+  font-weight: 700;
+  cursor: pointer;
+}
+.wg-keymap-add,
+.wg-keymap-bindings,
+.wg-keymap-macros,
+.wg-keymap-json {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+.wg-keymap-add > .wg-button {
+  justify-self: start;
+}
+.wg-keymap-record {
+  display: flex;
+  gap: 0.5rem;
+}
+.wg-keymap-check:empty,
+.wg-keymap-problems:empty {
+  display: none;
+}
+.wg-keymap-problems {
+  color: #ffb4a0;
+  font-size: 0.9rem;
+}
+@media (max-width: 30rem) {
+  .wg-keymap-macro {
+    grid-template-columns: 1fr auto;
+  }
+  .wg-keymap-macro input {
+    grid-column: 1 / -1;
+  }
 }
 .wg-keymap-status:empty {
   display: none;
@@ -646,6 +691,36 @@
   font-family: ui-monospace, monospace;
   font-weight: 700;
   text-align: center;
+}
+
+/* A macro being recorded, as vim shows «recording». */
+.wg-recording {
+  position: absolute;
+  right: max(0.75rem, env(safe-area-inset-right));
+  bottom: max(7rem, env(safe-area-inset-bottom));
+  padding: 0.25rem 0.6rem;
+  font-weight: 700;
+  color: #a8323a;
+}
+.wg-macro-steps {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.wg-field {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+}
+.wg-field input,
+.wg-field select,
+.wg-field textarea {
+  font: inherit;
+  padding: 0.3rem 0.4rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
 }
 
 /* --- Texts and the stage lying on the map --------------------------------- */

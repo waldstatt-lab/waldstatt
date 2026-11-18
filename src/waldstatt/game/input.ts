@@ -3,16 +3,12 @@
  * the saw, one finger or the left mouse button marks an area instead, and two
  * fingers or another mouse button pan; while placing, a drag that starts on
  * the building being placed moves it); pinching and the wheel zoom; a tap is
- * a short press without movement. Keys are handled only while the map has
- * focus, by the keymap (keys.ts): the movement keys (arrows, h j k l and
- * s e i u by default) move the cursor one tile along the squares' edges,
- * again and again while held, and the view glides after it; digits typed
- * before give a count, so «10» and then → moves ten tiles; with Shift they
- * pan smoothly; + and − zoom; v starts a selection (the saw's or paving's)
- * at the cursor and o jumps to its other corner; Enter or Space applies;
- * Escape drops a count or cancels.
+ * a short press without movement. Keys on the map go to the key dispatcher
+ * (dispatch.ts), which runs commands; this module keeps the keyboard cursor
+ * they move: one tile at a time along the squares' edges, with the view
+ * gliding after it once it leaves the middle half of the screen. Escape that
+ * the dispatcher does not take cancels.
  */
-import { actionFor, directions, isModifier, normal } from "./keys";
 import type { Renderer } from "./render";
 
 export interface Tile {
@@ -27,6 +23,11 @@ export interface MapHandlers {
   release(): void;
   /** A key for something on the map, such as the stage; true if taken. */
   key(event: KeyboardEvent, down: boolean): boolean;
+  /** Any other key: for the dispatcher; true if taken. */
+  keydown(event: KeyboardEvent): boolean;
+  keyup(event: KeyboardEvent): void;
+  /** Focus left the map. */
+  blur(): void;
   /** Whether a one-finger or left-button drag marks an area (the saw). */
   sawing(): boolean;
   /** A press on the building being placed: true if it is taken to drag. */
@@ -37,16 +38,6 @@ export interface MapHandlers {
   hover(tile: Tile): void;
   saw(from: Tile, to: Tile, done: boolean): void;
   cursor(tile: Tile): void;
-  activate(tile: Tile): void;
-  /** v: a rectangle starts at the cursor, for the saw or paving. */
-  visual(tile: Tile): void;
-  /**
-   * o: the selection's corners swap; returns the corner the cursor jumps
-   * to, or null without a selection.
-   */
-  other(tile: Tile): Tile | null;
-  /** The count typed before a movement, or null once it is used or dropped. */
-  count(n: number | null): void;
   cancel(): void;
   /** The view moved, e.g. to save the camera. */
   moved(): void;
@@ -209,23 +200,6 @@ export function attachInput(
     }
   });
 
-  /** The keys held to move the cursor or pan, which way, and since when. */
-  const held = new Map<
-    string,
-    { d: [number, number]; pan: boolean; since: number; next: number }
-  >();
-  let loop = 0;
-  let last = 0;
-  /** The count typed before a movement, such as 10 for «10» and then →. */
-  let count = 0;
-  const maxCount = 9999;
-
-  const setCount = (n: number) => {
-    if (n === count) return;
-    count = n;
-    handlers.count(n || null);
-  };
-
   const step = (direction: [number, number], by = 1) => {
     cursor ??= centreTile();
     // Along the squares' edges, so every tile is reached: → and ← along x,
@@ -238,108 +212,23 @@ export function attachInput(
     handlers.cursor(cursor);
   };
 
-  /** Moves and pans while keys are held: steps at an even pace, pans smoothly. */
-  const tick = (now: number) => {
-    const dt = Math.min(0.05, (now - last) / 1000);
-    last = now;
-    let panX = 0;
-    let panY = 0;
-    for (const h of held.values()) {
-      if (h.pan) {
-        panX += h.d[0];
-        panY += h.d[1];
-      } else if (now >= h.next) {
-        step(h.d);
-        // A pause after the first step, then steady steps.
-        h.next = now + (now - h.since < 100 ? 220 : 85);
-      }
-    }
-    if (panX || panY) {
-      renderer.pan(-panX * 900 * dt, -panY * 900 * dt);
-      handlers.moved();
-    }
-    loop = held.size ? requestAnimationFrame(tick) : 0;
-  };
-
   host.addEventListener("keydown", (event) => {
     // Keys on something inside the map, such as a link in a text, are theirs.
     if (event.target !== host) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (handlers.key(event, true)) {
+    if (handlers.key(event, true) || handlers.keydown(event)) {
       event.preventDefault();
       return;
     }
-    // Digits make a count for the next movement; a lone 0 is nothing.
-    // (Shift is allowed: some layouts, such as AZERTY, need it for digits.)
-    if (/^[0-9]$/.test(event.key)) {
-      if (event.key !== "0" || count)
-        setCount(Math.min(maxCount, count * 10 + Number(event.key)));
-      event.preventDefault();
-      return;
-    }
-    if (event.key === "Escape") {
-      // Escape drops a count first, as in vim.
-      if (count) setCount(0);
-      else handlers.cancel();
-      return;
-    }
-    const action = actionFor(event.key);
-    const direction = action && directions[action];
-    if (direction) {
-      event.preventDefault();
-      const by = count || 1;
-      setCount(0);
-      // The keyboard's own repeat is ignored: the loop sets the pace.
-      const key = normal(event.key);
-      if (event.repeat || held.has(key)) return;
-      const now = performance.now();
-      const pan = event.shiftKey;
-      held.set(key, { d: direction, pan, since: now, next: now + 220 });
-      if (!pan) step(direction, by);
-      if (!loop) {
-        last = now;
-        loop = requestAnimationFrame(tick);
-      }
-      return;
-    }
-    // Any other key drops the count.
-    if (!isModifier(event.key)) setCount(0);
-    if (action === "zoomIn") {
-      event.preventDefault();
-      zoomCentre(1.25);
-    } else if (action === "zoomOut") {
-      event.preventDefault();
-      zoomCentre(0.8);
-    } else if (action === "visual") {
-      event.preventDefault();
-      cursor ??= centreTile();
-      handlers.cursor(cursor);
-      handlers.visual(cursor);
-    } else if (action === "other") {
-      event.preventDefault();
-      cursor ??= centreTile();
-      const to = handlers.other(cursor);
-      if (to) {
-        cursor = to;
-        keepInView(cursor);
-        handlers.cursor(cursor);
-      }
-    } else if (action === "apply") {
-      event.preventDefault();
-      cursor ??= centreTile();
-      handlers.cursor(cursor);
-      handlers.activate(cursor);
-    }
+    if (event.key === "Escape") handlers.cancel();
   });
 
   host.addEventListener("keyup", (event) => {
-    held.delete(normal(event.key));
-    if (event.key === "Shift") for (const h of held.values()) h.pan = false;
+    handlers.keyup(event);
     if (event.target === host) handlers.key(event, false);
   });
   host.addEventListener("blur", () => {
-    held.clear();
-    setCount(0);
+    handlers.blur();
     handlers.release();
   });
 
@@ -383,6 +272,30 @@ export function attachInput(
   return {
     /** The keyboard cursor, if the keyboard has been used. */
     cursor: () => cursor,
+    /** The keyboard cursor, shown at the middle of the view if it was not. */
+    here(): Tile {
+      cursor ??= centreTile();
+      handlers.cursor(cursor);
+      return cursor;
+    },
+    /** Moves the keyboard cursor by tiles. */
+    move(direction: [number, number], by = 1) {
+      step(direction, by);
+    },
+    /** Moves the keyboard cursor to a tile, the view following. */
+    jump(tile: Tile) {
+      cursor = { ...tile };
+      keepInView(cursor);
+      handlers.cursor(cursor);
+    },
+    zoom(factor: number) {
+      zoomCentre(factor);
+    },
+    /** Pans the view by directions held, smoothly, for a time step. */
+    pan(dx: number, dy: number, dt: number) {
+      renderer.pan(-dx * 900 * dt, -dy * 900 * dt);
+      handlers.moved();
+    },
     clearCursor() {
       cursor = null;
     },

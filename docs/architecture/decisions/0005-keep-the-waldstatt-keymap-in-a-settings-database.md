@@ -4,8 +4,10 @@ status: accepted
 date: 2026-11-18
 amends:
   - 0004-keep-named-waldstatt-saves-and-files.md
+amended-by:
+  - 0006-make-waldstatt-actions-commands-that-keys-bind-to.md
 sources:
-  - src/waldstatt/game/keys.ts
+  - src/waldstatt/game/keymap.ts
   - src/waldstatt/game/keysDialog.ts
   - src/waldstatt/game/textCursor.ts
   - src/waldstatt/game/input.ts
@@ -13,6 +15,13 @@ sources:
 ---
 
 # 0005 — Let visitors bind the Waldstatt's keys, kept in a settings database
+
+**Amended by [ADR 0006](0006-make-waldstatt-actions-commands-that-keys-bind-to.md):**
+keys no longer bind to a fixed list of actions in scopes but to named commands
+and chains of them, in contexts, with sequences, the visitor's bindings
+layered over the defaults and `null` taking a default away; `keys.ts` became
+`keymap.ts`. The keymap stays in `waldstatt-games-settings` as a record of
+version 2, with the named macros; a record of version 1 is converted once.
 
 ## Context
 
@@ -40,7 +49,7 @@ Alternatives considered for where it lives:
 
 ## Decision
 
-- [`keys.ts`](../../../src/waldstatt/game/keys.ts) holds the
+- [`keys.ts`](../../../src/waldstatt/game/keymap.ts) holds the
   keymap: each action (moving left, right, up and down, starting a selection,
   its other corner, applying, zooming, the four tools, Bauen, the menu and
   both finders) has a list of keys. Defaults: arrows, h j k l and s e i u

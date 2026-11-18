@@ -1,11 +1,14 @@
 ---
 tags: [adr]
-status: proposed
+status: accepted
 date: 2026-11-19
 amends:
   - 0005-keep-the-waldstatt-keymap-in-a-settings-database.md
 sources:
-  - src/waldstatt/game/keys.ts
+  - src/waldstatt/game/commands.ts
+  - src/waldstatt/game/commandSet.ts
+  - src/waldstatt/game/keymap.ts
+  - src/waldstatt/game/dispatch.ts
   - src/waldstatt/game/keysDialog.ts
   - src/waldstatt/game/input.ts
   - src/waldstatt/game/ui.ts
@@ -38,7 +41,12 @@ Alternatives considered:
 
 ## Decision
 
-Proposed, not implemented.
+Implemented in
+[`commands.ts`](../../../src/waldstatt/game/commands.ts),
+[`commandSet.ts`](../../../src/waldstatt/game/commandSet.ts),
+[`keymap.ts`](../../../src/waldstatt/game/keymap.ts) (which
+replaces `keys.ts`) and
+[`dispatch.ts`](../../../src/waldstatt/game/dispatch.ts):
 
 - Every action of the keyboard and the finder is a **command** in one
   registry, with an id path of colon segments (`up`, `up:20`, `build:hütte`,
@@ -65,9 +73,6 @@ Proposed, not implemented.
   converted once. Both can be edited as JSON in the dialog «Tasten» and
   exported and imported as a file, checked like every other untrusted input.
 
-Once implemented, this record becomes accepted, and ADR 0005 is marked
-amended by it.
-
 ## Consequences
 
 - Keys and the finder cannot drift apart: a feature adds commands, and both
@@ -86,10 +91,12 @@ amended by it.
 
 ## The tell
 
-Once implemented: searching `src/waldstatt/game` for
-`FinderItem` or for keys compared in `keydown` handlers outside the
-dispatcher should find nothing. Every entry of the «:» finder should come
-from the registry, and every default binding should name a registered
-command; a manual check of the dialog «Tasten» should show a description for
-each binding. The search cannot prove that every command is reachable by
-keyboard.
+Searching `src/waldstatt/game` for `event.key ===` should
+find only Escape and modifier checks, the text fields of the finder and the
+dialogs, and the stage's game controls: any other comparison of a key outside
+`dispatch.ts` and `keymap.ts` bypasses the keymap. The finder's entries
+should come from `commands.entries()` or from parsing what is typed, never
+from labels written in `ui.ts`. Every default binding in `keymap.ts` should
+read as a registered command; opening «Tasten» shows a description for each,
+or the reason it does not read. The checks cannot prove that every command is
+reachable by keyboard.
