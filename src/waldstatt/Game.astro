@@ -152,13 +152,19 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
         </button>
       </li>
       <li>
+        <button type="button" class="wg-button" data-act="saves">
+          Wälder speichern und laden …
+        </button>
+      </li>
+      <li>
         <button type="button" class="wg-button" data-act="reset">
           Neu beginnen …
         </button>
       </li>
       <li class="wg-keys">
         Tasten: a Axt · s Säge · p Pflastern · x Abreissen · b Bauen · m Menü ·
-        v Auswahl · / Start und Schriften · : Befehle · h j k l bewegen
+        v Auswahl · / Start und Schriften · : Befehle, auch «wälder» · h j k l
+        bewegen
       </li>
       <li class="wg-credit">
         Gewässer und Landesgrenze: Bundesamt für Landestopografie swisstopo
@@ -253,6 +259,54 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
           Abbrechen
         </button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog
+    class="wg-dialog wg-saves"
+    data-saves
+    aria-labelledby="wg-saves-title"
+  >
+    <h2 id="wg-saves-title">Wälder</h2>
+    <form class="wg-saves-new" data-saves-form>
+      <label for="wg-saves-name">Diesen Wald speichern als</label>
+      <div class="wg-saves-row">
+        <input
+          id="wg-saves-name"
+          type="text"
+          maxlength="60"
+          required
+          autocomplete="off"
+          spellcheck="false"
+          data-saves-name
+        />
+        <button type="submit" class="wg-button wg-primary">
+          Speichern
+        </button>
+      </div>
+    </form>
+    <h3>Gespeicherte Wälder</h3>
+    <p class="wg-saves-empty" data-saves-empty hidden>
+      Noch kein Wald gespeichert.
+    </p>
+    <ul class="wg-saves-list" data-saves-list></ul>
+    <div class="wg-actions">
+      <button type="button" class="wg-button" data-saves-export>
+        Diesen Wald herunterladen
+      </button>
+      <button type="button" class="wg-button" data-saves-import>
+        Wald aus Datei …
+      </button>
+      <input
+        type="file"
+        accept=".json,application/json"
+        hidden
+        data-saves-file
+      />
+    </div>
+    <p class="wg-saves-status" data-saves-status></p>
+    <form method="dialog" class="wg-actions">
+      <button class="wg-button">Schliessen</button>
     </form>
   </dialog>
 

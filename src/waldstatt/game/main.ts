@@ -1,9 +1,10 @@
 /**
  * Starts the Waldstatt: reads the saved state from IndexedDB (ADR 0003), sets
  * up PixiJS on the map, wires the rules, the picture and the interface
- * together, saves now and then, and registers the service worker that makes
- * the page installable and playable offline (ADR 0002). Without WebGL the
- * still picture and its note stay.
+ * together, saves now and then, loads saved forests and files in place of
+ * the forest being played (ADR 0004), and registers the service worker that
+ * makes the page installable and playable offline (ADR 0002). Without WebGL
+ * the still picture and its note stay.
  */
 import { Application } from "pixi.js";
 import { setIseLogo } from "./art";
@@ -15,7 +16,8 @@ import { textLength, WorldLayer } from "./overlay";
 import { Renderer } from "./render";
 import { Stage } from "./stage";
 import { Game, type Events, type TextSpec } from "./sim";
-import { clearSaved, keep, load, save, whenClosed } from "./state";
+import { SavesDialog } from "./savesDialog";
+import { clearSaved, keep, load, replaceWith, save, whenClosed } from "./state";
 import { readGames } from "./texts";
 import { Ui } from "./ui";
 import { loadPages, onPage, start as clearing, town } from "./world";
@@ -51,7 +53,8 @@ async function start(root: HTMLElement) {
   if (!host) return;
 
   const games = readGames();
-  const { state, problem } = await load(new Set(games.map((g) => g.id)));
+  const gameIds = new Set(games.map((g) => g.id));
+  const { state, problem } = await load(gameIds);
   // The water as far out as the texts may lie hidden: the games' scrolls
   // round the first clearing, the town's texts round the Klosterplatz; and
   // round the view.
@@ -231,6 +234,7 @@ async function start(root: HTMLElement) {
     (id) => games.find((g) => g.id === id)?.title ?? "",
   );
   world = new WorldLayer(host, game, games);
+  let saves: SavesDialog | undefined;
   ui = new Ui({
     root,
     game,
@@ -243,7 +247,27 @@ async function start(root: HTMLElement) {
       window.clearTimeout(saveTimer);
       void clearSaved().then(() => window.location.reload());
     },
+    saves: () => void saves?.open(),
+    saveCommands: () => saves?.commands() ?? [],
     moved: scheduleSave,
+  });
+  const shown = ui;
+  saves = new SavesDialog({
+    root,
+    state,
+    gameIds,
+    confirm: (o) => shown.confirm(o),
+    announce: (text) => shown.announce(text),
+    replace: async (next) => {
+      // The forest being played is saved no more, so it cannot come back.
+      saving = false;
+      window.clearTimeout(saveTimer);
+      if (await replaceWith(next)) window.location.reload();
+      else
+        shown.announce(
+          "Der Wald liess sich nicht laden. Lade die Seite neu, um im bisherigen Wald weiterzuspielen; bis dahin wird hier nicht gespeichert.",
+        );
+    },
   });
   syncStage();
   attachInput(host, renderer, ui.handlers());
@@ -270,7 +294,7 @@ async function start(root: HTMLElement) {
   whenClosed(() => {
     saving = false;
     ui?.announce(
-      "Der Wald wurde in einem anderen Tab neu begonnen. Lade diese Seite neu; bis dahin wird hier nicht gespeichert.",
+      "In einem anderen Tab wurde der Wald neu begonnen oder ein anderer geladen. Lade diese Seite neu; bis dahin wird hier nicht gespeichert.",
     );
   });
 

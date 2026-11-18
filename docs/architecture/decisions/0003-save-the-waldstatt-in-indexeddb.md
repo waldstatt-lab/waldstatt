@@ -4,6 +4,8 @@ status: accepted
 date: 2026-11-18
 amends:
   - 0002-make-the-waldstatt-a-browser-game.md
+amended-by:
+  - 0004-keep-named-waldstatt-saves-and-files.md
 sources:
   - src/waldstatt/game/state.ts
   - src/waldstatt/game/main.ts
@@ -11,6 +13,12 @@ sources:
 ---
 
 # 0003 — Save the Waldstatt in IndexedDB
+
+**Amended by [ADR 0004](0004-keep-named-waldstatt-saves-and-files.md):**
+forests saved under a name live in a second database, `waldstatt-games-saves`,
+which «Neu beginnen» leaves alone; loading one or a file replaces the records of
+`waldstatt-games` in one transaction after opening it at a higher version. The
+tell's single database name below now covers the forest being played only.
 
 ## Context
 

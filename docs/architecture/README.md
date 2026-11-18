@@ -23,7 +23,7 @@ the map. Its folder `src/waldstatt/` holds:
 
 | Path | Contents |
 | --- | --- |
-| `Game.astro` | The page: map host, toolbox, menus, the back button, the confirmation for «Neu beginnen», and inert `<template>`s with the Ortstafel, the Chronik and each game's rendered Markdown, which lie hidden in the forest |
+| `Game.astro` | The page: map host, toolbox, menus, the back button, the confirmation dialog, the dialog «Wälder» for saved forests, and inert `<template>`s with the Ortstafel, the Chronik and each game's rendered Markdown, which lie hidden in the forest |
 | `Forest.astro` | The still picture: the start of the generated forest as SVG, shown until the game is ready and instead of it |
 | `Icon.astro`, `icons.ts` | Pixel icons as colour grids for the toolbox, the Waldmensch's portrait and the app icon |
 | `png.ts` | A small PNG encoder for the app icons at build time |
@@ -33,7 +33,9 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/config.ts` | The balance table: costs, footprints, build times, speeds, stock limits, the hidden texts and where they lie |
 | `game/world.ts` | The world: the forest from a fixed seed, and the water pages, loaded as they come into view and rasterized into tiles: water, lakes by number, the palisade and the land abroad |
 | `game/iso.ts` | The projections between tiles and the screen: the isometric view, the top-down plan, and the blend between them |
-| `game/state.ts` | The save in IndexedDB ([ADR 0003](decisions/0003-save-the-waldstatt-in-indexeddb.md)): the settlement, the people and one record per chunk, validated on load, written in part, reset by deleting the database |
+| `game/state.ts` | The save in IndexedDB ([ADR 0003](decisions/0003-save-the-waldstatt-in-indexeddb.md)): the settlement, the people and one record per chunk, validated on load, written in part, reset by deleting the database; snapshots of the whole forest, and replacing it with another in one transaction |
+| `game/saves.ts` | Forests saved under a name in the database `waldstatt-games-saves`, and forests as JSON files to download and read back ([ADR 0004](decisions/0004-keep-named-waldstatt-saves-and-files.md)) |
+| `game/savesDialog.ts` | The dialog «Wälder»: save under a name, the list to load, download or delete, the forest being played as a file, and a forest from a file |
 | `game/sim.ts` | The rules: the tools on the ground, marking and felling, the hidden texts, Waldleute and their tasks (walking back to eat included), bridges, ports and ships, building sites, placing rules, what the build menu shows, ruins and repair, the ravens; it steps the systems below in turn |
 | `game/economy.ts` | The goods: the shared stock and its limits, the crews and recipes of the producing buildings, beer for the Spielhäuser and the theatre, the upkeep of the Klause, the churches and the Kloster, the Brot auswerfen |
 | `game/people.ts` | The Waldleute's lives: ages, meals and where food reaches, children, deaths, graves and tombstones, beds, the fire and the first pair |
@@ -237,8 +239,8 @@ stage, or opens its game or source; otherwise it opens a small card on the map
 above the building with its state and stock, − and + for a crew, or the repair
 of a ruin. A tap anywhere else, the card's ×, or Escape closes it. Other
 messages show as a short label over a building for a few seconds. Nothing explains the game: there are no hints,
-and announcements tell only what happened. Only «Neu beginnen» in the menu asks
-for confirmation.
+and announcements tell only what happened. Only «Neu beginnen» and loading,
+overwriting or deleting a saved forest ask for confirmation.
 
 **Resources.** On wide screens a bar along the top shows the goods the
 settlement has had, the Waldleute and beds, motivation, and, from the first
@@ -348,10 +350,11 @@ when it is hidden; only chunks that changed are written. The organization's
 Pages sites share one origin (the games save under `moto-devil/` and
 `car-drive/` in `localStorage`), so the save is validated on load, a broken
 save starts a new forest with a notice, and «Neu beginnen» deletes the
-database and any old keys starting with `waldstatt-games/`. The installed app
+database and any old keys starting with `waldstatt-games/`, but not the saved
+forests below. The installed app
 asks the browser to keep its storage. Each tab holds the database open; when
-one tab resets the forest, the others let go of it and stop saving, so they
-cannot write their old forest back, and say so. If the database does not open
+one tab resets the forest or loads another, the others let go of it and stop
+saving, so they cannot write their old forest back, and say so. If the database does not open
 within five seconds, as when an older tab still holds it, the page starts a
 fresh forest without saving and says why. If the start fails otherwise, the
 still picture shows the error instead of waiting silently. The manifest's start URL and scope and
@@ -361,6 +364,35 @@ serves files under the base path and Astro's `_astro/` assets cache-first,
 ignoring `Vary` because those URLs carry content hashes. On the first visit the
 page hands the worker the files it already loaded, so the next start works
 offline. The worker is not registered in development.
+
+**Saved forests and files.** «Wälder speichern und laden …» in the menu, or
+`:wälder` in the finder, opens the dialog «Wälder»
+([ADR 0004](decisions/0004-keep-named-waldstatt-saves-and-files.md),
+[pitch](../pitches/pitch--waelder-speichern.md)). It saves the
+forest being played under a name, as a snapshot of the whole save (the
+settlement, the people and every chunk), in the IndexedDB database
+`waldstatt-games-saves`, one record per name with the time and the counts of
+Waldleute and buildings; names are cleaned of control characters and cut to
+60 characters, and at most 200 forests are kept. Saving under a name that
+exists asks first. The list shows the forests newest first, each with «Laden»,
+«Herunterladen» and «Löschen»; loading and deleting ask first. Loading checks
+the snapshot with the save's own checks, stops this page's saving, opens
+`waldstatt-games` at the next version so other tabs let go, replaces its
+records in one transaction, and reloads the page; if that fails, the old forest
+stays and the page says so. «Diesen Wald herunterladen» and «Herunterladen»
+offer a JSON file, `waldstatt-<name>-<day>.json`, with `format:
+"waldstatt-games"`, the name, the time, the save's records and the chunks'
+bytes in base64. «Wald aus Datei …» reads such a file of at most 32 MB, checks
+it like the save, adds it to the list under its name (numbered if the name is
+taken) and offers to load it. Snapshots and files of another save version are
+refused. The «:» finder has the same actions: `wald:speichern`,
+`wald:herunterladen`, `wald:aus-datei`, and `wald:laden:…`,
+`wald:herunterladen:…` and `wald:löschen:…` for each saved forest, named in
+lower case with hyphens and hinted with the time it was saved. Each opens the
+dialog first, so its status line and confirmations show; `wald:aus-datei`
+opens the file picker straight from the key or tap, as browsers require. The
+finder knows the saved forests from the start of the page and after each
+change in the dialog; one saved in another tab shows after a reload.
 
 **Access.** The map is a focusable `role="application"`: arrow keys or h, j,
 k, l move a cursor tile along the squares' edges (→ and ← along x, ↑ and ↓
@@ -373,7 +405,8 @@ Bauen and m the menu, which lists these keys. «/» opens a finder over the
 starting point (`start`) and the texts found so far and jumps to the one
 chosen; «:» one over commands:
 `tool:…` for the tools at hand, `build:…` for the buildings the menu shows,
-`lichtung`, `bauen`, `menü` and `neu-beginnen`. Both match fuzzily, ignoring
+`lichtung`, `bauen`, `menü`, `wälder` and `neu-beginnen`, and `wald:…` for
+the saved forests (see below). Both match fuzzily, ignoring
 accents, and take arrows or Tab, Enter and Escape. While the view is turned onto the stage,
 the keys from the game's controls play it instead. Every tool, menu item and
 link is a real button or link with a German name; status, finished buildings,

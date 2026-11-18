@@ -4,9 +4,12 @@
  * seed and more), one with the people, and one per chunk with its felled
  * trees, cobbles and seedlings as bytes. The forest itself is generated
  * (world.ts); only the visitor's changes are saved, and a save writes only
- * the chunks that changed. The organization's Pages sites share one origin,
- * so whatever comes back is checked as untrusted input, and a reset deletes
- * only this database and the Waldstatt's old `localStorage` keys.
+ * the chunks that changed. A snapshot is the whole forest as plain data,
+ * for the forests saved under a name and for files (saves.ts, ADR 0004);
+ * loading one replaces the saved forest in one transaction. The
+ * organization's Pages sites share one origin, so whatever comes back is
+ * checked as untrusted input, and a reset deletes only this database and the
+ * Waldstatt's old `localStorage` keys.
  */
 import {
   balance,
@@ -29,6 +32,7 @@ const limits = {
   people: balance.maxPeople + 100,
   tombs: 3000,
   list: 40000,
+  chunks: 20000,
 };
 
 export interface Building {
@@ -189,50 +193,74 @@ export function whenClosed(listener: () => void) {
 /** Seconds to wait for the database, e.g. while another tab holds it. */
 const openTimeout = 5000;
 
-function open(): Promise<IDBDatabase> {
-  if (closed) return Promise.reject(new Error("closed"));
-  opening ??= new Promise<IDBDatabase>((resolve, reject) => {
+const timeout = <T>(promise: Promise<T>) =>
+  new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(
       () => reject(new Error("blocked")),
       openTimeout,
     );
-    const connect = (version?: number) => {
-      const r = indexedDB.open(dbName, version);
-      r.onupgradeneeded = () => {
-        for (const store of ["meta", "chunks"])
-          if (!r.result.objectStoreNames.contains(store))
-            r.result.createObjectStore(store);
-      };
-      r.onsuccess = () => {
-        const db = r.result;
-        // A database without its stores, e.g. left by an interrupted reset:
-        // open it once more at the next version, which adds them.
-        if (
-          !db.objectStoreNames.contains("meta") ||
-          !db.objectStoreNames.contains("chunks")
-        ) {
-          const next = db.version + 1;
-          db.close();
-          return connect(next);
-        }
-        // Another tab resets the forest: let go, and save no more here, so
-        // this tab cannot write its old forest back.
-        db.onversionchange = () => {
-          db.close();
-          closed = true;
-          opening = null;
-          onClosed();
-        };
+    promise.then(
+      (value) => {
         window.clearTimeout(timer);
-        resolve(db);
-      };
-      r.onerror = () => {
+        resolve(value);
+      },
+      (error: unknown) => {
         window.clearTimeout(timer);
-        reject(r.error);
-      };
+        reject(error);
+      },
+    );
+  });
+
+const done = (tx: IDBTransaction) =>
+  new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+
+/** Opens the database, at the given version, and adds its stores if missing. */
+function connect(at?: number): Promise<IDBDatabase> {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const r = indexedDB.open(dbName, at);
+    r.onupgradeneeded = () => {
+      for (const store of ["meta", "chunks"])
+        if (!r.result.objectStoreNames.contains(store))
+          r.result.createObjectStore(store);
     };
-    connect();
-  }).catch((error: unknown) => {
+    r.onsuccess = () => {
+      const db = r.result;
+      // A database without its stores, e.g. left by an interrupted reset:
+      // open it once more at the next version, which adds them.
+      if (
+        !db.objectStoreNames.contains("meta") ||
+        !db.objectStoreNames.contains("chunks")
+      ) {
+        const next = db.version + 1;
+        db.close();
+        resolve(connect(next));
+        return;
+      }
+      resolve(db);
+    };
+    r.onerror = () => reject(r.error);
+  });
+}
+
+function open(): Promise<IDBDatabase> {
+  if (closed) return Promise.reject(new Error("closed"));
+  opening ??= timeout(
+    connect().then((db) => {
+      // Another tab resets the forest or loads another: let go, and save no
+      // more here, so this tab cannot write its old forest back.
+      db.onversionchange = () => {
+        db.close();
+        closed = true;
+        opening = null;
+        onClosed();
+      };
+      return db;
+    }),
+  ).catch((error: unknown) => {
     opening = null;
     throw error;
   });
@@ -279,23 +307,68 @@ export async function load(gameIds: Set<string>): Promise<{
     ]);
     if (save === undefined) return { state: freshState() };
     const state = parse(save, people, gameIds);
-    if (keys.length > 20000) throw new Error("chunks");
-    keys.forEach((k, i) => {
-      if (typeof k !== "string" || !chunkKey.test(k)) throw new Error("chunk");
-      const record = values[i] as Record<string, unknown> | null;
-      if (typeof record !== "object" || record === null)
-        throw new Error("chunk record");
-      const felled = bytes(record.felled, bitsetBytes);
-      const paved = bytes(record.paved, bitsetBytes);
-      const growth = bytes(record.growth, growthBytes);
-      if (felled) state.felled.set(k, felled);
-      if (paved) state.paved.set(k, paved);
-      if (growth) state.growth.set(k, growth);
-    });
+    if (keys.length > limits.chunks) throw new Error("chunks");
+    keys.forEach((k, i) => addChunk(state, k, values[i]));
     return { state };
   } catch {
     return { state: freshState(), problem: "invalid" };
   }
+}
+
+/** Adds a chunk record to the state, or throws if it is not one. */
+function addChunk(state: Saved, key: unknown, value: unknown) {
+  if (typeof key !== "string" || !chunkKey.test(key)) throw new Error("chunk");
+  if (typeof value !== "object" || value === null)
+    throw new Error("chunk record");
+  const record = value as Record<string, unknown>;
+  const felled = bytes(record.felled, bitsetBytes);
+  const paved = bytes(record.paved, bitsetBytes);
+  const growth = bytes(record.growth, growthBytes);
+  if (felled) state.felled.set(key, felled);
+  if (paved) state.paved.set(key, paved);
+  if (growth) state.growth.set(key, growth);
+}
+
+/**
+ * A whole forest as plain data: the settlement, the people and every chunk,
+ * as the database holds them. Saved forests and files are made of it.
+ */
+export interface Snapshot {
+  save: unknown;
+  people: unknown;
+  chunks: Record<string, ChunkRecord>;
+}
+type ChunkRecord = Partial<Record<"felled" | "paved" | "growth", Uint8Array>>;
+
+/** The whole forest as plain data, copied. */
+export function snapshot(state: Saved): Snapshot {
+  const keys = new Set([
+    ...state.felled.keys(),
+    ...state.paved.keys(),
+    ...state.growth.keys(),
+  ]);
+  const chunks: Record<string, ChunkRecord> = {};
+  for (const key of keys) {
+    const record = chunkRecord(state, key);
+    if (record) chunks[key] = record;
+  }
+  return { ...records(state), chunks };
+}
+
+/**
+ * Reads a snapshot from a saved forest or a file, checked like the save;
+ * throws if anything in it is invalid.
+ */
+export function restore(data: unknown, gameIds: Set<string>): Saved {
+  if (typeof data !== "object" || data === null) throw new Error("snapshot");
+  const d = data as Record<string, unknown>;
+  const state = parse(d.save, d.people, gameIds);
+  if (typeof d.chunks !== "object" || d.chunks === null)
+    throw new Error("chunks");
+  const entries = Object.entries(d.chunks);
+  if (entries.length > limits.chunks) throw new Error("chunks");
+  for (const [key, value] of entries) addChunk(state, key, value);
+  return state;
 }
 
 function parse(data: unknown, rawPeople: unknown, gameIds: Set<string>): Saved {
@@ -478,6 +551,68 @@ const pairList = (keys: Iterable<string>) => {
   return list;
 };
 
+const round = (n: number, k: number) => Math.round(n * k) / k;
+
+/** The settlement and the people, as records to store. */
+function records(state: Saved): { save: unknown; people: unknown } {
+  const save = {
+    v: version,
+    stock: { ...state.stock },
+    marks: pairList(state.marks),
+    paving: pairList(state.paving),
+    buildings: state.buildings.map((b) => ({ ...b })),
+    nextId: state.nextId,
+    nextPerson: state.nextPerson,
+    flood: { ...state.flood },
+    camera: {
+      x: round(state.camera.x, 100),
+      y: round(state.camera.y, 100),
+      zoom: round(state.camera.zoom, 1000),
+    },
+    tools: { ...state.tools },
+    sawAt: state.sawAt && { ...state.sawAt },
+    seed: state.seed,
+    texts: Object.fromEntries(
+      [...state.texts].map(([key, at]) => [key, { ...at }]),
+    ),
+    explored: [...state.explored],
+    unlocked: [...state.unlocked],
+    fresh: state.fresh,
+    seen: [...state.seen],
+    mood: state.mood,
+    moods: state.moods.map((m) => ({ ...m })),
+    tombs: state.tombs.flatMap((t) => [t.x, t.y]),
+    deaths: { ...state.deaths },
+  };
+  // Only what a person is; what they are doing is found anew.
+  const people = state.people.map((p) => ({
+    id: p.id,
+    sex: p.sex,
+    age: round(p.age, 1000),
+    life: round(p.life, 1000),
+    hunger: round(p.hunger, 10),
+    lastChild: round(p.lastChild, 1000),
+    x: round(p.x, 100),
+    y: round(p.y, 100),
+    job: p.job,
+  }));
+  return { save, people };
+}
+
+/** A chunk's record to store, copied, or undefined if nothing changed there. */
+function chunkRecord(state: Saved, key: string): ChunkRecord | undefined {
+  const record: ChunkRecord = {};
+  for (const [name, map] of [
+    ["felled", state.felled],
+    ["paved", state.paved],
+    ["growth", state.growth],
+  ] as const) {
+    const value = map.get(key);
+    if (value) record[name] = value.slice();
+  }
+  return Object.keys(record).length ? record : undefined;
+}
+
 let writing = false;
 let again = false;
 
@@ -493,70 +628,19 @@ export async function save(state: Saved): Promise<boolean> {
   writing = true;
   try {
     const db = await open();
-    const round = (n: number, k: number) => Math.round(n * k) / k;
-    const meta = {
-      v: version,
-      stock: { ...state.stock },
-      marks: pairList(state.marks),
-      paving: pairList(state.paving),
-      buildings: state.buildings.map((b) => ({ ...b })),
-      nextId: state.nextId,
-      nextPerson: state.nextPerson,
-      flood: { ...state.flood },
-      camera: {
-        x: round(state.camera.x, 100),
-        y: round(state.camera.y, 100),
-        zoom: round(state.camera.zoom, 1000),
-      },
-      tools: { ...state.tools },
-      sawAt: state.sawAt,
-      seed: state.seed,
-      texts: Object.fromEntries(state.texts),
-      explored: [...state.explored],
-      unlocked: [...state.unlocked],
-      fresh: state.fresh,
-      seen: [...state.seen],
-      mood: state.mood,
-      moods: state.moods.map((m) => ({ ...m })),
-      tombs: state.tombs.flatMap((t) => [t.x, t.y]),
-      deaths: { ...state.deaths },
-    };
-    // Only what a person is; what they are doing is found anew.
-    const people = state.people.map((p) => ({
-      id: p.id,
-      sex: p.sex,
-      age: round(p.age, 1000),
-      life: round(p.life, 1000),
-      hunger: round(p.hunger, 10),
-      lastChild: round(p.lastChild, 1000),
-      x: round(p.x, 100),
-      y: round(p.y, 100),
-      job: p.job,
-    }));
+    const { save, people } = records(state);
     const dirty = [...state.dirtyChunks];
     state.dirtyChunks.clear();
     const tx = db.transaction(["meta", "chunks"], "readwrite");
-    tx.objectStore("meta").put(meta, "save");
+    tx.objectStore("meta").put(save, "save");
     tx.objectStore("meta").put(people, "people");
     const chunks = tx.objectStore("chunks");
     for (const key of dirty) {
-      const record: Record<string, Uint8Array> = {};
-      for (const [name, map] of [
-        ["felled", state.felled],
-        ["paved", state.paved],
-        ["growth", state.growth],
-      ] as const) {
-        const value = map.get(key);
-        if (value) record[name] = value.slice();
-      }
-      if (Object.keys(record).length) chunks.put(record, key);
+      const record = chunkRecord(state, key);
+      if (record) chunks.put(record, key);
       else chunks.delete(key);
     }
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    }).catch((error) => {
+    await done(tx).catch((error: unknown) => {
       // Try these chunks again next time.
       for (const key of dirty) state.dirtyChunks.add(key);
       throw error;
@@ -570,6 +654,45 @@ export async function save(state: Saved): Promise<boolean> {
       again = false;
       void save(state);
     }
+  }
+}
+
+/**
+ * Replaces the saved forest with another, a saved one or one from a file,
+ * in one transaction: if it fails, the old forest stays. Other tabs let go
+ * of the database first, and this page saves no more, so that nothing
+ * writes the old forest back; the page reloads afterwards. Returns false if
+ * the browser refuses.
+ */
+export async function replaceWith(next: Saved): Promise<boolean> {
+  try {
+    const current = await open();
+    const at = current.version + 1;
+    current.onversionchange = null;
+    current.close();
+    closed = true;
+    opening = null;
+    // Opening at a higher version makes the other tabs let go of it.
+    const db = await timeout(connect(at));
+    try {
+      const { save, people } = records(next);
+      const tx = db.transaction(["meta", "chunks"], "readwrite");
+      const meta = tx.objectStore("meta");
+      const chunks = tx.objectStore("chunks");
+      meta.clear();
+      chunks.clear();
+      meta.put(save, "save");
+      meta.put(people, "people");
+      for (const [key, record] of Object.entries(snapshot(next).chunks))
+        chunks.put(record, key);
+      await done(tx);
+    } finally {
+      db.close();
+    }
+    return true;
+  } catch {
+    closed = true;
+    return false;
   }
 }
 

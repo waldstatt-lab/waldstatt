@@ -35,4 +35,5 @@ does not prove correctness.
 | --- | --- |
 | [0001 — Build a static site with Astro and daisyUI on GitHub Pages](0001-build-a-static-site-with-astro-and-daisyui.md) | accepted; amended by 0002 |
 | [0002 — Make the Waldstatt a browser game that gates its content](0002-make-the-waldstatt-a-browser-game.md) | accepted; amends 0001; amended by 0003 |
-| [0003 — Save the Waldstatt in IndexedDB](0003-save-the-waldstatt-in-indexeddb.md) | accepted; amends 0002 |
+| [0003 — Save the Waldstatt in IndexedDB](0003-save-the-waldstatt-in-indexeddb.md) | accepted; amends 0002; amended by 0004 |
+| [0004 — Keep named Waldstatt saves in a database of their own, and as files](0004-keep-named-waldstatt-saves-and-files.md) | accepted; amends 0003 |

@@ -8,8 +8,8 @@
  * dialogs: a found text or the stage turns the view top-down onto it, a
  * Spielhaus with beer opens its game in a new tab, a ruin is repaired, other
  * buildings show a short status label, and tearing down takes a second tap.
- * Only «Neu beginnen» in the menu asks first. Nodes are created with the DOM
- * API, never from HTML strings.
+ * Only «Neu beginnen» and the saved forests in the menu (savesDialog.ts) ask
+ * first. Nodes are created with the DOM API, never from HTML strings.
  */
 import { buildingPicture } from "./art";
 import {
@@ -46,7 +46,7 @@ type Tool = "none" | "axe" | "saw" | "pave" | "demolish";
 type PlaceMode = "mouse" | "keys" | "touch";
 
 /** An entry of the finder: what it shows, a hint, and what it does. */
-interface FinderItem {
+export interface FinderItem {
   label: string;
   hint?: string;
   run(): void;
@@ -111,6 +111,10 @@ export interface UiOptions {
   /** The theatre's stage and its corner in tiles, if a theatre stands. */
   stage(): { stage: Stage; x: number; y: number } | null;
   reset(): void;
+  /** Opens the saved forests. */
+  saves(): void;
+  /** The finder's commands for the saved forests. */
+  saveCommands(): FinderItem[];
   moved(): void;
 }
 
@@ -248,7 +252,7 @@ export class Ui {
     document.addEventListener("keydown", (event) => {
       // The map handles its own Escape (input.ts); the stage leaves on Escape.
       if (event.key !== "Escape" || event.target === this.mapHost()) return;
-      if (this.confirmDialog.open) return;
+      if (this.o.root.querySelector("dialog[open]")) return;
       if (!this.buildMenu.hidden || !this.mainMenu.hidden) {
         this.closeMenus(true);
         event.preventDefault();
@@ -747,6 +751,12 @@ export class Ui {
           ),
       },
       {
+        label: "wälder",
+        hint: "speichern, laden, als Datei",
+        run: () => this.menuAction("saves"),
+      },
+      ...this.o.saveCommands(),
+      {
         label: "neu-beginnen",
         hint: "fragt zuerst",
         run: () => this.menuAction("reset"),
@@ -822,10 +832,12 @@ export class Ui {
     } else if (action === "zoom-out") {
       r.zoomAt(0.8, box.width / 2, box.height / 2);
       this.o.moved();
+    } else if (action === "saves") {
+      this.o.saves();
     } else if (action === "reset") {
       void this.confirm({
         title: "Neu beginnen?",
-        text: "Der Wald wächst nach, alle Gebäude und Vorräte gehen verloren. Die Spielstände der Spiele bleiben.",
+        text: "Der Wald wächst nach, alle Gebäude und Vorräte gehen verloren. Gespeicherte Wälder und die Spielstände der Spiele bleiben.",
         yes: "Alles löschen",
       }).then((yes) => {
         if (yes) this.o.reset();
@@ -1523,11 +1535,8 @@ export class Ui {
 
   // --- Confirmations ------------------------------------------------------------------
 
-  private confirm(o: {
-    title: string;
-    text: string;
-    yes: string;
-  }): Promise<boolean> {
+  /** Asks first, in a modal dialog; true for yes. */
+  confirm(o: { title: string; text: string; yes: string }): Promise<boolean> {
     const d = this.confirmDialog;
     need(d, "[data-confirm-title]").textContent = o.title;
     need(d, "[data-confirm-text]").textContent = o.text;
