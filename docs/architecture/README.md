@@ -178,10 +178,14 @@ text. So the text lies on the floor, the trees still standing cover the rest,
 and Waldleute and buildings stand over it. It is cream with golden headings
 on a dark green floor; on cobbled tiles the floor under it shows cobbles, and
 a dark copy of the text, hidden from screen readers, shows instead of the light
-one, on cobbles drawn light and calm for it, with a hairline stroke that
-thickens its letters without moving its lines: each is masked to its tiles at four mask pixels per tile, so a cobbled path
-across a text changes its ink tile by tile. Buildings cannot be placed on a
-text. A label marks Einsiedeln on the map.
+one, with a hairline stroke that thickens its letters without moving its
+lines. Under a text, cobbles are faint: stones and mortar are almost the same
+light colour, so their pattern does not compete with the letters; elsewhere
+they are drawn light with narrow joints. Each ink is masked to its tiles
+at four mask pixels per tile, so a cobbled path across a text changes its ink
+tile by tile. When cobbles are laid, the new floor and masks are made as images
+and decoded before they replace the old ones, all at once, so the text does not
+flicker. Buildings cannot be placed on a text. A label marks Einsiedeln on the map.
 
 Meinrads Klause and the Kloster each bring one of Meinrad's two ravens. A
 raven leads to a game's scroll that is not yet explored, the nearest first
@@ -212,8 +216,9 @@ while the isometric view blends into a top-down plan with north up
 (`projection()` in `iso.ts`), so the text lies upright and fills the width at a
 comfortable size. Meanwhile trees, buildings and Waldleute blend from their
 isometric pictures into ones seen from straight above (`plan.ts`). In the plan
-the map can be dragged and zoomed in; zooming out, the button «Zurück zur
-Karte» or Escape turns the view back. On the stage, taps on its signs press
+the map can be dragged and zoomed in and out; zoomed out below half the
+reading zoom, it turns back to the isometric view where and as high as it is,
+and the button «Zurück zur Karte» or Escape turns it back to where it was. On the stage, taps on its signs press
 them (held while the pointer stays down), the keys from the controls table
 play, and the long sign opens the real game in a new tab. The monastery and
 Meinrads Klause are drawn without religious symbols. The dam can only stand where the Sihl leaves

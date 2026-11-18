@@ -98,6 +98,22 @@ function sheet(kind: TextKind, game: GameInfo | undefined): HTMLElement | null {
   );
 }
 
+/** A canvas as an object URL whose image is already decoded. */
+async function decodedUrl(canvas: HTMLCanvasElement): Promise<string> {
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve),
+  );
+  const url = blob ? URL.createObjectURL(blob) : canvas.toDataURL();
+  const image = new Image();
+  image.src = url;
+  try {
+    await image.decode();
+  } catch {
+    // Shown as soon as it loads, then.
+  }
+  return url;
+}
+
 /** Sets or clears a layer's mask, with the prefixed property for Safari. */
 function mask(element: HTMLElement, url: string | null) {
   element.style.maskImage = url ?? "";
@@ -148,10 +164,13 @@ export class WorldLayer {
       light: HTMLElement;
       dark: HTMLElement;
       paved: string | null;
+      /** The object URLs of its floor and masks. */
+      urls: string[];
     }
   >();
   private pending = new Set<HiddenText>();
   private paveTimer = 0;
+  private repaving = false;
   private waterPins: (Pin & { basin: boolean })[] = [];
   private placePins: Pin[] = [];
   private toasts = new Map<number, { pin: Pin; until: number }>();
@@ -285,40 +304,50 @@ export class WorldLayer {
         light: lightLayer,
         dark: darkLayer,
         paved: null,
+        urls: [],
       });
       this.add(t.key, element, { x: t.x, y: t.y, w: t.w, h: t.h }, this.floor);
     }
     this.pending.add(t);
     if (!this.paveTimer)
-      this.paveTimer = window.setTimeout(() => this.repave(), 200);
+      this.paveTimer = window.setTimeout(() => void this.repave(), 200);
   }
 
   /**
    * Paints the floor under the texts whose cobbles changed and shows each
-   * ink where it reads: light on the green, dark on the stones.
+   * ink where it reads: light on the green, dark on the stones. The new
+   * pictures are decoded before they replace the old ones, all at once, so
+   * the text never shows without its floor or masks.
    */
-  private repave() {
+  private async repave() {
     this.paveTimer = 0;
-    for (const t of this.pending) {
-      const find = this.finds.get(t.key);
-      if (!find) continue;
-      const paved = (u: number, v: number) =>
-        this.game.isPaved(t.x + u, t.y + v);
-      let signature = "";
-      for (let v = 0; v < t.h; v++)
-        for (let u = 0; u < t.w; u++) signature += paved(u, v) ? "1" : "0";
-      if (signature === find.paved) continue;
-      find.paved = signature;
-      const floor = textFloor(t.w, t.h, TEXT_SCALE, paved);
-      find.element.style.backgroundImage = `url(${floor.toDataURL()})`;
-      const any = signature.includes("1");
-      find.dark.hidden = !any;
-      if (!any) {
-        mask(find.light, null);
-        continue;
-      }
+    if (this.repaving) {
+      this.paveTimer = window.setTimeout(() => void this.repave(), 200);
+      return;
+    }
+    this.repaving = true;
+    const due = [...this.pending];
+    this.pending.clear();
+    try {
+      for (const t of due) await this.repaveText(t);
+    } finally {
+      this.repaving = false;
+    }
+  }
+
+  private async repaveText(t: HiddenText) {
+    const find = this.finds.get(t.key);
+    if (!find) return;
+    const paved = (u: number, v: number) => this.game.isPaved(t.x + u, t.y + v);
+    let signature = "";
+    for (let v = 0; v < t.h; v++)
+      for (let u = 0; u < t.w; u++) signature += paved(u, v) ? "1" : "0";
+    if (signature === find.paved) return;
+    const any = signature.includes("1");
+    const pictures = [textFloor(t.w, t.h, TEXT_SCALE, paved)];
+    if (any)
       // Four mask pixels per tile, so the inks change within a quarter tile.
-      const masks = (["light", "dark"] as const).map((ink) => {
+      for (const ink of ["light", "dark"] as const) {
         const canvas = document.createElement("canvas");
         canvas.width = t.w * 4;
         canvas.height = t.h * 4;
@@ -330,12 +359,22 @@ export class WorldLayer {
               if (paved(u, v) === (ink === "dark"))
                 ctx.fillRect(u * 4, v * 4, 4, 4);
         }
-        return `url(${canvas.toDataURL()})`;
-      });
-      mask(find.light, masks[0]);
-      mask(find.dark, masks[1]);
-    }
-    this.pending.clear();
+        pictures.push(canvas);
+      }
+    const urls = await Promise.all(pictures.map(decodedUrl));
+    find.paved = signature;
+    find.element.style.backgroundImage = `url(${urls[0]})`;
+    find.dark.hidden = !any;
+    mask(find.light, any ? `url(${urls[1]})` : null);
+    mask(find.dark, any ? `url(${urls[2]})` : null);
+    // The old pictures go once the new ones show.
+    const old = find.urls;
+    find.urls = urls;
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        old.forEach((url) => URL.revokeObjectURL(url)),
+      ),
+    );
   }
 
   /** The rectangle a text covers, in tiles, without its margins. */

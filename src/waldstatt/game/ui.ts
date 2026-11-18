@@ -66,6 +66,8 @@ export interface UiOptions {
  * zoom 1 in the plan, so the 12 px text reads at about 16 px.
  */
 const readingZoom = 0.95;
+/** Zoomed out below this share of the reading zoom, the plan turns back to the map. */
+const leaveBelow = 0.5;
 
 export class Ui {
   private tool: Tool = "none";
@@ -79,7 +81,7 @@ export class Ui {
     id: number | string;
     stage: boolean;
     back: { x: number; y: number; zoom: number };
-    /** The closest zoom so far; zooming out from it leads back to the map. */
+    /** The zoom the view turned to; well below it, the view turns back. */
     zoom: number;
   } | null = null;
   private suppliesDirty = true;
@@ -267,9 +269,10 @@ export class Ui {
   frame() {
     const r = this.o.renderer;
     if (this.reading && !r.flying) {
-      // Zooming in is fine; any zooming out turns back to the map.
-      this.reading.zoom = Math.max(this.reading.zoom, r.camera.zoom);
-      if (r.camera.zoom < this.reading.zoom * 0.97) this.leaveReading(true);
+      // Zooming in and out a little stays in the plan; only from a certain
+      // height, half the reading zoom, does the view turn back to the map.
+      if (r.camera.zoom < this.reading.zoom * leaveBelow)
+        this.leaveReading(true);
     }
     if (!this.suppliesDirty) return;
     this.suppliesDirty = false;
@@ -847,7 +850,7 @@ export class Ui {
 
   /**
    * Turns the view back to the map: to where it was, or, after zooming out
-   * of the text, around the text at the zoom the map had.
+   * of the text, from where and how high the view is now.
    */
   private leaveReading(zoomedOut = false) {
     if (!this.reading) return;
@@ -858,7 +861,7 @@ export class Ui {
     const r = this.o.renderer;
     this.o.renderer.flyTo(
       zoomedOut
-        ? { x: r.camera.x, y: r.camera.y, zoom: back.zoom, plan: 0 }
+        ? { x: r.camera.x, y: r.camera.y, zoom: r.camera.zoom, plan: 0 }
         : { ...back, plan: 0 },
     );
     this.o.moved();

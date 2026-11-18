@@ -2030,14 +2030,20 @@ export function groundTexture(
 /**
  * Cobblestones in rows, seamless: `size` pixels square, stones `stone`
  * pixels across, with a seed for their shades. Light and calm, with narrow
- * joints, so dark text stays readable on them.
+ * joints. `faint` ones, under texts, have stones and mortar of almost the
+ * same colour, so only a hint of their pattern competes with the letters.
  */
-export function cobbles(size: number, stone: number, seed: number) {
+export function cobbles(
+  size: number,
+  stone: number,
+  seed: number,
+  faint = false,
+) {
   const element = document.createElement("canvas");
   element.width = element.height = size;
   const ctx = element.getContext("2d");
   if (!ctx) throw new Error("2d context");
-  ctx.fillStyle = "#b8af9b";
+  ctx.fillStyle = faint ? "#d3cbb7" : "#b8af9b";
   ctx.fillRect(0, 0, size, size);
   const rnd = random(seed);
   const rows = Math.round(size / stone);
@@ -2046,8 +2052,10 @@ export function cobbles(size: number, stone: number, seed: number) {
     for (let c = -1; c <= rows; c++) {
       const x = c * stone + shift;
       const y = r * stone;
-      const light = 208 + Math.floor(rnd() * 18);
-      const tint = Math.floor(rnd() * 8);
+      const light = faint
+        ? 216 + Math.floor(rnd() * 5)
+        : 208 + Math.floor(rnd() * 18);
+      const tint = Math.floor(rnd() * (faint ? 3 : 8));
       ctx.fillStyle = `rgb(${light + tint}, ${light + 2}, ${light - 12 - tint})`;
       ctx.beginPath();
       ctx.roundRect(x + 0.7, y + 0.7, stone - 1.4, stone - 1.4, stone * 0.3);
@@ -2080,7 +2088,7 @@ export function textFloor(
       rnd() < 0.5 ? "rgba(120, 160, 80, 0.18)" : "rgba(10, 25, 10, 0.25)";
     ctx.fillRect(rnd() * element.width, rnd() * element.height, 2, 1.4);
   }
-  const stones = cobbles(res, res / 4, 4);
+  const stones = cobbles(res, res / 4, 4, true);
   for (let v = 0; v < h; v++)
     for (let u = 0; u < w; u++)
       if (paved(u, v)) ctx.drawImage(stones, u * res, v * res);

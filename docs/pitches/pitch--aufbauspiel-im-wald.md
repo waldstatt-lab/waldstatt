@@ -64,8 +64,8 @@ a stock limit. The app icons are pixel art encoded as PNG at build time.
   opens a panel or dialog: other buildings show a short status label, tearing
   down takes a second tap, and the dam names what will drown while placing.
 - In the plan view, buildings, trees and Waldleute are drawn from straight
-  above; the map can be dragged and zoomed in, and zooming out returns to the
-  isometric view.
+  above; the map can be dragged and zoomed in and a little out, and zooming
+  out further returns to the isometric view.
 - The theatre is a wooden amphitheatre with stands all round, and its stage is
   painted on the map: the preview with wooden signs for the programme and the
   keys, played by tapping the signs or with the keyboard.
