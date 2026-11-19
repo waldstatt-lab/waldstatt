@@ -28,7 +28,10 @@ function setup() {
         {
           kind: "choice",
           name: "ein Gebäude",
-          choices: () => [{ value: "hütte", label: "Hütte" }],
+          choices: () => [
+            { value: "hütte", label: "Hütte" },
+            { value: "turm", label: "Turm", unlisted: true },
+          ],
         },
       ],
       describe: ([b]) => `${b} bauen`,
@@ -60,6 +63,17 @@ function setup() {
   );
   return { c, said, done };
 }
+
+describe("unlisted choices", () => {
+  it("are left out of the list but run when typed out", () => {
+    const { c, done } = setup();
+    const texts = c.entries().map((e) => e.text);
+    expect(texts).toContain("build:hütte");
+    expect(texts).not.toContain("build:turm");
+    c.runText("build:turm");
+    expect(done).toEqual(["build:turm"]);
+  });
+});
 
 describe("reading commands", () => {
   it("reads ids with arguments and defaults", () => {

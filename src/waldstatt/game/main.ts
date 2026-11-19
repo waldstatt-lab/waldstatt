@@ -367,6 +367,7 @@ async function start(root: HTMLElement) {
       disableAll: () => runtime.disableAll(),
       start: (name) => runtime.start(name),
       stop: (name) => runtime.stop(name),
+      running: (name) => runtime.runs.some((r) => r.script === name),
       stopAll: () => runtime.stopAll(),
       open: () => scriptsDialog?.open(),
       edit: (name) => scriptsDialog?.edit(name),

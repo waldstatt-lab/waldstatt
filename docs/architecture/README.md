@@ -625,7 +625,11 @@ A binding or macro to one whose script is switched off or gone is kept and
 says why when used; the dispatcher caches no reading of them. `script:run:<name>`,
 `script:stop:<name>`, `script:stop-all`, `script:edit:<name>` and
 `scripts:open` are commands, so keys and the finder start and stop scripts; scripts may run any command that does not open a
-menu, finder or dialog. The dialog «Skripte» (from the menu, a badge «▶ 2
+menu, finder or dialog. The finder lists only the scripts each fits: those
+switched on here for `script:run` and `script:disable`, those switched off
+for `script:enable`, the running ones for `script:stop`; the others are
+left out of the list (a choice marked unlisted) but still say why when typed
+out. The dialog «Skripte» (from the menu, a badge «▶ 2
 Skripte» while scripts run, or `:scripts:open`) lists each script with its
 trigger and state (bereit, aus in diesem Wald, läuft, wartet, ältere Fassung,
 Fehler), the switch «In diesem Wald», ▶ and ■,

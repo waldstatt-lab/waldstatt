@@ -34,6 +34,11 @@ export const contexts: Context[] = [
 export interface Choice {
   value: string;
   label: string;
+  /**
+   * Left out of the finder's list, but valid when typed out, such as a
+   * script switched off in this forest for `script:run`.
+   */
+  unlisted?: boolean;
 }
 
 export type Arg =
@@ -303,7 +308,7 @@ export class Commands {
       const declared = spec.args ?? [];
       const choice = declared.find((a) => a.kind === "choice");
       if (choice?.kind === "choice") {
-        for (const c of choice.choices()) add(spec, [c.value]);
+        for (const c of choice.choices()) if (!c.unlisted) add(spec, [c.value]);
         continue;
       }
       const number = declared[0];

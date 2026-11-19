@@ -41,6 +41,8 @@ export interface ScriptCommands {
   disableAll(): number;
   start(name: string): string | undefined;
   stop(name: string): boolean;
+  /** Whether a script runs in this forest, from its top or a command. */
+  running(name: string): boolean;
   stopAll(): number;
   open(): void;
   edit(name: string): void;
@@ -560,7 +562,7 @@ export function registerCommands(
     },
     {
       id: "script:run",
-      args: [scriptChoice()],
+      args: [scriptChoice((name, s) => s.enabled(name))],
       ...locked,
       describe: ([name]) => `Skript «${name}» starten`,
       run: ([name]) => {
@@ -571,7 +573,7 @@ export function registerCommands(
     },
     {
       id: "script:stop",
-      args: [scriptChoice()],
+      args: [scriptChoice((name, s) => s.running(name))],
       ...locked,
       describe: ([name]) => `Skript «${name}» anhalten`,
       run: ([name]) =>
@@ -601,7 +603,7 @@ export function registerCommands(
     },
     {
       id: "script:enable",
-      args: [scriptChoice()],
+      args: [scriptChoice((name, s) => !s.enabled(name))],
       ...locked,
       describe: ([name]) => `Skript «${name}» in diesem Wald einschalten`,
       run: ([name]) => {
@@ -613,7 +615,7 @@ export function registerCommands(
     },
     {
       id: "script:disable",
-      args: [scriptChoice()],
+      args: [scriptChoice((name, s) => s.enabled(name))],
       ...locked,
       describe: ([name]) => `Skript «${name}» in diesem Wald ausschalten`,
       run: ([name]) => {
@@ -625,9 +627,21 @@ export function registerCommands(
     },
   );
 
-  function scriptChoice() {
-    return choice("ein Skript", () =>
-      (scripts()?.names() ?? []).map((name) => ({ value: name, label: name })),
-    );
+  /**
+   * The saved scripts; those for which `listed` is false stay valid but are
+   * left out of the finder, such as a script switched off for `script:run`.
+   */
+  function scriptChoice(
+    listed: (name: string, s: ScriptCommands) => boolean = () => true,
+  ) {
+    return choice("ein Skript", () => {
+      const s = scripts();
+      if (!s) return [];
+      return s.names().map((name) => ({
+        value: name,
+        label: name,
+        unlisted: !listed(name, s),
+      }));
+    });
   }
 }
