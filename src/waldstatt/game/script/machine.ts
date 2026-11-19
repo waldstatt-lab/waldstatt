@@ -3,8 +3,10 @@
  * plain data, so it can be saved with the forest and continue after a
  * reload: a stack of frames (the body, where in it, its variables and its
  * values), what it waits for, its timeouts and its deadline, all in seconds
- * of play. The machine reaches the game only through its host: commands as
- * text, the game's queries by name, the fields of buildings, and whether a
+ * of play. A run starts at the script's top, or at one of its `cmd:` with
+ * values (ADR 0008). The machine reaches the game only through its host:
+ * commands as text, written as the finder reads them (`repair:under(5)`),
+ * the game's queries by name, the fields of buildings, and whether a
  * command's work is done. It runs a limited number of steps at a time, so
  * no script can freeze the page.
  */
@@ -44,6 +46,8 @@ export interface RunState {
   /** The program it runs, by its hash; the script, for the dialog. */
   program: string;
   script: string;
+  /** The `cmd:` it started at, by its key `script:name`; none for the top. */
+  entry?: string;
   frames: Frame[];
   /** Waiting until a point of the clock, or for a command's work. */
   wait?: { until?: number; work?: Work };
@@ -76,6 +80,38 @@ export function start(program: Program, now: number): RunState {
     timeouts: [],
     deadline: now + program.timeout,
   };
+}
+
+/** A new run of one of a program's `cmd:`, with its values, starting now. */
+export function startAt(
+  program: Program,
+  key: string,
+  values: Value[],
+  now: number,
+): RunState | string {
+  const fn = program.fns[key];
+  if (!fn || fn.kind !== "cmd") return `Den Befehl «${key}» gibt es nicht.`;
+  if (fn.params.length !== values.length)
+    return `«${key.slice(key.indexOf(":") + 1)}» braucht ${fn.params.length} ${fn.params.length === 1 ? "Wert" : "Werte"}.`;
+  const vars: Record<string, Value> = {};
+  fn.params.forEach((p, i) => (vars[p] = values[i]));
+  return {
+    program: program.hash,
+    script: program.name,
+    entry: key,
+    frames: [{ fn: key, pc: 0, vars, stack: [] }],
+    timeouts: [],
+    deadline: now + program.timeout,
+  };
+}
+
+/** A value as a command takes it: a number as it is, a text in quotes. */
+function commandValue(v: Value, host: MachineHost): string | undefined {
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : undefined;
+  if (typeof v === "string") return JSON.stringify(v);
+  if (typeof v === "object" && v !== null && !Array.isArray(v) && "b" in v)
+    return JSON.stringify(host.describe(v.b));
+  return undefined;
 }
 
 class Fail extends Error {}
@@ -176,6 +212,8 @@ export function step(
   try {
     while (steps < budget) {
       steps++;
+      // The command a run started at has returned.
+      if (!run.frames.length) return { status: { state: "done" }, steps };
       const now = host.now();
       // The whole run's deadline, then timeouts, the innermost first.
       if (now >= run.deadline)
@@ -378,15 +416,19 @@ export function step(
           break;
         }
         case "cmd": {
-          const [, parts, awaits] = ins;
-          const values = frame.stack.splice(
-            frame.stack.length - parts.filter((p) => p === null).length,
+          const [, id, segments, count, awaits] = ins;
+          const values = frame.stack.splice(frame.stack.length - count, count);
+          const written: string[] = [];
+          for (const v of values) {
+            const w = commandValue(v, host);
+            if (w === undefined)
+              fail(`«${id}» nimmt Zahlen und Texte, nicht «${text(v, host)}».`);
+            written.push(w as string);
+          }
+          const result = host.command(
+            [id, ...segments].join(":") +
+              (written.length ? `(${written.join(", ")})` : ""),
           );
-          let k = 0;
-          const written = parts
-            .map((p) => (p === null ? text(values[k++] ?? null, host) : p))
-            .join("");
-          const result = host.command(written);
           if (result.error) fail(result.error);
           if (awaits && result.work) {
             run.wait = { work: result.work };
@@ -521,7 +563,14 @@ export function validRun(raw: unknown, program: Program): RunState | undefined {
       stack: fr.stack as Value[],
     });
   }
-  if (frames[0].fn !== "main") return undefined;
+  const entry =
+    typeof r.entry === "string" &&
+    Object.hasOwn(program.fns, r.entry) &&
+    program.fns[r.entry].kind === "cmd"
+      ? r.entry
+      : undefined;
+  if (r.entry !== undefined && !entry) return undefined;
+  if (frames[0].fn !== (entry ?? "main")) return undefined;
   const num = (v: unknown) => typeof v === "number" && Number.isFinite(v);
   let wait: RunState["wait"];
   if (r.wait !== undefined) {
@@ -568,6 +617,7 @@ export function validRun(raw: unknown, program: Program): RunState | undefined {
   return {
     program: program.hash,
     script: program.name,
+    ...(entry ? { entry } : {}),
     frames,
     wait,
     timeouts,

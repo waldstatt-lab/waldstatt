@@ -2,10 +2,13 @@
  * The finders (ui.ts): «/» over the start and the texts found, the `goto`
  * commands, and «:» over every command (commands.ts), matched fuzzily by its
  * id and the words of its German description, each with the key bound to it;
- * what is typed runs as it is when it reads as a command or a chain. Arrows
- * or Tab move, Enter runs, Escape closes. Nodes are created with the DOM API.
+ * what is typed runs as it is when it reads as a command or a chain, and
+ * `up 15` reads as `up(15)`. A command that needs values it was not given
+ * is put into the field, as `notify:info(`, to be completed. Arrows or Tab
+ * move, Enter runs, Escape closes. Nodes are created with the DOM API.
  */
 import type { Commands } from "./commands";
+import { shortcut } from "./commandText";
 import { el, fuzzy, need, plain } from "./dom";
 import { keyLabel, keysFor } from "./keymap";
 import type { Building } from "./state";
@@ -16,6 +19,8 @@ interface FinderItem {
   hint?: string;
   /** Why it cannot run now; it shows greyed. */
   why?: string;
+  /** Chosen, it is put into the field to be completed instead of run. */
+  fill?: string;
   run(): void;
 }
 
@@ -118,8 +123,8 @@ export class Finder {
    * What the finder lists for what is typed. «/»: the start and the texts
    * found (the `goto` commands). «:»: every command, matched fuzzily by its
    * id and its German description; what is typed runs as it is if it reads
-   * as a command or a chain, such as `up:20` or `build:hütte;enter;right:3`,
-   * and «rep 30» reads as `repair:under:30`.
+   * as a command or a chain, such as `up(20)` or `build:hütte;enter;right(3)`,
+   * and «rep 30» reads as `repair:under(30)`.
    */
   private items(query: string): FinderItem[] {
     const c = this.host.commands;
@@ -131,10 +136,13 @@ export class Finder {
       text: string,
       description: string,
       why?: string,
+      signature?: string,
     ): FinderItem => ({
-      label: text,
+      label: signature && signature !== text ? signature : text,
       hint: `${description}${keys(text)}`,
       why,
+      // Values it needs and was not given are typed in the field.
+      fill: signature && "error" in c.parse(text) ? `${text}(` : undefined,
       run: () => {
         if (!c.runText(text) && why) this.host.announce(why);
       },
@@ -155,8 +163,8 @@ export class Finder {
     const typed: FinderItem[] = [];
     const q = query.trim();
     if (q) {
-      // As typed, or with spaces for colons, such as «rep 30».
-      for (const text of [q, q.replace(/\s+/g, ":")]) {
+      // As typed, or with a space before its values, such as «up 15».
+      for (const text of [q, ...shortcut(q)]) {
         const parsed = c.parse(text);
         if ("steps" in parsed) {
           const written = parsed.steps.map((s) => s.text).join(";");
@@ -172,6 +180,18 @@ export class Finder {
           break;
         }
       }
+      // Written as a command with values, or a script's: say what is wrong
+      // rather than run something that only looks like it.
+      if (!typed.length && !q.includes(";") && /\(|:\d/.test(q)) {
+        const parsed = c.parse(q);
+        if ("error" in parsed)
+          typed.push({
+            label: q,
+            hint: "So geht es nicht",
+            why: parsed.error,
+            run: () => this.host.announce(parsed.error),
+          });
+      }
       if (!typed.length && q.includes(";")) {
         const parsed = c.parse(q);
         if ("error" in parsed)
@@ -183,16 +203,17 @@ export class Finder {
               this.host.announce(`Schritt ${parsed.step}: ${parsed.error}`),
           });
       }
-      const number = /^(\S+?)[\s:-]+(\d{1,4})$/.exec(q);
+      const number = /^(\S+?)[\s:(-]+(\d{1,4})\)?$/.exec(q);
       if (!typed.length && number) {
         // A number after a partial id: the first command that takes one.
+        const base = (text: string) => text.replace(/\(.*\)$/, "");
         const hit = all.find(
           (e) =>
             fuzzy(number[1], e.text) >= 0 &&
-            "steps" in c.parse(`${e.text.replace(/:\d+$/, "")}:${number[2]}`),
+            "steps" in c.parse(`${base(e.text)}(${number[2]})`),
         );
         if (hit) {
-          const text = `${hit.text.replace(/:\d+$/, "")}:${number[2]}`;
+          const text = `${base(hit.text)}(${number[2]})`;
           const parsed = c.parse(text);
           if ("steps" in parsed)
             typed.push({
@@ -205,7 +226,7 @@ export class Finder {
     }
     const listed = all
       .filter((e) => !e.text.startsWith("goto:") || e.text === "goto:start")
-      .map((e) => item(e.text, e.description, e.why))
+      .map((e) => item(e.text, e.description, e.why, e.signature))
       .map((i) => {
         // The id fuzzily; the German description by its words, costs and
         // keys left out, so «holz» finds Holzhacken, not every cost in wood.
@@ -276,6 +297,11 @@ export class Finder {
 
   private run(item: FinderItem | undefined) {
     if (!item) return;
+    if (item.fill !== undefined && this.input.value.trim() !== item.fill) {
+      this.input.value = item.fill;
+      this.filter();
+      return;
+    }
     // The building chosen when it opened stays chosen for the command.
     const chosen = this.chosen;
     this.close(true);

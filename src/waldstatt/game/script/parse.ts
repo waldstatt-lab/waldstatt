@@ -1,9 +1,12 @@
 /**
- * Reads a script of the Waldstatt's language (ADR 0007) into its syntax tree
- * (ast.ts). One statement per line, or several commands joined by «;»; `#`
- * begins a comment; blocks close with `end`. A statement that begins with a
- * name and a colon, or is a lone name, is a command, read as it is typed:
- * `build:hütte`, `repair:under:{limit}`, `enter`. Expressions are read by
+ * Reads a script of the Waldstatt's language (ADR 0007, ADR 0008) into its
+ * syntax tree (ast.ts). One statement per line, or several joined by «;»;
+ * `#` begins a comment; blocks close with `end`. A statement that is a name,
+ * with colons and values in parentheses, is a command: `build:hütte`,
+ * `repair:under(limit)`, `enter`, `$helfer:bauen:dorf(3)`; whether it is the
+ * game's or a script's, and that it is no query, the checker decides. At the
+ * top, `import waldstatt`, `import helfer as h` and `import reihe from
+ * helfer` say how names are written. Expressions are read by
  * precedence: `or`, `and`, `not`, comparisons, `+` `-`, `*` `/` `%`, a
  * leading `-`, then fields, indices and calls. Names may contain hyphens, as
  * commands do (`genug-holz`), so subtraction needs spaces. A number with
@@ -16,8 +19,8 @@ import {
   type Expr,
   type Pos,
   type Script,
+  type Import,
   type Stmt,
-  type Template,
 } from "./ast";
 
 const limits = {
@@ -61,6 +64,9 @@ export const scriptKeywords = [...keywords];
 
 /** A name: a letter or `_`, then letters, digits, `_`, hyphens inside. */
 const nameAt = /^[\p{L}_][\p{L}\p{N}_]*(?:-[\p{L}\p{N}_]+)*/u;
+const nameSrc = "[\\p{L}_][\\p{L}\\p{N}_]*(?:-[\\p{L}\\p{N}_]+)*";
+/** A name with colons, as `bauen:dorf`, for definitions and imports. */
+const pathSrc = `${nameSrc}(?::${nameSrc})*`;
 
 // --- Expressions -------------------------------------------------------------------
 
@@ -106,7 +112,9 @@ function tokenize(text: string, line: number, col: number): Token[] {
       let j = i + 1;
       let depth = 0;
       while (j < text.length && (text[j] !== '"' || depth > 0)) {
-        if (text[j] === "{") depth++;
+        // `\"` and `\\` stand for a quote and a backslash.
+        if (text[j] === "\\") j++;
+        else if (text[j] === "{") depth++;
         else if (text[j] === "}") depth = Math.max(0, depth - 1);
         j++;
       }
@@ -122,6 +130,22 @@ function tokenize(text: string, line: number, col: number): Token[] {
       i += name[0].length;
       continue;
     }
+    if (c === "$") {
+      const ns = nameAt.exec(rest.slice(1));
+      if (!ns)
+        throw new ScriptError(
+          "Nach «$» kommt ein Namensraum, wie $waldstatt oder $helfer.",
+          pos,
+        );
+      tokens.push({ t: "name", v: `$${ns[0]}`, at: pos });
+      i += ns[0].length + 1;
+      continue;
+    }
+    if (c === "{")
+      throw new ScriptError(
+        "«{…}» setzt nur in Texten Werte ein; ein Befehl nimmt sie in Klammern: up(n).",
+        pos,
+      );
     const op = /^(==|!=|<=|>=|\.\.|[-+*/%<>()[\],.=:;])/.exec(rest);
     if (op) {
       tokens.push({ t: "op", v: op[0], at: pos });
@@ -180,6 +204,37 @@ class ExprReader {
   expectOp(v: string, what: string) {
     if (!this.isOp(v)) throw new ScriptError(what, this.peek().at);
     this.next();
+  }
+
+  /** A name and the segments joined to it by colons: `repair:under`. */
+  path(first: string): string {
+    let name = first;
+    while (this.isOp(":")) {
+      const after = this.tokens[this.i + 1];
+      if (after?.t === "name" && !after.v.startsWith("$")) {
+        this.i += 2;
+        name += `:${after.v}`;
+      } else if (after?.t === "num")
+        throw new ScriptError(
+          `Werte stehen in Klammern: «${name}(${after.v})», nicht «${name}:${after.v}».`,
+          after.at,
+        );
+      else throw new ScriptError("Nach «:» kommt ein Name.", this.peek().at);
+    }
+    return name;
+  }
+
+  /** The values of a call, after its «(», up to its «)». */
+  args(): Expr[] {
+    const args: Expr[] = [];
+    if (!this.isOp(")"))
+      for (;;) {
+        args.push(this.expr());
+        if (this.isOp(",")) this.next();
+        else break;
+      }
+    this.expectOp(")", "Eine «)» fehlt.");
+    return args;
   }
 
   expr(min = 0): Expr {
@@ -256,28 +311,45 @@ class ExprReader {
           `«${t.v}» ist ein Schlüsselwort, kein Wert.`,
           t.at,
         );
-      if (this.isOp(":"))
-        throw new ScriptError(
-          `«${t.v}:…» ist ein Befehl, und ein Befehl gibt nichts zurück. Frag danach ab, was er bewirkt hat.`,
-          t.at,
-        );
+      const name = this.path(t.v);
       if (this.isOp("(")) {
         this.next();
-        const args: Expr[] = [];
-        if (!this.isOp(")"))
-          for (;;) {
-            args.push(this.expr());
-            if (this.isOp(",")) this.next();
-            else break;
-          }
-        this.expectOp(")", "Eine «)» fehlt.");
-        return { k: "call", name: t.v, args, at: t.at };
+        return { k: "call", name, args: this.args(), at: t.at };
       }
-      return { k: "name", name: t.v, at: t.at };
+      return { k: "name", name, at: t.at };
     }
     if (t.t === "end") throw new ScriptError("Hier fehlt ein Wert.", t.at);
     throw new ScriptError(`«${t.v}» gehört nicht hierher.`, t.at);
   }
+}
+
+/** Reads a command as a statement: its name, then its values, if any. */
+function readCommand(
+  text: string,
+  line: number,
+  col: number,
+): { name: string; args: Expr[] } {
+  if (!text) throw new ScriptError("Hier fehlt ein Befehl.", { line, col });
+  const r = new ExprReader(tokenize(text, line, col));
+  const t = r.next();
+  if (t.t !== "name" || keywords.has(t.v))
+    throw new ScriptError(`Das verstehe ich nicht: «${text}».`, t.at);
+  const name = r.path(t.v);
+  let args: Expr[] = [];
+  if (r.isOp("(")) {
+    r.next();
+    args = r.args();
+  }
+  if (!r.atEnd()) {
+    const n = r.peek();
+    throw new ScriptError(
+      n.t === "op" && n.v === "="
+        ? `«${name}» ist kein Name für einen Wert.`
+        : `Nach «${name}${args.length ? "(…)" : ""}» kommt nichts mehr; Werte stehen in Klammern, wie ${name}(…).`,
+      n.at,
+    );
+  }
+  return { name, args };
 }
 
 /** Reads a whole piece of a line as one expression. */
@@ -300,7 +372,11 @@ function interpolate(raw: string, at: Pos): (string | Expr)[] {
   let i = 0;
   let literal = "";
   while (i < raw.length) {
-    if (raw[i] === "{") {
+    if (raw[i] === "\\" && i + 1 < raw.length) {
+      const c = raw[i + 1];
+      literal += c === "n" ? "\n" : c;
+      i += 2;
+    } else if (raw[i] === "{") {
       let depth = 1;
       let j = i + 1;
       while (j < raw.length && depth > 0) {
@@ -346,7 +422,8 @@ function pieces(source: string, line: number): Piece[] {
   };
   for (let i = 0; i < source.length; i++) {
     const c = source[i];
-    if (c === '"') inText = !inText;
+    if (c === "\\" && inText) i++;
+    else if (c === '"') inText = !inText;
     else if (inText) continue;
     else if ("{([".includes(c)) depth++;
     else if ("})]".includes(c)) depth--;
@@ -429,13 +506,7 @@ export function parse(source: string): Script {
             "«import» gehört an den Anfang des Skripts.",
             at,
           );
-        const name = nameAt.exec(rest)?.[0];
-        if (!name || name !== rest)
-          throw new ScriptError(
-            "Nach «import» kommt der Name eines Skripts.",
-            at,
-          );
-        script.imports.push({ name, at });
+        script.imports.push(readImport(rest, at));
         continue;
       }
       if (word === "every") {
@@ -468,10 +539,9 @@ export function parse(source: string): Script {
       if ((word === "cmd" || word === "qry") && after.startsWith(":")) {
         if (stack.length > 1)
           throw new ScriptError(`«${word}:» steht nicht in einem Block.`, at);
-        const m =
-          /^:([\p{L}_][\p{L}\p{N}_]*(?:-[\p{L}\p{N}_]+)*)\s*\(([^)]*)\)\s*$/u.exec(
-            after,
-          );
+        const m = new RegExp(`^:(${pathSrc})\\s*\\(([^)]*)\\)\\s*$`, "u").exec(
+          after,
+        );
         if (!m)
           throw new ScriptError(
             `So: «${word}:name(a, b)» und darunter der Block bis «end».`,
@@ -494,6 +564,8 @@ export function parse(source: string): Script {
         if (new Set(params).size !== params.length)
           throw new ScriptError("Zwei Werte gleichen Namens.", at);
         const def: Def = { kind: word, name: m[1], params, body: [], at };
+        const doc = docAbove(lines, n);
+        if (doc) def.doc = doc;
         script.defs.push(def);
         header = false;
         open({ k: "def", def, body: def.body }, at);
@@ -662,7 +734,12 @@ export function parse(source: string): Script {
         continue;
       }
       if (word === "await") {
-        add({ ...command(rest, p.line, restCol), await: true, at });
+        add({
+          k: "command",
+          ...readCommand(rest, p.line, restCol),
+          await: true,
+          at,
+        });
         continue;
       }
       if (word === "say") {
@@ -697,16 +774,13 @@ export function parse(source: string): Script {
         });
         continue;
       }
-      if (name && /^\s*\(/.test(tail))
-        throw new ScriptError(
-          `«${name}(…)» ist eine Abfrage: sie gibt einen Wert zurück und tut nichts. Verwende ihren Wert, wie in «var x = ${name}(…)».`,
-          at,
-        );
-      if (name && /^(?::|\s*$)/.test(tail)) {
-        add({ ...command(p.text, p.line, p.col), await: false, at });
-        continue;
-      }
-      throw new ScriptError(`Das verstehe ich nicht: «${p.text}».`, at);
+      add({
+        k: "command",
+        ...readCommand(p.text, p.line, p.col),
+        await: false,
+        at,
+      });
+      continue;
     }
   }
   if (stack.length > 1) {
@@ -751,19 +825,47 @@ function closesLater(lines: string[], from: number, piece: Piece): boolean {
   return false;
 }
 
-/** Reads a command as typed, with `{…}` for values. */
-function command(
-  text: string,
-  line: number,
-  col: number,
-): { k: "command"; text: Template } {
-  const at = { line, col };
-  if (!text) throw new ScriptError("Hier fehlt ein Befehl.", at);
-  const outside = text.replace(/\{[^}]*\}/g, "");
-  if (!/^[\p{L}_][\p{L}\p{N}_:-]*$/u.test(outside))
-    throw new ScriptError(
-      `«${text}» ist kein Befehl: Befehle sind wie build:hütte oder repair:under:{n}, ohne Leerzeichen.`,
+/** The comment lines right above line `n` (counted from 0), as one text. */
+function docAbove(lines: string[], n: number): string | undefined {
+  const out: string[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const m = /^\s*#\s?(.*)$/.exec(lines[i]);
+    if (!m) break;
+    out.unshift(m[1].trim());
+  }
+  const text = out.join(" ").trim();
+  return text ? text.slice(0, 200) : undefined;
+}
+
+/**
+ * Reads what follows `import`: `waldstatt`, `helfer as h`, or
+ * `reihe, bauen:dorf as dorf from helfer`.
+ */
+function readImport(rest: string, at: Pos): Import {
+  const bad = () =>
+    new ScriptError(
+      "So: «import helfer», «import helfer as h» oder «import reihe, summe from helfer».",
       at,
     );
-  return { k: "command", text: interpolate(text, { line, col: col - 1 }) };
+  const ns = (text: string) => {
+    const t = text.trim();
+    if (nameAt.exec(t)?.[0] !== t || keywords.has(t)) throw bad();
+    return t;
+  };
+  const from = /^(.+?)\s+from\s+(\S+)$/su.exec(rest);
+  if (from) {
+    const one = new RegExp(
+      `^\\s*(${pathSrc})(?:\\s+as\\s+(${pathSrc}))?\\s*$`,
+      "u",
+    );
+    const names = from[1].split(",").map((part) => {
+      const m = one.exec(part);
+      if (!m) throw bad();
+      return m[2] ? { name: m[1], alias: m[2], at } : { name: m[1], at };
+    });
+    return { ns: ns(from[2]), names, at };
+  }
+  const as = /^(\S+)\s+as\s+(\S+)$/u.exec(rest.trim());
+  if (as) return { ns: ns(as[1]), alias: ns(as[2]), at };
+  return { ns: ns(rest), at };
 }

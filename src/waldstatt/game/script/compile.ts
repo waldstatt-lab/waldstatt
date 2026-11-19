@@ -1,15 +1,18 @@
 /**
  * Compiles a checked script (check.ts) into a program for the machine
  * (machine.ts): one list of simple instructions per body, the script's own
- * and each `cmd:` and `qry:`, with the line of each instruction for errors.
+ * (`main`) and each `cmd:` and `qry:` of the scripts it uses (by the key
+ * `script:name`), with the line of each instruction for errors. A game
+ * command is written out with its values when it runs, as the finder reads
+ * it (ADR 0008).
  * A program is plain data, so a run can carry it and be saved; its hash
  * names it, and the machine's version is part of it.
  */
-import type { BinaryOp, Expr, Stmt, Template } from "./ast";
+import type { BinaryOp, Expr, Stmt } from "./ast";
 import type { Unit } from "./check";
 
 /** Raised when the instructions or the machine change, so old runs are dropped. */
-export const machineVersion = 1;
+export const machineVersion = 2;
 
 /** A value as a program holds it: plain, so it can be saved. */
 export type Value =
@@ -37,7 +40,8 @@ export type Ins =
   | ["jump", number]
   | ["jf", number]
   | ["iter", string, string, string, number]
-  | ["cmd", (string | null)[], boolean]
+  /** A game command: its id, its choices as segments, how many values, await. */
+  | ["cmd", string, string[], number, boolean]
   | ["wait"]
   | ["tick"]
   | ["say"]
@@ -64,8 +68,10 @@ export interface Program {
   /** `every`, and the whole script's timeout, in seconds of play. */
   every?: number;
   timeout: number;
-  /** The script's own body is `main`. */
+  /** The script's own body is `main`; the others by `script:name`. */
   fns: Record<string, Fn>;
+  /** What the comment above a `cmd:` or `qry:` says, by its key. */
+  docs: Record<string, string>;
   hash: string;
 }
 
@@ -74,10 +80,13 @@ export const defaultTimeout = 600;
 
 export function compile(unit: Unit): Program {
   const fns: Record<string, Fn> = {
-    main: body("main", [], unit.main.body, unit.name, unit),
+    main: body("main", [], unit.main.body, unit.name),
   };
-  for (const [name, d] of unit.defs)
-    fns[name] = body(d.kind, d.params, d.body, d.script, unit);
+  const docs: Record<string, string> = {};
+  for (const [key, d] of unit.defs) {
+    fns[key] = body(d.kind, d.params, d.body, d.script);
+    if (d.doc) docs[key] = d.doc;
+  }
   const program: Omit<Program, "hash"> = {
     version: machineVersion,
     name: unit.name,
@@ -85,8 +94,12 @@ export function compile(unit: Unit): Program {
     every: unit.main.every?.seconds,
     timeout: unit.main.timeout?.seconds ?? defaultTimeout,
     fns,
+    docs,
   };
-  return { ...program, hash: hash(JSON.stringify([program.version, fns])) };
+  return {
+    ...program,
+    hash: hash(JSON.stringify([program.version, program.name, fns])),
+  };
 }
 
 /** A short hash of a text, FNV-1a, as eight hexadecimal digits. */
@@ -104,7 +117,6 @@ function body(
   params: string[],
   stmts: Stmt[],
   script: string,
-  unit: Unit,
 ): Fn {
   const code: Ins[] = [];
   const lines: number[] = [];
@@ -146,7 +158,9 @@ function body(
         return;
       }
       case "name":
-        emit(["load", e.name]);
+        if (e.ref?.k === "qry") emit(["callq", e.ref.key, 0]);
+        else if (e.ref?.k === "query") emit(["callq", e.ref.name, 0]);
+        else emit(["load", e.name]);
         return;
       case "list":
         e.items.forEach(expr);
@@ -165,7 +179,15 @@ function body(
       case "call":
         e.args.forEach(expr);
         line = e.at.line;
-        emit(["callq", e.name, e.args.length]);
+        emit([
+          "callq",
+          e.ref?.k === "qry"
+            ? e.ref.key
+            : e.ref?.k === "query"
+              ? e.ref.name
+              : e.name,
+          e.args.length,
+        ]);
         return;
       case "not":
         expr(e.a);
@@ -207,44 +229,6 @@ function body(
         emit(["bin", e.op]);
         return;
     }
-  };
-
-  /** A command's text: literal pieces, and `null` for each value put in. */
-  const template = (t: Template): (string | null)[] =>
-    t.map((p) => {
-      if (typeof p === "string") return p;
-      expr(p);
-      return null;
-    });
-
-  /** The values of a call of the script's own `cmd:`, segment by segment. */
-  const ownCall = (name: string, t: Template) => {
-    const segments: (string | Expr)[][] = [[]];
-    for (const p of t) {
-      if (typeof p !== "string") {
-        segments[segments.length - 1].push(p);
-        continue;
-      }
-      const bits = p.split(":");
-      bits.forEach((bit, i) => {
-        if (i > 0) segments.push([]);
-        if (bit) segments[segments.length - 1].push(bit);
-      });
-    }
-    const args = segments.slice(1);
-    for (const seg of args) {
-      if (seg.length === 1 && typeof seg[0] !== "string") expr(seg[0]);
-      else if (seg.every((x) => typeof x === "string")) {
-        const text = (seg as string[]).join("");
-        emit(["const", /^-?\d+(\.\d+)?$/.test(text) ? Number(text) : text]);
-      } else {
-        for (const x of seg)
-          if (typeof x === "string") emit(["const", x]);
-          else expr(x);
-        emit(["concat", seg.length]);
-      }
-    }
-    emit(["callc", name, args.length]);
   };
 
   const stmt = (s: Stmt): void => {
@@ -328,14 +312,12 @@ function body(
         return;
       }
       case "command": {
-        const first = s.text[0];
-        const head = typeof first === "string" ? first.split(":")[0] : "";
-        if (unit.defs.get(head)?.kind === "cmd") ownCall(head, s.text);
-        else {
-          const parts = template(s.text);
-          line = s.at.line;
-          emit(["cmd", parts, s.await]);
-        }
+        s.args.forEach(expr);
+        line = s.at.line;
+        if (s.ref?.k === "cmd") emit(["callc", s.ref.key, s.args.length]);
+        else if (s.ref?.k === "game")
+          emit(["cmd", s.ref.id, s.ref.segments, s.args.length, s.await]);
+        else throw new Error(`Unchecked command ${s.name}`);
         return;
       }
       case "timeout": {

@@ -51,6 +51,12 @@ function setup() {
       describe: () => "Befehle",
       run: () => void done.push("find"),
     },
+    {
+      id: "notify:info",
+      args: [{ kind: "text", name: "Text" }],
+      describe: ([t]) => `Meldung ${t}`,
+      run: ([t]) => void done.push(`notify:${t}`),
+    },
   );
   return { c, said, done };
 }
@@ -58,8 +64,14 @@ function setup() {
 describe("reading commands", () => {
   it("reads ids with arguments and defaults", () => {
     const { c } = setup();
-    const step = c.parseStep("up:20");
-    expect(typeof step === "string" ? step : step.text).toBe("up:20");
+    const step = c.parseStep("up(20)");
+    expect(typeof step === "string" ? step : step.text).toBe("up(20)");
+    const choice = c.parseStep('build("hütte")');
+    expect(typeof choice === "string" ? choice : choice.text).toBe(
+      "build:hütte",
+    );
+    const game = c.parseStep("$waldstatt:up(2)");
+    expect(typeof game === "string" ? game : game.text).toBe("up(2)");
     const plain = c.parseStep("up");
     expect(typeof plain === "string" ? plain : plain.args).toEqual(["1"]);
   });
@@ -67,22 +79,31 @@ describe("reading commands", () => {
   it("explains what is wrong", () => {
     const { c } = setup();
     expect(c.parseStep("nope")).toBe("«nope» ist kein Befehl.");
-    expect(c.parseStep("up:x")).toBe("«x» ist keine Zahl.");
+    expect(c.parseStep("up(x)")).toContain("weder eine Zahl noch ein Text");
+    expect(c.parseStep('up("x")')).toBe(
+      '«up»: Felder ist eine Zahl, nicht "x".',
+    );
+    expect(c.parseStep("up(2.5)")).toBe("«2.5» ist keine ganze Zahl.");
+    expect(c.parseStep("up:15")).toBe(
+      "«up» nimmt seine Werte in Klammern: up(15).",
+    );
     expect(c.parseStep("repair:under")).toBe(
       "«repair:under» braucht eine Zahl (Zustand).",
     );
     expect(c.parseStep("build:schloss")).toBe(
       "«schloss» gibt es bei «build» nicht.",
     );
-    expect(c.parseStep("up:3:4")).toBe("«up:3:4» hat zu viele Teile.");
+    expect(c.parseStep("up(3, 4)")).toBe("«up» nimmt einen Wert, nicht 2.");
+    expect(c.parseStep("notify:info")).toContain("braucht einen Text");
+    expect(c.parseStep("up(3")).toContain("«)»");
   });
 
   it("reads chains and refuses interactive steps in them", () => {
     const { c } = setup();
-    const parsed = c.parse("build:hütte; up:3");
+    const parsed = c.parse("build:hütte; up(3)");
     expect("steps" in parsed && parsed.steps.map((s) => s.text)).toEqual([
       "build:hütte",
-      "up:3",
+      "up(3)",
     ]);
     expect(c.parse("up;find:commands")).toEqual({
       error: "«find:commands» geht nicht in einem Makro.",
@@ -107,6 +128,56 @@ describe("reading commands", () => {
     expect(c.entries().map((e) => e.text)).toContain("secret:word");
   });
 
+  it("reads texts with every character, and writes them back quoted", () => {
+    const { c, done } = setup();
+    const text = 'Hütte steht; 12 Holz, "gut" (ja)';
+    const written = `notify:info(${JSON.stringify(text)})`;
+    const step = c.parseStep(written);
+    expect(typeof step === "string" ? step : step.args).toEqual([text]);
+    expect(typeof step === "string" ? step : step.text).toBe(written);
+    expect(c.runText(`${written};up(2)`)).toBe(true);
+    expect(done).toEqual([`notify:${text}`, "up:2"]);
+    expect(c.parse('notify:info("offen')).toMatchObject({ step: 1 });
+  });
+
+  it("lists commands with the names of their values", () => {
+    const { c } = setup();
+    const up = c.entries().find((e) => e.text === "up");
+    expect(up?.signature).toBe("up(Felder)");
+    expect(c.entries().find((e) => e.text === "build:hütte")?.signature).toBe(
+      undefined,
+    );
+  });
+
+  it("runs the scripts' commands supplied from outside", () => {
+    const { c } = setup();
+    const got: string[][] = [];
+    c.setExtra(() => [
+      {
+        id: "$helfer:bauen:dorf",
+        args: [
+          { kind: "any", name: "n" },
+          { kind: "any", name: "name" },
+        ],
+        describe: () => "Ein Dorf",
+        run: (args) => void got.push(args),
+      },
+    ]);
+    expect(c.runText('$helfer:bauen:dorf(3, "Au")')).toBe(true);
+    expect(got).toEqual([["3", '"Au"']]);
+    expect(c.entries().map((e) => e.text)).toContain("$helfer:bauen:dorf");
+    expect(c.parseStep("$helfer:nix")).toContain("kein Befehl");
+  });
+
+  it("checks kept chains, reading scripts' commands only as written", () => {
+    const { c } = setup();
+    expect(c.check('up(2);$helfer:bauen:dorf(3, "x")')).toBeUndefined();
+    expect(c.check("$helfer:bauen:dorf(3")).toContain("«)»");
+    expect(c.check("up:2")).toContain("up(2)");
+    expect(c.check("up;find:commands")).toContain("nicht in einem Makro");
+    expect(c.check("$waldstatt:nix")).toBe("«nix» ist kein Befehl.");
+  });
+
   it("makes slugs of names", () => {
     expect(slug("  Meinrads Klause ")).toBe("meinrads-klause");
     expect(slug("Wald: am Bach")).toBe("wald-am-bach");
@@ -117,15 +188,15 @@ describe("running", () => {
   it("lets a count stand for the number or multiply it", () => {
     const { c, done } = setup();
     c.runText("up", 20);
-    c.runText("up:20", 2);
-    c.runText("up:3");
+    c.runText("up(20)", 2);
+    c.runText("up(3)");
     expect(done).toEqual(["up:20", "up:40", "up:3"]);
   });
 
   it("repeats repeatable commands and whole chains", () => {
     const { c, done } = setup();
     c.runText("crew:more", 3);
-    c.runText("build:hütte;up:2", 2);
+    c.runText("build:hütte;up(2)", 2);
     expect(done).toEqual([
       "crew",
       "crew",
@@ -170,12 +241,12 @@ describe("recording", () => {
     const { c } = setup();
     c.startRecording();
     c.runText("up", 2);
-    c.runText("up:3");
-    c.runText("build:hütte");
+    c.runText("up(3)");
+    c.runText('build("hütte")');
     c.runText("find:commands");
     c.runText("broken");
-    expect(c.stopRecording()).toBe("up:5;build:hütte;broken");
-    expect(c.last).toBe("up:5;build:hütte;broken");
+    expect(c.stopRecording()).toBe("up(5);build:hütte;broken");
+    expect(c.last).toBe("up(5);build:hütte;broken");
   });
 
   it("does not record the steps inside a macro run", () => {

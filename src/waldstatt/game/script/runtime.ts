@@ -8,18 +8,23 @@
  * own sources and checked against them; one that does not fit is dropped.
  * At most eight run at once, each script once. The scripts are the
  * visitor's, kept apart from the forest; each forest switches on those that
- * may run in it, and nothing runs until scripts are unlocked.
+ * may run in it, and nothing runs until scripts are unlocked. A run may also
+ * start at one of a script's `cmd:` with values, as `$helfer:bauen:dorf(3)`
+ * does from the finder or a key (ADR 0008); it is known by that command and
+ * runs once at a time too.
  */
 import { ScriptError } from "./ast";
 import { check, type Library } from "./check";
 import { compile, machineVersion, type Program } from "./compile";
 import {
   start,
+  startAt,
   step,
   validRun,
   type MachineHost,
   type RunState,
 } from "./machine";
+import type { Value } from "./compile";
 
 export interface RuntimeHost extends MachineHost {
   library: Library;
@@ -30,7 +35,12 @@ export interface RuntimeHost extends MachineHost {
   announce(text: string): void;
   /** Whether scripts are unlocked at all (with «niklaus:wirth»). */
   unlocked(): boolean;
+  /** Shows that a script stopped with an error; else it is announced. */
+  alert?(script: string, text: string): void;
 }
+
+/** What a run is known by: its script, or `$script:command` it started at. */
+export const runKey = (r: RunState) => (r.entry ? `$${r.entry}` : r.script);
 
 /** How a script stands, for the dialog. */
 export type ScriptState =
@@ -80,6 +90,8 @@ export class Runtime {
   private compiled = new Map<string, Program | ScriptError>();
   private turn = 0;
   private listeners = new Set<() => void>();
+  /** The script whose run is stepping now, for what it says and shows. */
+  stepping: string | undefined;
 
   constructor(private host: RuntimeHost) {}
 
@@ -148,7 +160,7 @@ export class Runtime {
     if (!this.host.unlocked()) return "Skripte sind nicht freigeschaltet.";
     if (!this.on.has(name))
       return `«${name}» ist in diesem Wald nicht eingeschaltet.`;
-    if (this.runs.some((r) => r.script === name))
+    if (this.runs.some((r) => r.script === name && !r.entry))
       return `«${name}» läuft schon.`;
     if (this.runs.length >= limits.runs)
       return `Mehr als ${limits.runs} Skripte gleichzeitig gehen nicht.`;
@@ -162,10 +174,36 @@ export class Runtime {
     return undefined;
   }
 
+  /**
+   * Starts one of a script's `cmd:` with values, as `$script:name(…)` from
+   * the finder or a key; returns why not, if not.
+   */
+  startAt(script: string, name: string, values: Value[]): string | undefined {
+    if (!this.host.unlocked()) return "Skripte sind nicht freigeschaltet.";
+    if (!this.on.has(script))
+      return `«${script}» ist in diesem Wald nicht eingeschaltet.`;
+    const key = `${script}:${name}`;
+    if (this.runs.some((r) => r.entry === key)) return `«$${key}» läuft schon.`;
+    if (this.runs.length >= limits.runs)
+      return `Mehr als ${limits.runs} Skripte gleichzeitig gehen nicht.`;
+    const program = this.current(script);
+    if (program instanceof ScriptError)
+      return `«${script}», ${program.script ? `«${program.script}», ` : ""}Zeile ${program.at.line}: ${program.message}`;
+    const run = startAt(program, key, values, this.host.now());
+    if (typeof run === "string") return run;
+    this.programs.set(program.hash, program);
+    this.errors.delete(script);
+    this.runs.push(run);
+    this.changed();
+    return undefined;
+  }
+
+  /** Stops every run of a script, started at its top or at a command. */
   stop(name: string): boolean {
-    const i = this.runs.findIndex((r) => r.script === name);
-    if (i < 0) return false;
-    this.runs.splice(i, 1);
+    const before = this.runs.length;
+    for (let i = this.runs.length - 1; i >= 0; i--)
+      if (this.runs[i].script === name) this.runs.splice(i, 1);
+    if (this.runs.length === before) return false;
     this.changed();
     return true;
   }
@@ -225,21 +263,28 @@ export class Runtime {
     for (let k = 0; k < n && budget > 0; k++) {
       const run = this.runs[(this.turn + k) % n];
       if (!run) continue;
-      const { status, steps } = step(
-        run,
-        (h) => this.programs.get(h),
-        this.host,
-        Math.min(budget, limits.run),
-      );
+      this.stepping = run.script;
+      let result: ReturnType<typeof step>;
+      try {
+        result = step(
+          run,
+          (h) => this.programs.get(h),
+          this.host,
+          Math.min(budget, limits.run),
+        );
+      } finally {
+        this.stepping = undefined;
+      }
+      const { status, steps } = result;
       budget -= steps;
       if (status.state === "done" || status.state === "failed") {
         run.frames = [];
         ended = true;
         if (status.state === "failed") {
           this.errors.set(run.script, status);
-          this.host.announce(
-            `Skript «${run.script}» hält an, ${describeError(status, run.script)}`,
-          );
+          const why = `hält an, ${describeError(status, run.script)}`;
+          if (this.host.alert) this.host.alert(run.script, why);
+          else this.host.announce(`Skript «${run.script}» ${why}`);
         }
       }
     }

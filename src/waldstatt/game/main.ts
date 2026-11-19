@@ -12,7 +12,7 @@ import iseLogoUrl from "./ise-logo.png?url";
 import { href } from "../../lib/url";
 import { kinds, placing, STAGE, textWidth } from "./config";
 import { attachInput } from "./input";
-import { Commands } from "./commands";
+import { Commands, type Spec } from "./commands";
 import { registerCommands } from "./commandSet";
 import {
   load as loadKeys,
@@ -21,7 +21,10 @@ import {
   unlock,
   unlocked,
 } from "./keymap";
+import { ScriptError } from "./script/ast";
 import type { Library } from "./script/check";
+import type { Value } from "./script/compile";
+import { Notices } from "./notices";
 import { gameHost, gameQueries } from "./script/queries";
 import { Runtime } from "./script/runtime";
 import { ScriptsDialog } from "./scriptsDialog";
@@ -291,11 +294,19 @@ async function start(root: HTMLElement) {
         );
     },
   });
+  // Notices over the map (ADR 0008), from `notify:`, `say` and failures.
+  const notices = new Notices(
+    root.querySelector<HTMLElement>("[data-notices]") ?? root,
+    {
+      announce: (text) => shown.announce(text),
+      openScript: (name) => scriptsDialog?.edit(name),
+    },
+  );
   // The player's scripts (ADR 0007): the game's queries, its commands, and
   // their runs, kept with the forest.
   const library: Library = {
     queries: gameQueries,
-    command: (text) => commands.scriptCommand(text),
+    command: (head) => commands.forScript(head),
   };
   const runtime = new Runtime({
     ...gameHost(game, {
@@ -308,8 +319,38 @@ async function start(root: HTMLElement) {
     names: () => Object.keys(savedScripts()),
     announce: (text) => shown.announce(text),
     command: (text) => commands.runScript(text),
-    say: (text) => shown.announce(text),
+    say: (text) =>
+      notices.show({ kind: "info", text, script: runtime.stepping }),
+    alert: (script, text) => notices.show({ kind: "alert", text, script }),
     unlocked: () => unlocked("scripts"),
+  });
+  // The `cmd:` of the scripts switched on here, as `$script:name(…)` for the
+  // finder, keys and macros (ADR 0008); each starts a run at that command.
+  commands.setExtra(() => {
+    if (!unlocked("scripts")) return [];
+    const out: Spec[] = [];
+    for (const name of Object.keys(savedScripts())) {
+      if (!runtime.enabled(name)) continue;
+      const program = runtime.current(name);
+      if (program instanceof ScriptError) continue;
+      for (const [key, fn] of Object.entries(program.fns)) {
+        if (fn.kind !== "cmd" || !key.startsWith(`${name}:`)) continue;
+        const cmd = key.slice(name.length + 1);
+        out.push({
+          id: `$${key}`,
+          args: fn.params.map((param) => ({ kind: "any", name: param })),
+          describe: () =>
+            program.docs[key] ?? `Befehl des Skripts «${name}» starten`,
+          run: (args) =>
+            runtime.startAt(
+              name,
+              cmd,
+              args.map((a) => JSON.parse(a) as Value),
+            ) ?? shown.announce(`«$${key}» läuft.`),
+        });
+      }
+    }
+    return out;
   });
   registerCommands(
     commands,
@@ -327,6 +368,7 @@ async function start(root: HTMLElement) {
       open: () => scriptsDialog?.open(),
       edit: (name) => scriptsDialog?.edit(name),
     }),
+    (kind, text) => notices.show({ kind, text, script: runtime.stepping }),
   );
   scriptsDialog = new ScriptsDialog({
     root,
@@ -368,11 +410,9 @@ async function start(root: HTMLElement) {
     confirm: (o) => shown.confirm(o),
     announce: (text) => shown.announce(text),
   });
-  // Every command a stored keymap names is checked against those registered.
-  const why = (text: string) => {
-    const parsed = commands.parse(text);
-    return "error" in parsed ? parsed.error : undefined;
-  };
+  // Every command a stored keymap names is checked against those registered;
+  // a script's command (`$helfer:…`) only as written (ADR 0008).
+  const why = (text: string) => commands.check(text);
   void loadKeys(why);
   syncStage();
   ui.useInput(attachInput(host, renderer, ui.handlers()));

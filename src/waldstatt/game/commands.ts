@@ -1,7 +1,11 @@
 /**
- * The commands (ADR 0006): everything the keyboard and the «:» finder can do,
- * by name. A command's id is a path of colon segments, its fixed part and
- * then its arguments: `up`, `up:20`, `build:hütte`, `repair:under:5`.
+ * The commands (ADR 0006, ADR 0008): everything the keyboard and the «:»
+ * finder can do, by name. A command's id is a path of colon segments; its
+ * values follow in parentheses: `up`, `up(20)`, `repair:under(5)`,
+ * `notify:info("Hallo")`. A choice from a list may stand as a further
+ * segment, as `build:hütte`, or in the parentheses, as `build("hütte")`.
+ * `$waldstatt:` before a command names the game's explicitly; the commands
+ * of the players' scripts are `$script:name(…)`, supplied from outside.
  * Namespaces and verbs are English identifiers; names of things are as the
  * game names them, as lower-case slugs. Each command describes itself in
  * German, says why it cannot run now, and says how a count typed before its
@@ -12,6 +16,7 @@
  * the dispatcher runs them (dispatch.ts).
  */
 
+import { readCall, segmentSafe, splitChain, type Literal } from "./commandText";
 import type { Work } from "./script/machine";
 
 /** The places a binding can apply: where the keyboard is and what is open. */
@@ -41,7 +46,11 @@ export type Arg =
       /** The number when none is given; without, one is needed. */
       fallback?: number;
     }
-  | { kind: "choice"; name: string; choices(): Choice[] };
+  | { kind: "choice"; name: string; choices(): Choice[] }
+  /** A text, written in quotes. */
+  | { kind: "text"; name: string; max?: number }
+  /** A number or a text, kept as written (JSON), for scripts' commands. */
+  | { kind: "any"; name: string };
 
 export interface Spec {
   /** The fixed segments, such as `repair:under`. */
@@ -74,7 +83,7 @@ export interface Spec {
    * or a dialog, or changes keys or macros.
    */
   interactive?: boolean;
-  /** Arguments the finder offers as examples, such as `repair:under:10`. */
+  /** Arguments the finder offers as examples, such as `repair:under(10)`. */
   examples?: string[][];
   /**
    * Left out of the finder's list and the completions now: it runs only
@@ -87,7 +96,7 @@ export interface Spec {
 export interface Step {
   spec: Spec;
   args: string[];
-  /** As it is written, such as `up:20`. */
+  /** As it is written, such as `up(20)`. */
   text: string;
 }
 
@@ -101,7 +110,32 @@ export interface Entry {
   text: string;
   description: string;
   why?: string;
+  /** Its values by name, such as `up(Felder)`, if it takes any. */
+  signature?: string;
 }
+
+/** A command's values, as the script checker needs them (ADR 0008). */
+export interface ArgInfo {
+  kind: Arg["kind"];
+  name: string;
+  min?: number;
+  max?: number;
+  /** Whether it may be left out. */
+  optional: boolean;
+  /** The values a choice takes. */
+  choices?: string[];
+}
+
+/** A command found by its segments as written in a script. */
+export interface CommandInfo {
+  id: string;
+  args: ArgInfo[];
+  /** The segments after the id, as values of its first choices. */
+  segments: string[];
+}
+
+/** The id of the game's namespace (ADR 0008). */
+export const gameNamespace = "waldstatt";
 
 const limits = {
   /** Steps in one macro. */
@@ -125,7 +159,9 @@ export class Commands {
   private specs: Spec[] = [];
   private byId = new Map<string, Spec>();
   /** The recording under way, as the steps written so far. */
-  private recording: string[] | null = null;
+  private recording: { spec: Spec; args: string[] }[] | null = null;
+  /** The commands of the players' scripts, `$script:name`, as they are now. */
+  private extra: () => Spec[] = () => [];
   /** The last recording, which `macro:replay` runs. */
   last = "";
   /** The macros running now, by name, to refuse running one inside itself. */
@@ -145,6 +181,18 @@ export class Commands {
     }
   }
 
+  /** Supplies the commands of the players' scripts (ADR 0008). */
+  setExtra(extra: () => Spec[]) {
+    this.extra = extra;
+  }
+
+  private find(id: string): Spec | undefined {
+    return (
+      this.byId.get(id) ??
+      (id.startsWith("$") ? this.extra().find((s) => s.id === id) : undefined)
+    );
+  }
+
   /** Calls back when a recording starts or ends. */
   onChange(listener: () => void) {
     this.listeners.add(listener);
@@ -156,51 +204,33 @@ export class Commands {
 
   // --- Reading commands --------------------------------------------------------
 
-  /** Reads one command, such as `repair:under:5`, or why it is not one. */
+  /**
+   * Reads one command, such as `repair:under(5)` or `build:hütte`, or why it
+   * is not one.
+   */
   parseStep(text: string): Step | string {
-    const segments = text.trim().split(":");
-    if (!text.trim()) return "Leerer Befehl.";
+    const call = readCall(text);
+    if (typeof call === "string") return call;
+    let head = call.head;
+    if (head.startsWith(`$${gameNamespace}:`))
+      head = head.slice(gameNamespace.length + 2);
+    const segments = head.split(":");
+    if (segments.some((s) => !s))
+      return `«${head}»: zwischen zwei Doppelpunkten fehlt etwas.`;
     for (let n = segments.length; n > 0; n--) {
-      const spec = this.byId.get(segments.slice(0, n).join(":"));
-      if (!spec) continue;
-      const given = segments.slice(n);
-      const args: string[] = [];
-      const declared = spec.args ?? [];
-      if (given.length > declared.length)
-        return `«${text.trim()}» hat zu viele Teile.`;
-      for (const [i, arg] of declared.entries()) {
-        const value = given[i];
-        if (arg.kind === "number") {
-          if (value === undefined || value === "") {
-            if (arg.fallback === undefined)
-              return `«${spec.id}» braucht eine Zahl (${arg.name}).`;
-            args.push(String(arg.fallback));
-            continue;
-          }
-          if (!/^\d{1,4}$/.test(value)) return `«${value}» ist keine Zahl.`;
-          const n = Number(value);
-          if (n < arg.min || n > arg.max)
-            return `${arg.name}: ${arg.min} bis ${arg.max}.`;
-          args.push(String(n));
-        } else {
-          if (value === undefined || value === "")
-            return `«${spec.id}» braucht ${arg.name}.`;
-          if (!arg.choices().some((c) => c.value === value))
-            return `«${value}» gibt es bei «${spec.id}» nicht.`;
-          args.push(value);
-        }
-      }
-      return { spec, args, text: write(spec, args) };
+      const spec = this.find(segments.slice(0, n).join(":"));
+      if (spec) return fill(spec, segments.slice(n), call.values);
     }
+    if (head.startsWith("$"))
+      return `«${head}» ist kein Befehl eines eingeschalteten Skripts.`;
     return `«${segments[0]}» ist kein Befehl.`;
   }
 
   /** Reads a chain of commands joined by «;». */
   parse(text: string): Parsed {
-    const parts = text
-      .split(";")
-      .map((p) => p.trim())
-      .filter(Boolean);
+    const split = splitChain(text);
+    if (typeof split === "string") return { error: split, step: 1 };
+    const parts = split.map((p) => p.trim()).filter(Boolean);
     if (!parts.length) return { error: "Leerer Befehl.", step: 1 };
     if (parts.length > limits.steps)
       return {
@@ -219,6 +249,31 @@ export class Commands {
       steps.push(step);
     }
     return { steps };
+  }
+
+  /**
+   * Why a chain kept in the keymap cannot be, or undefined. A script's
+   * command (`$helfer:…`) is only read as written: its script may be
+   * switched off in this forest or not read yet, and it is refused with the
+   * reason when it runs (ADR 0008).
+   */
+  check(text: string): string | undefined {
+    const parts = splitChain(text);
+    if (typeof parts === "string") return parts;
+    const steps = parts.map((p) => p.trim()).filter(Boolean);
+    if (!steps.length) return "Leerer Befehl.";
+    for (const part of steps) {
+      if (part.startsWith("$") && !part.startsWith(`$${gameNamespace}:`)) {
+        const call = readCall(part);
+        if (typeof call === "string") return call;
+        continue;
+      }
+      const step = this.parseStep(part);
+      if (typeof step === "string") return step;
+      if (steps.length > 1 && step.spec.interactive)
+        return `«${step.text}» geht nicht in einem Makro.`;
+    }
+    return undefined;
   }
 
   /** What a chain does, in German. */
@@ -241,8 +296,9 @@ export class Commands {
         text: write(spec, args),
         description: spec.describe(args),
         why: spec.unavailable?.(args),
+        signature: signature(spec),
       });
-    for (const spec of this.specs) {
+    for (const spec of [...this.specs, ...this.extra()]) {
       if (spec.hidden?.()) continue;
       const declared = spec.args ?? [];
       const choice = declared.find((a) => a.kind === "choice");
@@ -331,15 +387,18 @@ export class Commands {
     };
     let args = step.args;
     let times = 1;
-    const number = spec.args?.[0];
+    // A count stands for the first number value.
+    const slot = spec.args?.findIndex((a) => a.kind === "number") ?? -1;
+    const number = slot >= 0 ? spec.args?.[slot] : undefined;
     if (count && spec.count === "number" && number?.kind === "number") {
       // The count stands for the number if none was given, else multiplies it.
-      const given = Number(args[0] ?? number.fallback ?? 1);
+      const given = Number(args[slot] ?? number.fallback ?? 1);
       const n = Math.min(
         number.max,
         given === number.fallback ? count : given * count,
       );
-      args = [String(n), ...args.slice(1)];
+      args = args.slice();
+      args[slot] = String(n);
     } else if (count && spec.count === "repeat")
       times = Math.min(limits.count, count);
     for (let t = 0; t < times; t++) {
@@ -361,27 +420,31 @@ export class Commands {
   // --- Scripts (ADR 0007) ------------------------------------------------------------
 
   /**
-   * Whether a command reads for a script, or why not. With values put in
-   * by `{…}`, only its fixed beginning is known, ending in «:».
+   * A game command for a script, found by its segments as written (such as
+   * `repair:under` or `build:hütte`), with its values; why not, if it is
+   * none or cannot run in a script.
    */
-  scriptCommand(text: string): string | undefined {
-    if (text.endsWith(":")) {
-      const id = text.slice(0, -1);
-      const spec =
-        this.byId.get(id) ??
-        this.specs.find(
-          (s) => s.id.startsWith(`${id}:`) || id.startsWith(`${s.id}:`),
-        );
-      if (!spec) return `«${id}» ist kein Befehl.`;
-      return spec.interactive
-        ? `«${id}» geht nicht in einem Skript.`
-        : undefined;
+  forScript(head: string): CommandInfo | string {
+    const segments = head.split(":");
+    for (let n = segments.length; n > 0; n--) {
+      const spec = this.byId.get(segments.slice(0, n).join(":"));
+      if (!spec) continue;
+      if (spec.interactive) return `«${spec.id}» geht nicht in einem Skript.`;
+      return {
+        id: spec.id,
+        segments: segments.slice(n),
+        args: (spec.args ?? []).map((a) => ({
+          kind: a.kind,
+          name: a.name,
+          optional: a.kind === "number" && a.fallback !== undefined,
+          ...(a.kind === "number" ? { min: a.min, max: a.max } : {}),
+          ...(a.kind === "choice"
+            ? { choices: a.choices().map((c) => c.value) }
+            : {}),
+        })),
+      };
     }
-    const step = this.parseStep(text);
-    if (typeof step === "string") return step;
-    return step.spec.interactive
-      ? `«${step.text}» geht nicht in einem Skript.`
-      : undefined;
+    return `«${segments[0]}» ist kein Befehl.`;
   }
 
   /** Runs one command for a script: why not, or the work it left. */
@@ -409,31 +472,109 @@ export class Commands {
   stopRecording(): string {
     const steps = this.recording ?? [];
     this.recording = null;
-    const text = steps.join(";");
+    const text = steps.map((s) => write(s.spec, s.args)).join(";");
     if (text) this.last = text;
     for (const listener of this.listeners) listener();
     return text;
   }
 
-  /** Writes a step down; moves in a row add up, as `up;up;up` to `up:3`. */
+  /** Writes a step down; moves in a row add up, as `up;up;up` to `up(3)`. */
   private write(spec: Spec, args: string[]) {
     const steps = this.recording;
     if (!steps) return;
     if (steps.length >= limits.steps) return;
     const previous = steps[steps.length - 1];
-    if (spec.hold && previous !== undefined) {
-      const [id, n] = previous.split(":");
-      if (id === spec.id && args.length === 1) {
-        const sum = Number(n ?? 1) + Number(args[0]);
-        steps[steps.length - 1] = `${spec.id}:${sum}`;
-        return;
-      }
+    if (
+      spec.hold &&
+      previous?.spec === spec &&
+      args.length === 1 &&
+      previous.args.length === 1
+    ) {
+      const sum = Number(previous.args[0]) + Number(args[0]);
+      previous.args = [String(sum)];
+      return;
     }
-    steps.push(write(spec, args));
+    steps.push({ spec, args: args.slice() });
   }
 }
 
-/** A command as written: its id, then its arguments. */
-function write(spec: Spec, args: string[]): string {
-  return [spec.id, ...args].join(":");
+/**
+ * A command as written: its id, its leading choices as segments where they
+ * can stand there, then its other values in parentheses.
+ */
+export function write(spec: Spec, args: string[]): string {
+  const declared = spec.args ?? [];
+  const segments: string[] = [];
+  const values: string[] = [];
+  for (const [i, a] of args.entries()) {
+    const kind = declared[i]?.kind;
+    if (!values.length && kind === "choice" && segmentSafe(a)) segments.push(a);
+    else if (kind === "number" || kind === "any") values.push(a);
+    else values.push(JSON.stringify(a));
+  }
+  return (
+    [spec.id, ...segments].join(":") +
+    (values.length ? `(${values.join(", ")})` : "")
+  );
+}
+
+/** A command's values by name, such as `up(Felder)`; none for choices only. */
+function signature(spec: Spec): string | undefined {
+  const args = spec.args ?? [];
+  if (!args.some((a) => a.kind !== "choice")) return undefined;
+  return `${spec.id}(${args.map((a) => a.name).join(", ")})`;
+}
+
+/** Fills a command's values from its segments and parentheses, checked. */
+function fill(
+  spec: Spec,
+  segments: string[],
+  values: Literal[],
+): Step | string {
+  const declared = spec.args ?? [];
+  for (const [i, seg] of segments.entries())
+    if (declared[i]?.kind !== "choice")
+      return declared.length
+        ? `«${spec.id}» nimmt seine Werte in Klammern: ${spec.id}(${/^\d+$/.test(seg) ? seg : JSON.stringify(seg)}).`
+        : `«${spec.id}» hat keinen Teil «${seg}».`;
+  const given: Literal[] = [...segments, ...values];
+  if (given.length > declared.length)
+    return declared.length
+      ? `«${spec.id}» nimmt ${declared.length === 1 ? "einen Wert" : `${declared.length} Werte`}, nicht ${given.length}.`
+      : `«${spec.id}» nimmt keine Werte.`;
+  const args: string[] = [];
+  for (const [i, arg] of declared.entries()) {
+    const v = given[i];
+    if (arg.kind === "number") {
+      if (v === undefined) {
+        if (arg.fallback === undefined)
+          return `«${spec.id}» braucht eine Zahl (${arg.name}).`;
+        args.push(String(arg.fallback));
+        continue;
+      }
+      if (typeof v !== "number")
+        return `«${spec.id}»: ${arg.name} ist eine Zahl, nicht ${JSON.stringify(v)}.`;
+      if (!Number.isInteger(v)) return `«${v}» ist keine ganze Zahl.`;
+      if (v < arg.min || v > arg.max)
+        return `${arg.name}: ${arg.min} bis ${arg.max}.`;
+      args.push(String(v));
+    } else if (arg.kind === "choice") {
+      if (v === undefined) return `«${spec.id}» braucht ${arg.name}.`;
+      const value = String(v);
+      if (!arg.choices().some((c) => c.value === value))
+        return `«${value}» gibt es bei «${spec.id}» nicht.`;
+      args.push(value);
+    } else if (arg.kind === "text") {
+      if (v === undefined)
+        return `«${spec.id}» braucht einen Text (${arg.name}), wie ${spec.id}("Hallo").`;
+      const value = String(v);
+      if (value.length > (arg.max ?? 500))
+        return `${arg.name}: höchstens ${arg.max ?? 500} Zeichen.`;
+      args.push(value);
+    } else {
+      if (v === undefined) return `«${spec.id}» braucht ${arg.name}.`;
+      args.push(JSON.stringify(v));
+    }
+  }
+  return { spec, args, text: write(spec, args) };
 }

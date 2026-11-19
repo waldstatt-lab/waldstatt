@@ -695,6 +695,83 @@
   text-align: center;
 }
 
+/* Notices of commands and scripts (ADR 0008): top right, under the bar. */
+.wg-notices {
+  position: absolute;
+  top: max(4.25rem, env(safe-area-inset-top));
+  right: max(0.75rem, env(safe-area-inset-right));
+  z-index: 5;
+  display: grid;
+  gap: 0.4rem;
+  width: min(22rem, calc(100vw - 1.5rem));
+  pointer-events: none;
+}
+.wg-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.3rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+  box-shadow: 0 4px 8px rgb(0 0 0 / 0.35);
+  pointer-events: auto;
+  animation: wg-notice-in 0.2s ease-out;
+}
+.wg-notice p {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.wg-notice-alert {
+  border-color: #a8323a;
+  box-shadow:
+    inset 4px 0 0 #a8323a,
+    0 4px 8px rgb(0 0 0 / 0.35);
+}
+.wg-notice-from {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #6a3a1c;
+}
+.wg-notice-actions {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.wg-notice-button,
+.wg-notice-close {
+  padding: 0.1rem 0.4rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-wood-light);
+  color: var(--wg-parchment);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+@keyframes wg-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.3rem);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wg-notice {
+    animation: none;
+  }
+}
+/* Phones show the supplies in the menu, so the top is free. */
+@media (max-width: 40rem) {
+  .wg-notices {
+    top: max(0.75rem, env(safe-area-inset-top));
+    left: max(0.75rem, env(safe-area-inset-left));
+    width: auto;
+  }
+}
+
 /* Scripts running: a badge that opens the dialog «Skripte». */
 .wg-scripts-badge {
   position: absolute;

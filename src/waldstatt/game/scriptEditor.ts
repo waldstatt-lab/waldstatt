@@ -1,9 +1,10 @@
 /**
- * The script editor (ADR 0007): CodeMirror 6 with a mode for the Waldstatt's
- * script language, completion of keywords, the game's queries and commands
- * (with their German descriptions), the script's own `cmd:` and `qry:`, and
- * the fields after a dot, and the checker's errors marked where they stand
- * as the text is typed. Vim's keys come from `@replit/codemirror-vim`,
+ * The script editor (ADR 0007, ADR 0008): CodeMirror 6 with a mode for the
+ * Waldstatt's script language, completion of keywords, the game's queries
+ * and commands (with their values and German descriptions), the script's
+ * own `cmd:` and `qry:`, the namespaces after `$` and their names after
+ * `$ns:`, and the fields after a dot, and the checker's errors and warnings
+ * marked where they stand as the text is typed. Vim's keys come from `@replit/codemirror-vim`,
  * loaded only when they are switched on. This module is loaded only when
  * the editor opens (scriptsDialog.ts), so the game's own script does not
  * carry it.
@@ -41,12 +42,17 @@ export interface EditorOptions {
   text: string;
   /** Completions: the game's queries, commands and the fields after a dot. */
   queries: Record<string, string>;
-  commands: () => { text: string; description: string }[];
+  commands: () => { text: string; description: string; signature?: string }[];
+  /** What each script offers after `$script:`. */
+  namespaces: () => Record<string, { label: string; detail: string }[]>;
   fields: Record<string, string>;
-  /** The checker's error for the text, with its line and column, if any. */
-  check(
-    text: string,
-  ): { message: string; line: number; col: number } | undefined;
+  /** The checker's error, or its warnings, with line and column. */
+  check(text: string): {
+    message: string;
+    line: number;
+    col: number;
+    severity: "error" | "warning";
+  }[];
   changed(text: string): void;
   vim: boolean;
 }
@@ -63,9 +69,21 @@ const mode = StreamLanguage.define<{ start: boolean }>({
     }
     if (stream.match(/^"(?:[^"]|\{[^}]*\})*"?/)) return "string";
     if (stream.match(/^\d+(?:\.\d+)?[smh]?(?![\p{L}_])/u)) return "number";
-    if (stream.match(/^(?:cmd|qry):[\p{L}_][\p{L}\p{N}_-]*/u)) {
+    if (
+      stream.match(
+        /^(?:cmd|qry):[\p{L}_][\p{L}\p{N}_-]*(?::[\p{L}_][\p{L}\p{N}_-]*)*/u,
+      )
+    ) {
       state.start = false;
       return "definition";
+    }
+    // A name in a namespace: `$waldstatt:up`, `$helfer:summe`.
+    if (
+      stream.match(/^\$[\p{L}_][\p{L}\p{N}_-]*(?::[\p{L}_][\p{L}\p{N}_-]*)*/u)
+    ) {
+      const wasStart = state.start;
+      state.start = false;
+      return wasStart ? "command" : "namespace";
     }
     const word = stream.match(
       /^[\p{L}_][\p{L}\p{N}_]*(?:-[\p{L}\p{N}_]+)*/u,
@@ -81,14 +99,16 @@ const mode = StreamLanguage.define<{ start: boolean }>({
           ? "atom"
           : "keyword";
       }
-      // A command: a word at the start of a statement, with its colons.
+      // A command: a word at the start of a statement, with its colons;
+      // its values follow in parentheses.
       if (
         wasStart &&
         (stream.peek() === ":" ||
+          stream.peek() === "(" ||
           stream.eol() ||
           /[\s;]/.test(stream.peek() ?? ""))
       ) {
-        stream.match(/^(?::[\p{L}\p{N}_-]*|:\{[^}]*\})*/u);
+        stream.match(/^(?::[\p{L}\p{N}_-]*)*/u);
         return "command";
       }
       return "variableName";
@@ -103,6 +123,7 @@ const mode = StreamLanguage.define<{ start: boolean }>({
   tokenTable: {
     command: tags.function(tags.variableName),
     definition: tags.definition(tags.function(tags.variableName)),
+    namespace: tags.namespace,
   },
 });
 
@@ -113,6 +134,7 @@ const style = HighlightStyle.define([
   { tag: tags.number, color: "#8cc8e8" },
   { tag: tags.atom, color: "#8cc8e8" },
   { tag: tags.function(tags.variableName), color: "#8fd3c4" },
+  { tag: tags.namespace, color: "#c9a7e8" },
   {
     tag: tags.definition(tags.function(tags.variableName)),
     color: "#ffcf7a",
@@ -172,8 +194,57 @@ export class ScriptEditor {
   private vim = new Compartment();
 
   constructor(o: EditorOptions) {
-    const words = /[\p{L}\p{N}_:-]*/u;
+    const words = /[\p{L}\p{N}_:$-]*/u;
     const complete = (context: CompletionContext) => {
+      // After `$`: the namespaces; after `$ns:`, its names.
+      const dollar = context.matchBefore(
+        /\$[\p{L}\p{N}_-]*(?::[\p{L}\p{N}_:-]*)?$/u,
+      );
+      if (dollar) {
+        const text = dollar.text.slice(1);
+        const colon = text.indexOf(":");
+        const spaces = o.namespaces();
+        if (colon < 0)
+          return {
+            from: dollar.from,
+            options: [
+              { label: "$waldstatt:", detail: "Das Spiel", type: "namespace" },
+              ...Object.keys(spaces).map((ns): Completion => ({
+                label: `$${ns}:`,
+                detail: "Ein Skript",
+                type: "namespace",
+              })),
+            ],
+            validFor: /^\$[\p{L}\p{N}_-]*$/u,
+          };
+        const ns = text.slice(0, colon);
+        const from = dollar.from + colon + 2;
+        const options: Completion[] =
+          ns === "waldstatt"
+            ? [
+                ...Object.entries(o.queries).map(
+                  ([label, detail]): Completion => ({
+                    label,
+                    detail,
+                    type: "variable",
+                  }),
+                ),
+                ...o.commands().map((c): Completion => ({
+                  label: c.signature ?? c.text,
+                  detail: c.description,
+                  apply: c.signature
+                    ? `${c.signature.slice(0, c.signature.indexOf("("))}(`
+                    : c.text,
+                  type: "function",
+                })),
+              ]
+            : (spaces[ns] ?? []).map((d): Completion => ({
+                label: d.label,
+                detail: d.detail,
+                type: "function",
+              }));
+        return { from, options, validFor: /^[\p{L}\p{N}_:-]*$/u };
+      }
       // Fields after a dot.
       const field = context.matchBefore(/\.[\p{L}_]*$/u);
       if (field) {
@@ -193,9 +264,9 @@ export class ScriptEditor {
       const from = word ? word.from : context.pos;
       const text = context.state.doc.toString();
       const own = [
-        ...text.matchAll(/^(cmd|qry):([\p{L}_][\p{L}\p{N}_-]*)\(([^)]*)\)/gmu),
+        ...text.matchAll(/^(cmd|qry):([\p{L}_][\p{L}\p{N}_:-]*)\(([^)]*)\)/gmu),
       ].map((m): Completion => ({
-        label: m[1] === "cmd" ? `${m[2]}:` : `${m[2]}(`,
+        label: `${m[2]}(`,
         detail: `${m[1] === "cmd" ? "Befehl" : "Abfrage"} des Skripts (${m[3]})`,
         type: m[1] === "cmd" ? "function" : "method",
       }));
@@ -211,8 +282,11 @@ export class ScriptEditor {
         })),
         ...own,
         ...o.commands().map((c): Completion => ({
-          label: c.text,
+          label: c.signature ?? c.text,
           detail: c.description,
+          apply: c.signature
+            ? `${c.signature.slice(0, c.signature.indexOf("("))}(`
+            : c.text,
           type: "function",
         })),
       ];
@@ -220,21 +294,19 @@ export class ScriptEditor {
     };
     const lint = linter(
       (view): Diagnostic[] => {
-        const e = o.check(view.state.doc.toString());
-        if (!e) return [];
         const doc = view.state.doc;
-        const line = doc.line(Math.min(Math.max(1, e.line), doc.lines));
-        const from = Math.min(line.from + Math.max(0, e.col - 1), line.to);
-        // From the column to the end of the line, or the line if it is empty there.
-        const to = from < line.to ? line.to : Math.min(doc.length, from + 1);
-        return [
-          {
+        return o.check(doc.toString()).map((e) => {
+          const line = doc.line(Math.min(Math.max(1, e.line), doc.lines));
+          const from = Math.min(line.from + Math.max(0, e.col - 1), line.to);
+          // From the column to the end of the line, or the line if it is empty there.
+          const to = from < line.to ? line.to : Math.min(doc.length, from + 1);
+          return {
             from: Math.min(from, to),
             to,
-            severity: "error",
+            severity: e.severity,
             message: e.message,
-          },
-        ];
+          };
+        });
       },
       { delay: 300 },
     );

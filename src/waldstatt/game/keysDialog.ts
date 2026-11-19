@@ -226,7 +226,7 @@ export class KeysDialog {
       type: "text",
       autocomplete: "off",
       spellcheck: false,
-      placeholder: "z. B. build:hütte;enter;right:3",
+      placeholder: "z. B. build:hütte;enter;right(3)",
     });
     command.setAttribute("list", "wg-keymap-commands");
     const options = el("datalist", { id: "wg-keymap-commands" });
@@ -404,7 +404,7 @@ export class KeysDialog {
         autocomplete: "off",
         spellcheck: false,
         placeholder:
-          "tool:holzhacken;selection:start;up:10;right:10;selection:confirm",
+          "tool:holzhacken;selection:start;up(10);right(10);selection:confirm",
       });
       stepsInput.setAttribute("aria-label", `Schritte von «${name || "neu"}»`);
       stepsInput.dataset.keysFocus = `macro:${name}`;
@@ -526,10 +526,7 @@ export class KeysDialog {
     return details;
   }
 
-  private why = (text: string) => {
-    const parsed = this.o.commands.parse(text);
-    return "error" in parsed ? parsed.error : undefined;
-  };
+  private why = (text: string) => this.o.commands.check(text);
 
   private problems(list: { text: string; line?: number }[]) {
     this.json?.problems.replaceChildren(

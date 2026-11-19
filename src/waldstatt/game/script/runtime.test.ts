@@ -4,8 +4,16 @@ import { Runtime, type RuntimeHost } from "./runtime";
 
 const library: Library = {
   queries: { time: { args: [0, 0], describe: "Spielzeit" } },
-  command: (text) =>
-    /^(up(:\d+)?|up:)$/.test(text) ? undefined : `«${text}» ist kein Befehl.`,
+  command: (head) =>
+    head === "up"
+      ? {
+          id: "up",
+          segments: [],
+          args: [
+            { kind: "number", name: "Felder", min: 1, max: 9, optional: true },
+          ],
+        }
+      : `«${head}» ist kein Befehl.`,
 };
 
 function setup(scripts: Record<string, string>) {
@@ -68,7 +76,7 @@ describe("the runtime", () => {
 
   it("starts `every` scripts on game time, never twice at once", () => {
     const { runtime, g, advance } = setup({
-      tick: "every 10s\nup\nwait 15s",
+      tick: "import waldstatt\nevery 10s\nup\nwait 15s",
     });
     advance(31);
     // At 0 it starts and waits 15s; at 10 it still runs and is skipped; at
@@ -105,13 +113,13 @@ describe("the runtime", () => {
   });
 
   it("drops runs whose program does not compile to the same thing", () => {
-    const first = setup({ a: "wait 5s\nup" });
+    const first = setup({ a: "import waldstatt\nwait 5s\nup" });
     first.runtime.start("a");
     first.advance(1);
     const saved = JSON.parse(JSON.stringify(first.runtime.save()));
     const h = Object.keys(saved.programs)[0];
-    saved.programs[h].sources.a = "wait 5s\nup:2";
-    const second = setup({ a: "up" });
+    saved.programs[h].sources.a = "import waldstatt\nwait 5s\nup(2)";
+    const second = setup({ a: "import waldstatt\nup" });
     expect(second.runtime.load(saved)).toBe(1);
     expect(second.runtime.runs).toHaveLength(0);
     expect(second.runtime.load({ ...saved, version: 999 })).toBe(1);
@@ -128,7 +136,10 @@ describe("the runtime", () => {
   });
 
   it("runs nothing until scripts are unlocked", () => {
-    const { runtime, g, advance } = setup({ a: "up", tick: "every 10s\nup" });
+    const { runtime, g, advance } = setup({
+      a: "import waldstatt\nup",
+      tick: "import waldstatt\nevery 10s\nup",
+    });
     g.unlocked = false;
     expect(runtime.start("a")).toBe("Skripte sind nicht freigeschaltet.");
     advance(20);
@@ -141,7 +152,7 @@ describe("the runtime", () => {
   it("runs only scripts switched on in this forest", () => {
     const { runtime, g, advance } = setup({
       a: "wait 50s",
-      tick: "every 10s\nup",
+      tick: "import waldstatt\nevery 10s\nup",
     });
     runtime.enable("tick", false);
     advance(20);
@@ -155,23 +166,57 @@ describe("the runtime", () => {
   });
 
   it("keeps which scripts are switched on with the forest", () => {
-    const first = setup({ a: "up", b: "up" });
+    const first = setup({ a: "say 1", b: "say 2" });
     first.runtime.enable("b", false);
     const saved = JSON.parse(JSON.stringify(first.runtime.save()));
     expect(saved.enabled).toEqual(["a"]);
-    const second = setup({ a: "up", b: "up" });
+    const second = setup({ a: "say 1", b: "say 2" });
     second.runtime.load(saved);
     expect(second.runtime.enabled("a")).toBe(true);
     expect(second.runtime.enabled("b")).toBe(false);
     // Saved before forests switched scripts on: those that ran stay on.
-    const third = setup({ a: "wait 5s", b: "up" });
+    const third = setup({ a: "wait 5s", b: "say 2" });
     third.runtime.start("a");
     const old = JSON.parse(JSON.stringify(third.runtime.save()));
     delete old.enabled;
-    const fourth = setup({ a: "wait 5s", b: "up" });
+    const fourth = setup({ a: "wait 5s", b: "say 2" });
     expect(fourth.runtime.load(old)).toBe(0);
     expect(fourth.runtime.runs).toHaveLength(1);
     expect(fourth.runtime.enabled("b")).toBe(false);
+  });
+
+  it("starts a run at a script's command, once at a time", () => {
+    const { runtime, g, advance } = setup({
+      helfer: "import waldstatt\ncmd:bauen:dorf(n)\n  wait 2s\n  up(n)\nend",
+    });
+    expect(runtime.startAt("helfer", "bauen:dorf", [3])).toBeUndefined();
+    expect(runtime.startAt("helfer", "bauen:dorf", [3])).toContain(
+      "läuft schon",
+    );
+    expect(runtime.state("helfer").state).toBe("running");
+    advance(5);
+    expect(g.ran).toEqual(["up(3)"]);
+    expect(runtime.runs).toHaveLength(0);
+    expect(runtime.startAt("helfer", "bauen:dorf", [])).toContain("braucht 1");
+    runtime.enable("helfer", false);
+    expect(runtime.startAt("helfer", "bauen:dorf", [1])).toContain(
+      "nicht eingeschaltet",
+    );
+  });
+
+  it("names the script whose run is stepping, and shows failures", () => {
+    const scripts = { a: 'say "x"', b: "var x = 1 / 0" };
+    const { runtime, host, advance } = setup(scripts);
+    const seen: (string | undefined)[] = [];
+    const alerts: string[] = [];
+    host.say = () => seen.push(runtime.stepping);
+    host.alert = (script, text) => alerts.push(`${script}: ${text}`);
+    runtime.start("a");
+    runtime.start("b");
+    advance(2);
+    expect(seen).toEqual(["a"]);
+    expect(alerts[0]).toContain("b: hält an, Zeile 1");
+    expect(runtime.stepping).toBeUndefined();
   });
 
   it("runs at most eight scripts at once", () => {

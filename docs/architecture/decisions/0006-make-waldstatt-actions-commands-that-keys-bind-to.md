@@ -6,6 +6,7 @@ amends:
   - 0005-keep-the-waldstatt-keymap-in-a-settings-database.md
 amended-by:
   - 0007-run-waldstatt-scripts-in-a-language-of-our-own.md
+  - 0008-pass-waldstatt-command-values-in-parentheses.md
 sources:
   - src/waldstatt/game/commands.ts
   - src/waldstatt/game/commandSet.ts
@@ -23,6 +24,11 @@ sources:
 commands may return the work they leave, which scripts await; queries are a
 second, read-only registry for scripts; and the `script:` commands start and
 stop the players' scripts.
+
+**Amended by [ADR 0008](0008-pass-waldstatt-command-values-in-parentheses.md):**
+a command's values follow its id in parentheses (`up(20)`,
+`repair:under(5)`), texts among them; a choice may still stand as a segment
+(`build:hütte`); and scripts' commands join as `$script:name(…)`.
 
 ## Context
 

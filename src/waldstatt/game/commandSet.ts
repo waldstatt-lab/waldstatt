@@ -1,7 +1,8 @@
 /**
  * Every command of the Waldstatt (ADR 0006, commands.ts): moving and viewing,
  * selecting and applying, the tools and menus, building and repairing, a
- * building's card, the text mode, the saved forests and the macros. Each
+ * building's card, the text mode, the saved forests, the macros, the
+ * scripts and the notices (ADR 0008). Each
  * runs through the interface (ui.ts) as a tap or key would. Their default
  * keys are in keymap.ts.
  */
@@ -50,6 +51,7 @@ export function registerCommands(
   ui: Ui,
   forests: () => ForestCommands | undefined,
   scripts: () => ScriptCommands | undefined,
+  notify: (kind: "info" | "alert", text: string) => void,
 ) {
   const game = () => ui.o.game;
   /** The script commands hide and refuse until scripts are unlocked. */
@@ -479,6 +481,23 @@ export function registerCommands(
         setMacro(name, null);
         ui.announce(`Makro «${name}» gelöscht.`);
       },
+    },
+    // --- Notices (ADR 0008) ------------------------------------------------------------
+    {
+      id: "notify:info",
+      args: [{ kind: "text", name: "Text", max: 500 }],
+      describe: ([text]) =>
+        text ? `Meldung zeigen: «${text}»` : "Eine Meldung zeigen, die vergeht",
+      run: ([text]) => notify("info", text),
+    },
+    {
+      id: "notify:alert",
+      args: [{ kind: "text", name: "Text", max: 500 }],
+      describe: ([text]) =>
+        text
+          ? `Meldung zeigen, bis sie geschlossen wird: «${text}»`
+          : "Eine Meldung zeigen, bis sie geschlossen wird",
+      run: ([text]) => notify("alert", text),
     },
     // --- Scripts (ADR 0007) -----------------------------------------------------------
     {

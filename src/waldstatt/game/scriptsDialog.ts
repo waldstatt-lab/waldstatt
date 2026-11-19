@@ -20,10 +20,19 @@ import {
   setScript,
 } from "./keymap";
 import { ScriptError } from "./script/ast";
-import { check, type Library } from "./script/check";
+import { check, gameNs, type Library } from "./script/check";
+import { parse } from "./script/parse";
 import { buildingFields } from "./script/queries";
 import { describeError, type Runtime } from "./script/runtime";
 import type { ScriptEditor } from "./scriptEditor";
+
+/** An error or a warning of the checker, with where it stands. */
+interface Problem {
+  message: string;
+  line: number;
+  col: number;
+  severity: "error" | "warning";
+}
 
 export interface ScriptsOptions {
   root: HTMLElement;
@@ -34,11 +43,20 @@ export interface ScriptsOptions {
   announce(text: string): void;
 }
 
-const template = `# Ein Skript: eine Anweisung je Zeile, Befehle wie im «:».
+const template = `import waldstatt
+# Ein Skript: eine Anweisung je Zeile, Befehle wie im «:», Werte in Klammern.
 # every 30s   ← startet es alle 30 Sekunden Spielzeit
 if stock.wood >= 8 then
   await place:hütte
   say "Eine Hütte steht."
+end
+
+# Baut Hütten nach rechts; im «:» als $name:bauen:reihe(3)
+cmd:bauen:reihe(n)
+  for i in 1..n
+    await place:hütte
+    right(3)
+  end
 end
 `;
 
@@ -137,9 +155,11 @@ export class ScriptsDialog {
         ? macroName(name)?.replace("Makroname", "Skriptname")
         : "Gib einen Namen.";
       if (why) return this.say(why);
+      if (name === gameNs)
+        return this.say(`«${gameNs}» ist der Namensraum des Spiels.`);
       if (Object.hasOwn(scripts(), name))
         return this.say(`«${name}» gibt es schon.`);
-      setScript(name, template);
+      setScript(name, template.replace("$name:", `$${name}:`));
       this.o.runtime.enable(name, true);
       void this.openEditor(name);
     });
@@ -276,23 +296,67 @@ export class ScriptsDialog {
 
   // --- The editor ----------------------------------------------------------------------
 
-  /** The checker's first error for a script's text, with where it stands. */
-  private problem(name: string, text: string) {
+  /**
+   * The checker's first error for a script's text, with where it stands, or
+   * its warnings; an error in a script it uses is shown on the first line.
+   */
+  private problems(name: string, text: string): Problem[] {
     const all = scripts();
     try {
-      check(name, (n) => (n === name ? text : all[n]), this.o.library);
-      return undefined;
+      const unit = check(
+        name,
+        (n) => (n === name ? text : all[n]),
+        this.o.library,
+      );
+      return unit.warnings.map((w) =>
+        w.script
+          ? {
+              message: `Im Skript «${w.script}», Zeile ${w.at.line}: ${w.message}`,
+              line: 1,
+              col: 1,
+              severity: "warning",
+            }
+          : { message: w.message, ...w.at, severity: "warning" },
+      );
     } catch (error) {
       if (!(error instanceof ScriptError)) throw error;
-      // An error in an imported script is shown on the first line.
-      return error.script && error.script !== name
-        ? {
-            message: `Im Skript «${error.script}», Zeile ${error.at.line}: ${error.message}`,
-            line: 1,
-            col: 1,
-          }
-        : { message: error.message, line: error.at.line, col: error.at.col };
+      return [
+        error.script && error.script !== name
+          ? {
+              message: `Im Skript «${error.script}», Zeile ${error.at.line}: ${error.message}`,
+              line: 1,
+              col: 1,
+              severity: "error",
+            }
+          : {
+              message: error.message,
+              line: error.at.line,
+              col: error.at.col,
+              severity: "error",
+            },
+      ];
     }
+  }
+
+  /** The first error, if any. */
+  private problem(name: string, text: string): Problem | undefined {
+    return this.problems(name, text).find((p) => p.severity === "error");
+  }
+
+  /** What each namespace offers after `$ns:`, for completion. */
+  private namespaces(): Record<string, { label: string; detail: string }[]> {
+    const out: Record<string, { label: string; detail: string }[]> = {};
+    for (const [script, source] of Object.entries(scripts())) {
+      try {
+        out[script] = parse(source).defs.map((d) => ({
+          label: d.kind === "cmd" ? d.name : `${d.name}(`,
+          detail: `${d.kind === "cmd" ? "Befehl" : "Abfrage"} (${d.params.join(", ")})${d.doc ? ` · ${d.doc}` : ""}`,
+        }));
+      } catch {
+        out[script] = [];
+      }
+    }
+    return out;
   }
 
   private async openEditor(name: string) {
@@ -308,9 +372,12 @@ export class ScriptsDialog {
     const check = el("p", { className: "wg-keymap-check" });
     const text = () => this.editing?.editor?.text ?? plain.value;
     const show = () => {
-      const p = this.problem(name, text());
-      check.textContent = p ? `Zeile ${p.line}: ${p.message}` : "Keine Fehler.";
-      check.classList.toggle("wg-script-error", !!p);
+      const all = this.problems(name, text());
+      const p = all[0];
+      check.textContent = p
+        ? `${p.severity === "warning" ? "Hinweis, " : ""}Zeile ${p.line}: ${p.message}`
+        : "Keine Fehler.";
+      check.classList.toggle("wg-script-error", p?.severity === "error");
     };
     const save = (): boolean => {
       const t = text();
@@ -376,8 +443,19 @@ export class ScriptsDialog {
         commands: () =>
           this.o.commands
             .entries()
-            .filter((e) => !this.o.commands.scriptCommand(e.text))
-            .map((e) => ({ text: e.text, description: e.description })),
+            .filter(
+              (e) =>
+                !e.text.startsWith("$") &&
+                typeof this.o.commands.forScript(
+                  e.text.replace(/\(.*$/, ""),
+                ) !== "string",
+            )
+            .map((e) => ({
+              text: e.text,
+              description: e.description,
+              signature: e.signature,
+            })),
+        namespaces: () => this.namespaces(),
         fields: {
           ...buildingFields,
           wood: "Holz",
@@ -388,7 +466,7 @@ export class ScriptsDialog {
           x: "Waagrecht, in Feldern",
           y: "Senkrecht, in Feldern",
         },
-        check: (t) => this.problem(name, t),
+        check: (t) => this.problems(name, t),
         changed: () => show(),
         vim: vim.checked,
       });

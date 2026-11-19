@@ -2,6 +2,8 @@
 tags: [adr]
 status: accepted
 date: 2026-11-19
+amended-by:
+  - 0008-pass-waldstatt-command-values-in-parentheses.md
 amends:
   - 0003-save-the-waldstatt-in-indexeddb.md
   - 0004-keep-named-waldstatt-saves-and-files.md
@@ -21,6 +23,13 @@ sources:
 ---
 
 # 0007 — Run the Waldstatt's player scripts in a small language of our own
+
+**Amended by [ADR 0008](0008-pass-waldstatt-command-values-in-parentheses.md):**
+commands take expressions in parentheses (`up(n * 2)`) instead of `{…}`; the
+game and every script are namespaces marked with `$`, with `import
+waldstatt`, `import helfer as h` and `import reihe from helfer`; a run may
+start at a `cmd:` from the finder or a key; and `say` and failures show as
+notices.
 
 ## Context
 

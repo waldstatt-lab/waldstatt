@@ -1,7 +1,21 @@
 /**
- * The syntax tree of the Waldstatt's script language (ADR 0007). Every node
- * keeps where it stands, so errors can name the line and column.
+ * The syntax tree of the Waldstatt's script language (ADR 0007, ADR 0008).
+ * Every node keeps where it stands, so errors can name the line and column.
+ * A name may be a path of colon segments (`repair:under`, `bauen:dorf`) and
+ * begin with `$` and a namespace (`$helfer:summe`, `$waldstatt:up`); the
+ * checker resolves each one and notes what it found (`ref`), for the
+ * compiler.
  */
+
+/** What a name stands for, as the checker found it. */
+export type Ref =
+  | { k: "var" }
+  /** One of the game's queries, by its name. */
+  | { k: "query"; name: string }
+  /** A script's own `qry:` or `cmd:`, by its key `script:name`. */
+  | { k: "qry" | "cmd"; key: string }
+  /** One of the game's commands: its id and the choices written as segments. */
+  | { k: "game"; id: string; segments: string[] };
 
 export interface Pos {
   line: number;
@@ -28,17 +42,14 @@ export type Expr =
   | { k: "str"; parts: (string | Expr)[]; at: Pos }
   | { k: "bool"; v: boolean; at: Pos }
   | { k: "none"; at: Pos }
-  | { k: "name"; name: string; at: Pos }
+  | { k: "name"; name: string; at: Pos; ref?: Ref }
   | { k: "list"; items: Expr[]; at: Pos }
   | { k: "field"; obj: Expr; name: string; at: Pos }
   | { k: "index"; obj: Expr; index: Expr; at: Pos }
-  | { k: "call"; name: string; args: Expr[]; at: Pos }
+  | { k: "call"; name: string; args: Expr[]; at: Pos; ref?: Ref }
   | { k: "not"; a: Expr; at: Pos }
   | { k: "neg"; a: Expr; at: Pos }
   | { k: "bin"; op: BinaryOp; a: Expr; b: Expr; at: Pos };
-
-/** A command as written: literal text and values put in by braces. */
-export type Template = (string | Expr)[];
 
 export type Stmt =
   | { k: "var"; name: string; value: Expr; at: Pos }
@@ -61,7 +72,15 @@ export type Stmt =
     }
   | { k: "wait"; seconds: Expr; at: Pos }
   | { k: "until"; cond: Expr; at: Pos }
-  | { k: "command"; text: Template; await: boolean; at: Pos }
+  | {
+      k: "command";
+      /** As written, such as `repair:under` or `$helfer:bauen:dorf`. */
+      name: string;
+      args: Expr[];
+      await: boolean;
+      at: Pos;
+      ref?: Ref;
+    }
   | {
       k: "timeout";
       seconds: Expr;
@@ -76,14 +95,28 @@ export type Stmt =
 /** A command (`cmd:`) or a query (`qry:`) of the script's own. */
 export interface Def {
   kind: "cmd" | "qry";
+  /** May have colons, as `bauen:dorf`. */
   name: string;
   params: string[];
   body: Stmt[];
   at: Pos;
+  /** The comment lines right above it, which describe it in the finder. */
+  doc?: string;
+}
+
+/**
+ * `import ns`, `import ns as alias`, or `import a, b as c from ns`. The
+ * game's namespace is `waldstatt`.
+ */
+export interface Import {
+  ns: string;
+  alias?: string;
+  names?: { name: string; alias?: string; at: Pos }[];
+  at: Pos;
 }
 
 export interface Script {
-  imports: { name: string; at: Pos }[];
+  imports: Import[];
   /** `every 30s`: seconds of play between runs. */
   every?: { seconds: number; at: Pos };
   /** `timeout 10m` at the top: seconds of play the whole script may take. */

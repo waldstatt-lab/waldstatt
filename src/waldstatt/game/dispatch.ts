@@ -160,8 +160,12 @@ export class Dispatcher {
     if (!steps) {
       const parsed = this.commands.parse(command);
       steps = "error" in parsed ? parsed.error : parsed.steps;
-      if (this.parsed.size > 500) this.parsed.clear();
-      this.parsed.set(command, steps);
+      // Kept only when it reads, and not for scripts' commands, which come
+      // and go as scripts are switched on and edited (ADR 0008).
+      if (typeof steps !== "string" && !command.includes("$")) {
+        if (this.parsed.size > 500) this.parsed.clear();
+        this.parsed.set(command, steps);
+      }
     }
     return steps;
   }

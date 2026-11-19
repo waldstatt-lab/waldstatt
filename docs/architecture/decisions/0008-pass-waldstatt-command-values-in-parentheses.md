@@ -1,16 +1,25 @@
 ---
 tags: [adr]
-status: proposed
+status: accepted
 date: 2026-11-19
 amends:
   - 0006-make-waldstatt-actions-commands-that-keys-bind-to.md
   - 0007-run-waldstatt-scripts-in-a-language-of-our-own.md
 sources:
+  - src/waldstatt/game/commandText.ts
   - src/waldstatt/game/commands.ts
   - src/waldstatt/game/commandSet.ts
-  - src/waldstatt/game/keymap.ts
+  - src/waldstatt/game/notices.ts
+  - src/waldstatt/game/finder.ts
+  - src/waldstatt/game/dispatch.ts
+  - src/waldstatt/game/main.ts
   - src/waldstatt/game/script/parse.ts
   - src/waldstatt/game/script/check.ts
+  - src/waldstatt/game/script/compile.ts
+  - src/waldstatt/game/script/machine.ts
+  - src/waldstatt/game/script/runtime.ts
+  - src/waldstatt/game/scriptEditor.ts
+  - src/waldstatt/game/scriptsDialog.ts
   - ../../pitches/pitch--befehlswerte.md
 ---
 

@@ -52,7 +52,9 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/overlay.ts` | The HTML lying on the map under the same projection: found texts under the canvas; upright pins for water names, Einsiedeln and status labels; and the measuring of texts that sets their footprint |
 | `game/stage.ts` | The theatre's stage in two canvases: the preview standing on the stage in 3D for the isometric view, and, turned top-down, the preview in 2D with a status line and wooden signs for the programme, the keys and the real game, on the amphitheatre's floor |
 | `game/input.ts` | Pointer, touch, wheel and keyboard input on the map, with counts before a movement |
-| `game/commands.ts` | The commands ([ADR 0006](decisions/0006-make-waldstatt-actions-commands-that-keys-bind-to.md)): the registry, reading commands and chains, running them with a count, macros, and recording |
+| `game/commands.ts` | The commands ([ADR 0006](decisions/0006-make-waldstatt-actions-commands-that-keys-bind-to.md), [ADR 0008](decisions/0008-pass-waldstatt-command-values-in-parentheses.md)): the registry, reading commands and chains with their values, running them with a count, macros, recording, and the scripts' commands supplied from outside |
+| `game/commandText.ts` | How a command is written: its segments, values in parentheses, texts in quotes, chains split outside texts, and the finder's shortcut `up 15` |
+| `game/notices.ts` | The notices over the map from `notify:`, `say` and scripts' failures |
 | `game/commandSet.ts` | Every command of the game and what it does through the interface |
 | `game/keymap.ts` | The keymap ([ADR 0005](decisions/0005-keep-the-waldstatt-keymap-in-a-settings-database.md), ADR 0006): key names, the default bindings, contexts and their expressions, the visitor's layer and macros, checking JSON, converting version 1, and keeping it in the database `waldstatt-games-settings` |
 | `game/dispatch.ts` | The key dispatcher: counts, sequences, contexts, held movements and Shift to pan |
@@ -451,7 +453,16 @@ saved in another tab shows after a reload.
 the keyboard and the «:» finder do is a command in one registry
 (`commands.ts`, `commandSet.ts`), named by colon segments: English
 namespaces and verbs, names of things as the game names them, in lower case
-with hyphens. Each describes itself in German, says why it cannot run now,
+with hyphens. Its values follow in parentheses, separated by commas
+([ADR 0008](decisions/0008-pass-waldstatt-command-values-in-parentheses.md),
+[pitch](../pitches/pitch--befehlswerte.md)): numbers, and
+texts in double quotes with JSON's escapes (`notify:info("Hütte steht; gut")`),
+read by one reader (`commandText.ts`) for the finder, the keymap, macros and
+scripts, so `;` and `,` inside a text split nothing. A choice from a list may
+stand as a segment (`build:hütte`) or in the parentheses (`build("hütte")`);
+a value with a default may be left out (`up` is `up(1)`). The old form
+`up:20` is refused with the new one named. `$waldstatt:` before a command
+names the game's explicitly. Each describes itself in German, says why it cannot run now,
 and says how a count combines with it. They are: `left`, `right`, `up`,
 `down` (with a number of tiles), `zoom:in`, `zoom:out`, `goto:start` and
 `goto:<text>`; `enter` (what Enter does at the cursor: apply the tool, open a
@@ -461,20 +472,32 @@ text mode on a text read), `selection:start`, `selection:other`,
 `tool:pflastern`, `tool:reparieren`, `tool:abreissen` and `tool:none`, which
 choose rather than toggle; `menu:build`, `menu:main`, `find:texts`,
 `find:commands`, `keys:open` and `game:reset`; `build:<building>`;
-`repair:all`, `repair:worn`, `repair:crumbling`, `repair:under:<n>` and
+`repair:all`, `repair:worn`, `repair:crumbling`, `repair:under(<n>)` and
 `repair:chosen` (the building whose card was open when the finder opened,
 the open card's, or the one under the keyboard cursor), which order as many
 repairs as the stock pays for, the most worn first, and `clear:ruins`;
 `card:repair`, `crew:more` and `crew:less` for an open card; the text mode's
 `text:…`; the saved forests' `forest:…`; and `macro:record`, `macro:replay`,
-`macro:run:<name>` and `macro:delete:<name>`. A count typed before a key
-replaces a command's default number or multiplies a given one (`20` then ↑
-is `up:20`; `2` then a key bound to `up:20` is `up:40`), runs a repeatable
-command so many times (`crew:more`, `zoom:in`), or is dropped.
+`macro:run:<name>` and `macro:delete:<name>`; and `notify:info(<text>)` and
+`notify:alert(<text>)`, which show a notice. A count typed before a key
+replaces a command's first number if it has its default, or multiplies it
+(`20` then ↑ is `up(20)`; `2` then a key bound to `up(20)` is `up(40)`),
+runs a repeatable command so many times (`crew:more`, `zoom:in`), or is
+dropped.
+
+**Notices** (`notices.ts`): `notify:info`, `notify:alert`, a script's `say`
+and a script that stops with an error show a notice over the map, top right
+under the supplies (at the top on phones, whose supplies are in the menu),
+and read it out through the live region. An info fades after six seconds;
+an alert stays until its × closes it. A notice from a script names it and
+offers «Skript öffnen», which opens it in the editor. At most four show, the
+newest first, an info going before an alert; the same text again merges into
+one with a count. They take no focus from the map, and their texts are set
+as text.
 
 A **macro** is a chain of commands joined by `;`, such as
-`tool:holzhacken;selection:start;up:10;right:10;selection:confirm` or
-`build:hütte;enter;right:3`. It runs all its steps at once, in order, and
+`tool:holzhacken;selection:start;up(10);right(10);selection:confirm` or
+`build:hütte;enter;right(3)`. It runs all its steps at once, in order, and
 stops at the first that cannot run, saying which and why; what already
 happened stays, and it never waits for the Waldleute's work. A count runs the
 whole chain that many times. Commands that open a menu, a finder or a dialog,
@@ -483,7 +506,7 @@ a run at most 10,000, and a macro cannot run itself, directly or through
 another. q (`macro:record`) starts a recording, shown in a badge «● Aufnahme»:
 every command run meanwhile by key or finder is written down, even one that
 fails there (it may work where the macro runs), its count folded in and moves
-in a row added up (`20` then ↑ is `up:20`), but not pointer input or the steps
+in a row added up (`20` then ↑ is `up(20)`), but not pointer input or the steps
 inside a macro run. q again stops it and asks for
 a name: named, it is kept and runs as `macro:run:<name>`; without, it stays
 the last macro, which @ (`macro:replay`) runs.
@@ -540,11 +563,14 @@ JavaScript. One statement per line, `#` for comments, blocks closed with
 `end`: `var`, assignment, `if … then … elif … else … end`, `for i in 1..10`
 (both ends included), `for b in list`, `while`, `wait 30s`, `wait until
 <query>`, `await <command>`, `timeout 2m … else … end`, `say`, `return` and
-`stop`; at the top `import <script>`, `every 30s` and `timeout 10m` for the
-whole script (10 minutes of play by default). Commands and queries stay
-apart, checked before a script can run: commands, the game's as typed in the
-finder (`repair:under:{n}`) and the script's own `cmd:name(a, b) … end`,
-called as `name:1:2`, are statements and return nothing; queries, the game's
+`stop`; at the top `import`, `every 30s` and `timeout 10m` for the whole
+script (10 minutes of play by default). Commands and queries stay apart,
+checked before a script can run: commands, the game's as typed in the finder
+with expressions as their values (`repair:under(n * 2)`, `build(kind)`) and
+the script's own `cmd:name(a, b) … end` (names may have colons, as
+`cmd:bauen:dorf(n)`), called as `name(1, 2)`, are statements and return
+nothing; the checker knows each game command's values and refuses a wrong
+number of them, a text for a number and a literal out of range; queries, the game's
 (`stock.wood`, `people`, `beds`, `mood`, `cursor.x`, `tool`, `time`,
 `buildings(kind)`, `building-at(x, y)`, `count`, `min`, `max`, `abs`,
 `floor`, `round`) and the script's own `qry:name(a) … return … end`, are
@@ -554,10 +580,18 @@ is queried afterwards. `place:<building>` places a building at the keyboard
 cursor in one step. Each game command that leaves work says what «done»
 means: a site finished, ordered repairs done, ruins gone; one that can no
 longer be done fails the script there. Buildings reach scripts as ids, read
-anew at each access; values are numbers, texts with `{…}`, `true`, `false`,
-`none` and lists. Names may contain hyphens, so subtraction needs spaces.
-`import` brings another script's `cmd:` and `qry:`; clashes and circles are
-errors. A script is checked and compiled to instructions for a machine with
+anew at each access; values are numbers, texts (with `{…}` for values
+inside and `\"` for a quote), `true`, `false`, `none` and lists. Names may
+contain hyphens, so subtraction needs spaces. The game and every script are
+namespaces, marked with `$`: `$waldstatt:up(15)`, `$helfer:summe(4)`; such a
+name needs no import. `import waldstatt`, which every new script starts with,
+brings the game's names without `$`; `import helfer` a script's,
+`import reihe, bauen:dorf as dorf from helfer` single names, and
+`import helfer as h` renames a namespace for the script (`$h:…`). Without
+`$`, a name is the script's own, then an imported one, then the game's; one
+that two imports bring is refused where it is used, and where a script's name
+hides the game's, the editor warns and names `$waldstatt:`. Scripts used
+through `$` are linked like imports, at most 16, with circles refused. A script is checked and compiled to instructions for a machine with
 an explicit stack, whose state is plain data. The runtime steps every run up
 to 400 instructions a frame and 2,000 for all, in game time, so scripts pause
 with the game; a script runs once at a time, at most eight at once, and one
@@ -568,7 +602,7 @@ the next start runs the new one. Runs and their programs are saved with the
 forest, so they continue after a reload, and saved forests and files carry
 them; on load each program is compiled again from its own sources and must
 match its hash, and each run must fit it, or it is dropped with a notice.
-Failures and timeouts stop a run and are announced with the line. Scripts
+Failures and timeouts stop a run and show as an alert with the line. Scripts
 are unlocked once per visitor by typing the hidden command `niklaus:wirth`
 in the finder; the unlock is kept in `waldstatt-games-settings` in a record
 of its own (`unlocks`), not in the keymap's JSON. Until then the menu item,
@@ -578,7 +612,13 @@ files, the same in every forest; each forest switches on the scripts that
 may run in it («In diesem Wald» in the dialog, `script:enable:<name>`,
 `script:disable:<name>`), saved with its runs, and switching one off ends its
 run. A command marked hidden is left out of the finder's list and the
-completions and runs only when typed out. `script:run:<name>`,
+completions and runs only when typed out. A script's `cmd:` definitions are
+commands too, `$helfer:bauen:dorf(3)`: the finder lists those of the scripts
+switched on in the forest, described by the comment above each; run from the
+finder, a key or a macro, one starts a run at that definition with literal
+values (a macro goes on at once), known by that command and once at a time.
+A binding or macro to one whose script is switched off or gone is kept and
+says why when used; the dispatcher caches no reading of them. `script:run:<name>`,
 `script:stop:<name>`, `script:stop-all`, `script:edit:<name>` and
 `scripts:open` are commands, so keys and the finder start and stop scripts; scripts may run any command that does not open a
 menu, finder or dialog. The dialog «Skripte» (from the menu, a badge «▶ 2
@@ -587,9 +627,10 @@ trigger and state (bereit, aus in diesem Wald, läuft, wartet, ältere Fassung,
 Fehler), the switch «In diesem Wald», ▶ and ■,
 editing and deleting, and makes new ones by name. The editor (CodeMirror 6,
 `scriptEditor.ts`, loaded only when it opens) highlights the language,
-completes keywords, the game's queries and commands with their descriptions,
-the script's own and fields after a dot, and marks the checker's errors as
-they are typed; «Vim-Tasten» switches on `@replit/codemirror-vim`, loaded
+completes keywords, the game's queries and commands with their values and
+descriptions, the namespaces after `$` and their names after `$ns:`, the
+script's own and fields after a dot, and marks the checker's errors and
+warnings as they are typed; «Vim-Tasten» switches on `@replit/codemirror-vim`, loaded
 then and remembered, with the selection drawn by CodeMirror, since vim's
 keys hide the browser's own. While the editor has focus, Escape is the editor's.
 «Speichern und starten» saves and starts. The language, the machine and the
@@ -627,9 +668,13 @@ found so far (the `goto` commands) and jumps to the one chosen; «:» one over
 every command, each with what it does and the key bound to it, matched
 fuzzily by its id, ignoring accents, and by the words of its description;
 commands that cannot run now show greyed with the reason. What is typed runs
-as it is when it reads as a command or a chain (`up:20`,
-`build:hütte;enter;right:3`), and a number after a partial id fills the
-command that takes one («rep 30» is `repair:under:30`). Both take arrows or
+as it is when it reads as a command or a chain (`up(20)`,
+`build:hütte;enter;right(3)`); `up 15` and `notify:info Hallo` read as
+`up(15)` and `notify:info("Hallo")`, a number after a partial id fills the
+command that takes one («rep 30» is `repair:under(30)`), and a command
+written with values that do not fit says why instead of running another.
+Chosen from the list, a command that needs values is put into the field to
+be completed (`notify:info(`); `$` lists the scripts' commands. Both take arrows or
 Tab, Enter and Escape. While the view is turned onto the stage,
 the keys from the game's controls play it instead. Every tool, menu item and
 link is a real button or link with a German name; status, finished buildings,
