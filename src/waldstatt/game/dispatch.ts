@@ -37,6 +37,8 @@ interface Held {
   pan?: [number, number];
   since: number;
   next: number;
+  /** The physical key, which lets go of it whatever Shift did meanwhile. */
+  code: string;
 }
 
 export class Dispatcher {
@@ -47,6 +49,8 @@ export class Dispatcher {
   private loop = 0;
   private last = 0;
   private parsed = new Map<string, Step[] | string>();
+  /** The physical key of the press being handled. */
+  private code = "";
 
   constructor(
     private commands: Commands,
@@ -75,16 +79,22 @@ export class Dispatcher {
       this.show();
       return true;
     }
+    this.code = event.code;
     return this.press(name, event, origin);
   }
 
   keyup(event: KeyboardEvent) {
+    // Held as pressed (`H`, `shift-up`), it may be let go as `h` or `up` if
+    // Shift came up first: every form of the key goes, and the physical key.
     const name = keyName(event);
-    if (name) {
-      this.held.delete(name);
-      const base = unshifted(name);
-      if (base) this.held.delete(base);
-    }
+    const base = name ? (unshifted(name) ?? name) : undefined;
+    for (const [key, h] of this.held)
+      if (
+        (event.code && h.code === event.code) ||
+        key === base ||
+        (base !== undefined && unshifted(key) === base)
+      )
+        this.held.delete(key);
     if (event.key === "Shift")
       for (const [key, h] of this.held) if (h.pan) this.held.delete(key);
   }
@@ -129,8 +139,10 @@ export class Dispatcher {
       this.pending = keys;
       this.show();
       const exact = found.command;
+      const code = this.code;
       this.timer = window.setTimeout(() => {
         this.pending = [];
+        this.code = code;
         if (exact) this.execute(exact, keys, false, origin, shift, name);
         this.show();
       }, wait);
@@ -199,13 +211,19 @@ export class Dispatcher {
       if (repeat || this.held.has(pressed)) return true;
       const now = performance.now();
       if (shift && one.pan) {
-        this.held.set(pressed, { pan: one.pan, since: now, next: now });
+        this.held.set(pressed, {
+          pan: one.pan,
+          since: now,
+          next: now,
+          code: this.code,
+        });
       } else {
         this.commands.run(steps, count);
         this.held.set(pressed, {
           step: () => this.commands.run(steps),
           since: now,
           next: now + 220,
+          code: this.code,
         });
       }
       if (!this.loop) {

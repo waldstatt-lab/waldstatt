@@ -215,12 +215,14 @@ export function step(
       // The command a run started at has returned.
       if (!run.frames.length) return { status: { state: "done" }, steps };
       const now = host.now();
-      // The whole run's deadline, then timeouts, the innermost first.
+      // The whole run's deadline, then timeouts: the outermost one that is
+      // up wins, and those opened inside it end with it.
       if (now >= run.deadline)
         fail("Die Zeit für das Skript ist um (timeout).");
-      const open = run.timeouts[run.timeouts.length - 1];
-      if (open && now >= open.deadline) {
-        run.timeouts.pop();
+      const up = run.timeouts.findIndex((t) => now >= t.deadline);
+      if (up >= 0) {
+        const open = run.timeouts[up];
+        run.timeouts.length = up;
         run.wait = undefined;
         while (run.frames.length > open.depth) run.frames.pop();
         enter();
@@ -605,6 +607,17 @@ export function validRun(raw: unknown, program: Program): RunState | undefined {
       !num(o.deadline) ||
       !Number.isInteger(o.target) ||
       !Number.isInteger(o.depth)
+    )
+      return undefined;
+    // In a frame of the run, inside those before it, and jumping into its code.
+    const depth = o.depth as number;
+    const target = o.target as number;
+    if (
+      depth < 1 ||
+      depth > frames.length ||
+      depth < (timeouts[timeouts.length - 1]?.depth ?? 1) ||
+      target < 0 ||
+      target > program.fns[frames[depth - 1].fn].code.length
     )
       return undefined;
     timeouts.push({

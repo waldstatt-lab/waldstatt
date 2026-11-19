@@ -40,7 +40,7 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/economy.ts` | The goods: the shared stock and its limits, the crews and recipes of the producing buildings, beer for the Spielhäuser and the theatre, the upkeep of the Klause, the churches and the Kloster, the Brot auswerfen |
 | `game/people.ts` | The Waldleute's lives: ages, meals and where food reaches, children, deaths, graves and tombstones, beds, the fire and the first pair |
 | `game/mood.ts` | Motivation: where it tends with what stands and how worn it is, passing events, and the work speed it sets |
-| `game/wear.ts` | Wear: every finished building's condition, its most by material and size, the wear levels the art shows, and falling into ruins |
+| `game/wear.ts` | Wear: every finished building's condition, its most by material and size, the wear levels the art shows, falling into ruins, and what a repair costs and tearing down gives back; covered by unit tests (`wear.test.ts`) |
 | `game/growth.ts` | The forest growing back: seedlings on felled ground beside forest, kept down where Waldleute walk |
 | `game/flood.ts` | The Sihlsee filling and draining tile by tile, buildings sinking, and the flood wave down the Sihl |
 | `game/nav.ts` | Finding ways: the Waldleute's search over open ground and crossings by ship, straightening ways, and ships' routes over their lake |
@@ -476,7 +476,8 @@ choose rather than toggle; `menu:build`, `menu:main`, `find:texts`,
 `repair:all`, `repair:worn`, `repair:crumbling`, `repair:under(<n>)` and
 `repair:chosen` (the building whose card was open when the finder opened,
 the open card's, or the one under the keyboard cursor), which order as many
-repairs as the stock pays for, the most worn first, and `clear:ruins`;
+repairs as the stock pays for, the most worn first, and fail when it pays for
+none, and `clear:ruins`;
 `card:repair`, `crew:more` and `crew:less` for an open card; the text mode's
 `text:…`; the saved forests' `forest:…`; and `macro:record`, `macro:replay`,
 `macro:run:<name>` and `macro:delete:<name>`; and `notify:info(<text>)` and
@@ -565,7 +566,8 @@ JavaScript. One statement per line, `#` for comments, blocks closed with
 (both ends included), `for b in list`, `while`, `wait 30s`, `wait until
 <query>`, `await <command>`, `timeout 2m … else … end`, `say`, `return` and
 `stop`; at the top `import`, `every 30s` and `timeout 10m` for the whole
-script (10 minutes of play by default). Commands and queries stay apart,
+script (10 minutes of play by default); a timeout ends at its own time even
+inside a longer one. Commands and queries stay apart,
 checked before a script can run: commands, the game's as typed in the finder
 with expressions as their values (`repair:under(n * 2)`, `build(kind)`) and
 the script's own `cmd:name(a, b) … end` (names may have colons, as
@@ -607,7 +609,9 @@ the next start runs the new one. Runs and their programs are saved with the
 forest, so they continue after a reload, and saved forests and files carry
 them; on load each program is compiled again from its own sources and must
 match its hash, and each run must fit it, or it is dropped with a notice.
-Failures and timeouts stop a run and show as an alert with the line. Scripts
+Failures and timeouts stop a run and show as an alert with the line. A script
+that does not check is checked again once a game command it names answers
+differently, as when a building appears in the build menu. Scripts
 are unlocked once per visitor by typing the hidden command `niklaus:wirth`
 in the finder; the unlock is kept in `waldstatt-games-settings` in a record
 of its own (`unlocks`), not in the keymap's JSON. Until then the menu item,
@@ -648,7 +652,9 @@ keys hide the browser's own. As vim's `clipboard=unnamedplus`
 (`vimClipboard.ts`), `y`, `d`, `c` and `x` also put their text on the system
 clipboard and `p` pastes from it, so a yank survives a reload; a named
 register such as `"a` stays apart, and where the browser refuses the
-clipboard, the register works alone. While the editor has focus, Escape is the editor's.
+clipboard, the register works alone. While a macro or `.` plays, `p` pastes
+the register as last read from or written to the clipboard, so its keys keep
+their order. While the editor has focus, Escape is the editor's.
 «Speichern und starten» saves and starts. The language, the machine and the
 runtime are covered by unit tests (`script/*.test.ts`).
 

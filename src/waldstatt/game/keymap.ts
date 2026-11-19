@@ -376,6 +376,7 @@ export function readContext(
 // --- The keymap ---------------------------------------------------------------------
 
 let user: UserKeymap = { bindings: [], macros: {} };
+let revisions = 0;
 let all: Binding[] = [];
 const listeners = new Set<() => void>();
 
@@ -494,6 +495,23 @@ export function scripts(): Record<string, string> {
   return { ...(user.scripts ?? {}) };
 }
 
+/** One script's source, without copying the others. */
+export function script(name: string): string | undefined {
+  return user.scripts && Object.hasOwn(user.scripts, name)
+    ? user.scripts[name]
+    : undefined;
+}
+
+/** The names of the visitor's scripts. */
+export function scriptNames(): string[] {
+  return Object.keys(user.scripts ?? {});
+}
+
+/** Counts every change of the visitor's keymap, scripts included. */
+export function revision(): number {
+  return revisions;
+}
+
 /** Whether the script editor uses vim's keys. */
 export function editorVim(): boolean {
   return user.editor?.vim === true;
@@ -517,6 +535,7 @@ export function setScript(name: string, source: string | null) {
 
 function use(next: UserKeymap, store: boolean) {
   user = next;
+  revisions++;
   build();
   for (const listener of listeners) listener();
   if (store) void write(next).catch(() => undefined);

@@ -1524,9 +1524,6 @@ export class Renderer {
         flat.tint = 0x7fb0e0;
         flat.alpha = 0.35 * (1 - (b.sunk ?? 0) * 0.5);
       }
-    } else if (b.state === "done" && !working && kinds[b.kind].upkeep) {
-      sprite.tint = 0xb8b0a0;
-      top.tint = 0xb8b0a0;
     } else if (b.state === "site") {
       sprite.alpha = 0.4;
       if (flat) flat.alpha = 0.4;
@@ -1551,6 +1548,11 @@ export class Renderer {
       view.bar = new Graphics();
       container.addChild(view.bar);
       this.drawBar(view.bar, b);
+    }
+    // An upkeep building below half is greyed, under its scaffold if repaired.
+    if (b.state === "done" && !working && kinds[b.kind].upkeep) {
+      sprite.tint = 0xb8b0a0;
+      top.tint = 0xb8b0a0;
     }
     this.put(upright);
     if (view.flat) this.put(view.flat);

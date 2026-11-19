@@ -442,6 +442,25 @@ say "weiter"`,
     expect(g.clock).toBeGreaterThanOrEqual(5);
   });
 
+  it("ends an outer timeout on time, though an inner one runs longer", () => {
+    const { g, host } = game();
+    const p = build({
+      main: `${W}timeout 5s
+  timeout 60s
+    wait until stock.wood > 100
+  else
+    say "innen"
+  end
+else
+  say "aussen"
+end
+say "weiter"`,
+    });
+    expect(play(p, g, host).status.state).toBe("done");
+    expect(g.said).toEqual(["aussen", "weiter"]);
+    expect(g.clock).toBeLessThan(10);
+  });
+
   it("fails with the line when the whole time is up or a command fails", () => {
     const { g, host } = game();
     const slow = build({ main: "timeout 3s\nwait 10s" });
@@ -500,6 +519,17 @@ say "weiter"`,
       ),
     ).toBeUndefined();
     expect(validRun({ ...run, entry: "main:nix" }, p)).toBeUndefined();
+    // A timeout must jump into the code of a frame the run has.
+    for (const t of [
+      { deadline: 0, target: -5, depth: 1 },
+      { deadline: 0, target: 999, depth: 1 },
+      { deadline: 0, target: 0, depth: 0 },
+      { deadline: 0, target: 0, depth: 2 },
+    ])
+      expect(validRun({ ...run, timeouts: [t] }, p)).toBeUndefined();
+    expect(
+      validRun({ ...run, timeouts: [{ deadline: 0, target: 0, depth: 1 }] }, p),
+    ).toBeDefined();
   });
 
   it("names a program by its compiled form and the machine's version", () => {

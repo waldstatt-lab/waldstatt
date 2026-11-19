@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Library } from "./check";
 import { Runtime, type RuntimeHost } from "./runtime";
 
+/** What `place:` offers; a test adds to it as buildings appear. */
+const places = ["hütte"];
+
 const library: Library = {
   queries: { time: { args: [0, 0], describe: "Spielzeit" } },
   command: (head) =>
@@ -13,7 +16,20 @@ const library: Library = {
             { kind: "number", name: "Felder", min: 1, max: 9, optional: true },
           ],
         }
-      : `«${head}» ist kein Befehl.`,
+      : head.startsWith("place:")
+        ? {
+            id: "place",
+            segments: head.split(":").slice(1),
+            args: [
+              {
+                kind: "choice",
+                name: "Gebäude",
+                optional: false,
+                choices: [...places],
+              },
+            ],
+          }
+        : `«${head}» ist kein Befehl.`,
 };
 
 function setup(scripts: Record<string, string>) {
@@ -24,10 +40,21 @@ function setup(scripts: Record<string, string>) {
     told: [] as string[],
     unlocked: true,
   };
+  let sources = "";
+  let revision = 0;
   const host: RuntimeHost = {
     library,
     source: (name) => scripts[name],
     names: () => Object.keys(scripts),
+    // Counts changes of the sources, as the keymap does when one is saved.
+    revision: () => {
+      const now = JSON.stringify(scripts);
+      if (now !== sources) {
+        sources = now;
+        revision++;
+      }
+      return revision;
+    },
     announce: (text) => g.told.push(text),
     now: () => g.clock,
     command: (text) => {
@@ -217,6 +244,42 @@ describe("the runtime", () => {
     expect(runtime.startAt("helfer", "bauen:dorf", [1])).toContain(
       "nicht eingeschaltet",
     );
+  });
+
+  it("switching a script off stops all its runs", () => {
+    const { runtime } = setup({
+      helfer:
+        "import waldstatt\nwait 100s\ncmd:bauen(n)\n  wait 100s\nend\ncmd:roden()\n  wait 100s\nend",
+      andere: "wait 100s",
+    });
+    expect(runtime.start("helfer")).toBeUndefined();
+    expect(runtime.startAt("helfer", "bauen", [3])).toBeUndefined();
+    expect(runtime.startAt("helfer", "roden", [])).toBeUndefined();
+    expect(runtime.start("andere")).toBeUndefined();
+    expect(runtime.runs).toHaveLength(4);
+    runtime.enable("helfer", false);
+    expect(runtime.runs.map((r) => r.script)).toEqual(["andere"]);
+  });
+
+  it("checks a failed script again once the game offers what it lacked", () => {
+    const { runtime } = setup({
+      kloster: "import waldstatt\nplace:kloster",
+    });
+    expect(runtime.start("kloster")).toContain("gibt es bei «place» nicht");
+    places.push("kloster");
+    try {
+      expect(runtime.start("kloster")).toBeUndefined();
+    } finally {
+      places.pop();
+    }
+  });
+
+  it("compiles a script again when a source changes", () => {
+    const { runtime, scripts } = setup({ a: "wait 1s" });
+    const first = runtime.current("a");
+    expect(runtime.current("a")).toBe(first);
+    scripts.a = "wait 2s";
+    expect(runtime.current("a")).not.toBe(first);
   });
 
   it("names the script whose run is stepping, and shows failures", () => {

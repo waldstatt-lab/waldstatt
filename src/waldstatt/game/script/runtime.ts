@@ -32,6 +32,8 @@ export interface RuntimeHost extends MachineHost {
   source(name: string): string | undefined;
   /** The names of the scripts saved now. */
   names(): string[];
+  /** A number that changes whenever a saved script's source does. */
+  revision(): number;
   announce(text: string): void;
   /** Whether scripts are unlocked at all (with «niklaus:wirth»). */
   unlocked(): boolean;
@@ -86,8 +88,20 @@ export class Runtime {
   private on = new Set<string>();
   /** The last error of each script, until it starts again. */
   private errors = new Map<string, Extract<ScriptState, { state: "failed" }>>();
-  /** Compiled current versions, by source text, so a check runs once. */
-  private compiled = new Map<string, Program | ScriptError>();
+  /**
+   * Compiled current versions, by script, so a check runs once per change
+   * of the sources. A failure also keeps what the game's commands answered
+   * it, and is checked again once one of them answers differently, as when
+   * a building appears in the build menu.
+   */
+  private compiled = new Map<
+    string,
+    {
+      revision: number;
+      result: Program | ScriptError;
+      asked: Map<string, string>;
+    }
+  >();
   private turn = 0;
   private listeners = new Set<() => void>();
   /** The script whose run is stepping now, for what it says and shows. */
@@ -115,25 +129,43 @@ export class Runtime {
         line: 1,
         col: 1,
       });
-    // The key holds every script it may import, so a change there counts.
-    const key = `${name}\u0000${this.host
-      .names()
-      .map((n) => `${n}\u0001${this.host.source(n)}`)
-      .join("\u0002")}`;
-    let result = this.compiled.get(key);
-    if (!result) {
-      try {
-        result = compile(
-          check(name, (n) => this.host.source(n), this.host.library),
-        );
-      } catch (error) {
-        if (!(error instanceof ScriptError)) throw error;
-        result = error;
-      }
-      if (this.compiled.size > 200) this.compiled.clear();
-      this.compiled.set(key, result);
+    // The revision counts every script's change, those it imports included.
+    const revision = this.host.revision();
+    const cached = this.compiled.get(name);
+    if (
+      cached?.revision === revision &&
+      (!(cached.result instanceof ScriptError) || this.same(cached.asked))
+    )
+      return cached.result;
+    const library = this.host.library;
+    const asked = new Map<string, string>();
+    let result: Program | ScriptError;
+    try {
+      result = compile(
+        check(name, (n) => this.host.source(n), {
+          queries: library.queries,
+          command: (head) => {
+            const answer = library.command(head);
+            asked.set(head, JSON.stringify(answer));
+            return answer;
+          },
+        }),
+      );
+    } catch (error) {
+      if (!(error instanceof ScriptError)) throw error;
+      result = error;
     }
+    if (this.compiled.size > 200) this.compiled.clear();
+    this.compiled.set(name, { revision, result, asked });
     return result;
+  }
+
+  /** Whether the game's commands still answer as they did. */
+  private same(asked: Map<string, string>): boolean {
+    for (const [head, answer] of asked)
+      if (JSON.stringify(this.host.library.command(head)) !== answer)
+        return false;
+    return true;
   }
 
   /** Whether a script is switched on in this forest. */
@@ -149,8 +181,9 @@ export class Runtime {
     } else {
       this.on.delete(name);
       this.due.delete(name);
-      const i = this.runs.findIndex((r) => r.script === name);
-      if (i >= 0) this.runs.splice(i, 1);
+      // Every run of it, from its top or at one of its commands.
+      for (let i = this.runs.length - 1; i >= 0; i--)
+        if (this.runs[i].script === name) this.runs.splice(i, 1);
     }
     this.changed();
   }

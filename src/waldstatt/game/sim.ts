@@ -43,7 +43,7 @@ import {
   type Point,
 } from "./nav";
 import type { Building, Person, Saved } from "./state";
-import { share, Wear, wears } from "./wear";
+import { repairCost, salvage, share, Wear, wears } from "./wear";
 import {
   damSite,
   hasBaseTree,
@@ -1266,34 +1266,12 @@ export class Game {
     if (b.state === "ruin" || b.state === "drowned") return {};
     if (b.state === "site" && b.work === 0) return { ...kinds[b.kind].cost };
     if (!this.recycler(b)) return {};
-    return this.share(kinds[b.kind].cost, balance.refund * share(b));
+    return salvage(b);
   }
 
-  /**
-   * What a repair takes: part of the building's costs as far as it is worn,
-   * rounded up. A ruin is not repaired.
-   */
+  /** What a repair takes (wear.ts): none for a ruin or a sound building. */
   repairCost(b: Building): Cost {
-    if (b.state !== "done") return {};
-    const worn = Math.max(0, 1 - share(b));
-    const out: Cost = {};
-    if (worn <= 0) return out;
-    for (const key of goodKeys) {
-      const n = Math.ceil(
-        (kinds[b.kind].cost[key] ?? 0) * balance.repair * worn,
-      );
-      if (n > 0) out[key] = n;
-    }
-    return out;
-  }
-
-  private share(cost: Cost, k: number): Cost {
-    const out: Cost = {};
-    for (const key of goodKeys) {
-      const n = Math.floor((cost[key] ?? 0) * k);
-      if (n > 0) out[key] = n;
-    }
-    return out;
+    return repairCost(b);
   }
 
   /** Seconds of one Waldmensch's work clearing a ruin away takes. */

@@ -10,7 +10,7 @@
  * as a share of the most, so a change of balance keeps how worn each
  * building looks.
  */
-import { balance, durability, kinds } from "./config";
+import { balance, durability, goodKeys, kinds, type Cost } from "./config";
 import type { Game } from "./sim";
 import type { Building } from "./state";
 
@@ -27,7 +27,8 @@ export const most = (b: Pick<Building, "kind" | "w" | "h">) =>
   durability(b.kind, b.w, b.h);
 
 /** Its condition in points, as the card and the finder count it. */
-export const points = (b: Building) => Math.ceil(share(b) * most(b) - 1e-9);
+export const points = (b: Building) =>
+  Math.max(0, Math.ceil(share(b) * most(b) - 1e-9));
 
 /** Whether a building wears at all: finished, and made of something. */
 export const wears = (b: Building) => b.state === "done" && most(b) > 0;
@@ -37,6 +38,36 @@ export function wearLevel(b: Building): WearLevel {
   if (b.state !== "done" || !most(b)) return 0;
   const k = share(b);
   return k >= 2 / 3 ? 0 : k >= 1 / 3 ? 1 : 2;
+}
+
+/**
+ * What a repair takes: part of the building's costs as far as it is worn,
+ * rounded up. A ruin or a building not finished is not repaired.
+ */
+export function repairCost(b: Building): Cost {
+  if (b.state !== "done") return {};
+  const worn = Math.max(0, 1 - share(b));
+  const out: Cost = {};
+  if (worn <= 0) return out;
+  for (const key of goodKeys) {
+    const n = Math.ceil((kinds[b.kind].cost[key] ?? 0) * balance.repair * worn);
+    if (n > 0) out[key] = n;
+  }
+  return out;
+}
+
+/**
+ * What a building torn down within reach of a Recyclinghof gives back: part
+ * of its costs as far as it is not worn, rounded down.
+ */
+export function salvage(b: Building): Cost {
+  const k = balance.refund * share(b);
+  const out: Cost = {};
+  for (const key of goodKeys) {
+    const n = Math.floor((kinds[b.kind].cost[key] ?? 0) * k);
+    if (n > 0) out[key] = n;
+  }
+  return out;
 }
 
 export class Wear {

@@ -569,18 +569,28 @@ export class Ui {
 
   /**
    * Orders the repair of every building in a list the stock pays for, the
-   * most worn first; returns why not, or those ordered.
+   * most worn first; returns why not, or those ordered. That none could be
+   * paid for is a why not, so a script does not go on as if repaired.
    */
   repairAll(list: Building[]): string | Building[] {
     const g = this.o.game;
-    if (!list.length) return "Nichts zu reparieren.";
     const done: Building[] = [];
     let short = 0;
+    let why: string | undefined;
     for (const b of [...list].sort((a, c) => points(a) - points(c))) {
       if (!g.state.buildings.includes(b)) continue;
-      if (g.repair(b)) short++;
-      else done.push(b);
+      const not = g.repair(b);
+      if (not) {
+        short++;
+        why ??= not;
+      } else done.push(b);
     }
+    if (!done.length)
+      return short === 1 && why
+        ? why
+        : short
+          ? `Für keine der ${short} Reparaturen reichen die Güter.`
+          : "Nichts zu reparieren.";
     const ordered = done.length;
     const said =
       ordered === 1

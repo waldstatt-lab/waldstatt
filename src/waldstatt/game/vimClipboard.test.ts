@@ -39,15 +39,17 @@ function fakeVim() {
       });
     },
   };
+  const macro = { isPlaying: false };
   const vim: VimApi = {
     getRegisterController: () => controller,
+    getVimGlobalState_: () => ({ macroModeState: macro }),
     defineAction: (name: string, fn: never) => {
       actions[name] = fn;
     },
   };
   const paste = (registerName?: string) =>
     actions.paste.call(actions, {}, { registerName }, {});
-  return { vim, controller, pasted, paste };
+  return { vim, controller, pasted, paste, macro };
 }
 
 function fakeClip(text = "") {
@@ -104,6 +106,27 @@ describe("vim and the clipboard", () => {
     paste();
     await settle();
     expect(pasted[1].text).toBe("im a");
+  });
+
+  it("pastes at once while a macro or «.» plays, in order", async () => {
+    const { vim, pasted, paste, macro, controller } = fakeVim();
+    const clip = fakeClip("zeile\n");
+    shareClipboard(vim, clip);
+    controller.pushText("a", "yank", "im a");
+    paste();
+    await settle();
+    // Played back: each paste lands before the keys after it run.
+    macro.isPlaying = true;
+    paste();
+    paste("a");
+    paste();
+    expect(pasted.map((p) => p.text)).toEqual([
+      "zeile\n",
+      "zeile\n",
+      "im a",
+      "zeile\n",
+    ]);
+    expect(pasted[1].linewise).toBe(true);
   });
 
   it("wraps vim's registers once", () => {

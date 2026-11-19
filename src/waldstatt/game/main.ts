@@ -17,7 +17,9 @@ import { registerCommands } from "./commandSet";
 import {
   load as loadKeys,
   onChange as keysChanged,
-  scripts as savedScripts,
+  revision as keymapRevision,
+  script as savedScript,
+  scriptNames,
   lock,
   unlock,
   unlocked,
@@ -316,8 +318,9 @@ async function start(root: HTMLElement) {
       name: (b) => game.nameOf(b),
     }),
     library,
-    source: (name) => savedScripts()[name],
-    names: () => Object.keys(savedScripts()),
+    source: (name) => savedScript(name),
+    names: scriptNames,
+    revision: keymapRevision,
     announce: (text) => shown.announce(text),
     command: (text) => commands.runScript(text),
     say: (text) =>
@@ -330,7 +333,7 @@ async function start(root: HTMLElement) {
   commands.setExtra(() => {
     if (!unlocked("scripts")) return [];
     const out: Spec[] = [];
-    for (const name of Object.keys(savedScripts())) {
+    for (const name of scriptNames()) {
       if (!runtime.enabled(name)) continue;
       const program = runtime.current(name);
       if (program instanceof ScriptError) continue;
@@ -361,7 +364,7 @@ async function start(root: HTMLElement) {
       unlocked: () => unlocked("scripts"),
       unlock: () => unlock("scripts"),
       lock: () => lock("scripts"),
-      names: () => Object.keys(savedScripts()),
+      names: scriptNames,
       enabled: (name) => runtime.enabled(name),
       enable: (name, on) => runtime.enable(name, on),
       disableAll: () => runtime.disableAll(),

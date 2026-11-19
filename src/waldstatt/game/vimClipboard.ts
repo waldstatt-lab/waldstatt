@@ -5,6 +5,9 @@
  * clipboard holds, so a yank survives a reload and reaches other programs.
  * A named register (`"a`) stays apart from the clipboard. Without the
  * clipboard, or when the browser refuses it, the register works as before.
+ * While a macro (`@q`) or `.` plays, keys run one after the other at once,
+ * so a paste then takes the register as it is, holding what the clipboard
+ * held when last read or yanked to, rather than wait for the clipboard.
  * Kept free of the DOM and of the vim module, so the tests hand in fakes.
  */
 
@@ -53,6 +56,8 @@ interface Actions {
 export interface VimApi {
   getRegisterController(): unknown;
   defineAction(name: string, fn: never): void;
+  /** Vim's state across editors: whether a macro or `.` plays now. */
+  getVimGlobalState_?(): { macroModeState?: { isPlaying?: boolean } };
 }
 
 const shared = new WeakSet<object>();
@@ -97,7 +102,8 @@ export function shareClipboard(vim: VimApi, clipboard: Clip | undefined): void {
         // The editor closed while the clipboard was read.
       }
     };
-    if (!viaClipboard(name)) return go();
+    const playing = vim.getVimGlobalState_?.().macroModeState?.isPlaying;
+    if (!viaClipboard(name) || playing) return go();
     clip.readText().then((raw) => {
       const text = raw.replace(/\r\n?/g, "\n");
       // A text from elsewhere is pasted as lines if it ends with one.
