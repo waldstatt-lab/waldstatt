@@ -14,7 +14,9 @@
  * bound. The visitor's sections and named macros are kept in the IndexedDB
  * database `waldstatt-games-settings`, apart from the forest, so «Neu
  * beginnen» keeps them; a keymap of version 1 is converted once. What is
- * read back, typed or loaded from a file is untrusted and checked.
+ * read back, typed or loaded from a file is untrusted and checked. The same
+ * database keeps what the visitor unlocked, such as the scripts (ADR 0007),
+ * in a record of its own, so a keymap file neither carries nor drops it.
  */
 import { contexts, type Context } from "./commands";
 
@@ -24,10 +26,14 @@ export interface Section {
   bindings: Record<string, string | null>;
 }
 
-/** The visitor's keymap and macros, as in its JSON. */
+/** The visitor's keymap, macros and scripts, as in its JSON. */
 export interface UserKeymap {
   bindings: Section[];
   macros: Record<string, string>;
+  /** Scripts' sources by name (ADR 0007); their runs belong to the forest. */
+  scripts?: Record<string, string>;
+  /** The script editor's settings: vim's keys on or off. */
+  editor?: { vim?: boolean };
 }
 
 /** One binding, as it is looked up. */
@@ -135,6 +141,8 @@ const limits = {
   key: 24,
   name: 60,
   macros: 200,
+  scripts: 100,
+  source: 50_000,
   /** Characters of the keymap's JSON. */
   json: 500_000,
 };
@@ -481,6 +489,32 @@ export function macros(): Record<string, string> {
   return { ...user.macros };
 }
 
+/** The visitor's scripts' sources, by name. */
+export function scripts(): Record<string, string> {
+  return { ...(user.scripts ?? {}) };
+}
+
+/** Whether the script editor uses vim's keys. */
+export function editorVim(): boolean {
+  return user.editor?.vim === true;
+}
+
+export function setEditorVim(on: boolean) {
+  const next = userKeymap();
+  next.editor = { ...(next.editor ?? {}), vim: on };
+  use(next, true);
+}
+
+/** Saves a script's source under a name, or deletes it with null. */
+export function setScript(name: string, source: string | null) {
+  const next = userKeymap();
+  const all = { ...(next.scripts ?? {}) };
+  if (source === null) delete all[name];
+  else all[name] = source.slice(0, limits.source);
+  next.scripts = all;
+  use(next, true);
+}
+
 function use(next: UserKeymap, store: boolean) {
   user = next;
   build();
@@ -538,9 +572,9 @@ export function setMacro(name: string, steps: string | null) {
   use(next, true);
 }
 
-/** The default bindings again; the macros stay. */
+/** The default bindings again; the macros, scripts and settings stay. */
 export function reset() {
-  use({ bindings: [], macros: { ...user.macros } }, true);
+  use({ ...userKeymap(), bindings: [] }, true);
 }
 
 // --- Checking what is read --------------------------------------------------------
@@ -653,6 +687,35 @@ export function check(
       }
       keymap.macros[name] = steps;
     }
+  // Scripts are only kept here: they are checked when they start.
+  const sources = r.scripts ?? {};
+  if (typeof sources !== "object" || sources === null || Array.isArray(sources))
+    say("«scripts» muss ein Objekt von Namen zu Quelltexten sein.");
+  else {
+    const kept: Record<string, string> = {};
+    for (const [name, text] of Object.entries(sources).slice(
+      0,
+      limits.scripts,
+    )) {
+      const why = macroName(name);
+      if (why) {
+        say(why.replace("Makroname", "Skriptname"), name);
+        continue;
+      }
+      if (typeof text !== "string" || text.length > limits.source) {
+        say(
+          `Skript «${name}»: Erwartet wird sein Quelltext, höchstens ${limits.source} Zeichen.`,
+          name,
+        );
+        continue;
+      }
+      kept[name] = text;
+    }
+    if (Object.keys(kept).length) keymap.scripts = kept;
+  }
+  const editor = r.editor as Record<string, unknown> | undefined;
+  if (editor && typeof editor === "object" && typeof editor.vim === "boolean")
+    keymap.editor = { vim: editor.vim };
   return { keymap, problems };
 }
 
@@ -788,6 +851,28 @@ const dbName = "waldstatt-games-settings";
 const storeName = "settings";
 const recordKey = "keys";
 const version = 2;
+const unlocksKey = "unlocks";
+
+/** What can be unlocked: the scripts, with «niklaus:wirth». */
+export type Feature = "scripts";
+
+let unlocks = new Set<Feature>();
+
+/** Whether the visitor unlocked a feature. */
+export function unlocked(feature: Feature): boolean {
+  return unlocks.has(feature);
+}
+
+/** Unlocks a feature for the visitor, in every forest; false if it was. */
+export function unlock(feature: Feature): boolean {
+  if (unlocks.has(feature)) return false;
+  unlocks = new Set([...unlocks, feature]);
+  for (const listener of listeners) listener();
+  void put(unlocksKey, { version: 1, unlocked: [...unlocks] }).catch(
+    () => undefined,
+  );
+  return true;
+}
 
 let opening: Promise<IDBDatabase> | null = null;
 
@@ -816,29 +901,51 @@ function open(): Promise<IDBDatabase> {
   return opening;
 }
 
-async function write(map: UserKeymap) {
+async function put(key: string, value: unknown) {
   const db = await open();
   await new Promise<void>((resolve, reject) => {
     const t = db.transaction(storeName, "readwrite");
-    t.objectStore(storeName).put({ version, keymap: map }, recordKey);
+    t.objectStore(storeName).put(value, key);
     t.oncomplete = () => resolve();
     t.onerror = t.onabort = () => reject(t.error);
   });
 }
 
+async function get(key: string): Promise<unknown> {
+  const db = await open();
+  return new Promise<unknown>((resolve, reject) => {
+    const r = db.transaction(storeName).objectStore(storeName).get(key);
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+
+async function write(map: UserKeymap) {
+  await put(recordKey, { version, keymap: map });
+}
+
+/** Reads what the visitor unlocked; only known features count. */
+export function readUnlocks(raw: unknown): Set<Feature> {
+  const out = new Set<Feature>();
+  const list = (raw as { unlocked?: unknown } | null)?.unlocked;
+  if (Array.isArray(list))
+    for (const f of list) if (f === "scripts") out.add(f);
+  return out;
+}
+
 /**
- * Reads the saved keymap, checking each command with `command`; a keymap of
- * version 1 is converted and stored as version 2. The defaults stay if there
- * is none or it fails.
+ * Reads what was unlocked and the saved keymap, checking each command with
+ * `command`; a keymap of version 1 is converted and stored as version 2. The
+ * defaults stay if there is none or it fails.
  */
 export async function load(command: (text: string) => string | undefined) {
   try {
-    const db = await open();
-    const stored = await new Promise<unknown>((resolve, reject) => {
-      const r = db.transaction(storeName).objectStore(storeName).get(recordKey);
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => reject(r.error);
-    });
+    const found = readUnlocks(await get(unlocksKey));
+    if (found.size) {
+      unlocks = new Set([...unlocks, ...found]);
+      for (const listener of listeners) listener();
+    }
+    const stored = await get(recordKey);
     if (typeof stored !== "object" || stored === null) return;
     const s = stored as { version?: unknown; keys?: unknown; keymap?: unknown };
     if (s.version === 1) {

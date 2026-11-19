@@ -27,7 +27,7 @@ for significant choices and their rationale.
 - `astro.config.mjs`, `package.json`, `.prettierrc.json`: build, dependencies,
   and formatting.
 - `.mise/config.toml` and `.mise/tasks/`: pinned Node.js and the `install`, `dev`,
-  `build`, `preview`, `check`, `fmt` and `agents:init-claude` tasks.
+  `build`, `preview`, `check`, `test`, `fmt` and `agents:init-claude` tasks.
 - `.github/workflows/`: CI on pull requests and GitHub Pages on `main`.
 - [docs/pitches/](docs/pitches/README.md): bounded feature proposals and companion sketches.
 
@@ -64,7 +64,9 @@ changes, and avoid unrelated formatting or dependency upgrades. Keep
 not edit `dist/`, `.astro/` or `node_modules/`.
 
 Follow the [contribution checks](CONTRIBUTING.md#setup-and-validation). For code or
-content changes, run `mise run check`: Prettier, `astro check`, and `astro build`.
+content changes, run `mise run check`: Prettier, `astro check`, the Vitest unit
+tests, and `astro build`. Add unit tests (`*.test.ts`) with changes to modules
+that work without the DOM.
 Verify visual changes in a browser with `mise run dev` or `mise run preview`, at
 desktop and phone widths. Do not claim a successful build proves a page looks
 right.

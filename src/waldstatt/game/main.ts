@@ -14,7 +14,17 @@ import { kinds, placing, STAGE, textWidth } from "./config";
 import { attachInput } from "./input";
 import { Commands } from "./commands";
 import { registerCommands } from "./commandSet";
-import { load as loadKeys } from "./keymap";
+import {
+  load as loadKeys,
+  onChange as keysChanged,
+  scripts as savedScripts,
+  unlock,
+  unlocked,
+} from "./keymap";
+import type { Library } from "./script/check";
+import { gameHost, gameQueries } from "./script/queries";
+import { Runtime } from "./script/runtime";
+import { ScriptsDialog } from "./scriptsDialog";
 import { KeysDialog } from "./keysDialog";
 import { textLength, WorldLayer } from "./overlay";
 import { Renderer } from "./render";
@@ -124,10 +134,13 @@ async function start(root: HTMLElement) {
     if (!saving || saveTimer) return;
     saveTimer = window.setTimeout(saveNow, 2000);
   };
+  // The scripts' runs as data, once the runtime exists (ADR 0007).
+  let scriptRuns = (): unknown => state.scripts;
   const saveNow = () => {
     window.clearTimeout(saveTimer);
     saveTimer = 0;
     if (!saving) return;
+    state.scripts = scriptRuns();
     void save(state).then((ok) => {
       if (ok || warned) return;
       warned = true;
@@ -240,6 +253,7 @@ async function start(root: HTMLElement) {
   world = new WorldLayer(host, game, games);
   let saves: SavesDialog | undefined;
   let keys: KeysDialog | undefined;
+  let scriptsDialog: ScriptsDialog | undefined;
   const commands = new Commands((text) => ui?.announce(text));
   ui = new Ui({
     root,
@@ -255,6 +269,7 @@ async function start(root: HTMLElement) {
     },
     saves: () => void saves?.open(),
     keys: () => keys?.open(),
+    scripts: () => scriptsDialog?.open(),
     commands,
     moved: scheduleSave,
   });
@@ -276,7 +291,77 @@ async function start(root: HTMLElement) {
         );
     },
   });
-  registerCommands(commands, shown, () => saves?.forestCommands());
+  // The player's scripts (ADR 0007): the game's queries, its commands, and
+  // their runs, kept with the forest.
+  const library: Library = {
+    queries: gameQueries,
+    command: (text) => commands.scriptCommand(text),
+  };
+  const runtime = new Runtime({
+    ...gameHost(game, {
+      cursor: () => shown.cursorTile(),
+      tool: () => shown.toolName(),
+      name: (b) => game.nameOf(b),
+    }),
+    library,
+    source: (name) => savedScripts()[name],
+    names: () => Object.keys(savedScripts()),
+    announce: (text) => shown.announce(text),
+    command: (text) => commands.runScript(text),
+    say: (text) => shown.announce(text),
+    unlocked: () => unlocked("scripts"),
+  });
+  registerCommands(
+    commands,
+    shown,
+    () => saves?.forestCommands(),
+    () => ({
+      unlocked: () => unlocked("scripts"),
+      unlock: () => unlock("scripts"),
+      names: () => Object.keys(savedScripts()),
+      enabled: (name) => runtime.enabled(name),
+      enable: (name, on) => runtime.enable(name, on),
+      start: (name) => runtime.start(name),
+      stop: (name) => runtime.stop(name),
+      stopAll: () => runtime.stopAll(),
+      open: () => scriptsDialog?.open(),
+      edit: (name) => scriptsDialog?.edit(name),
+    }),
+  );
+  scriptsDialog = new ScriptsDialog({
+    root,
+    runtime,
+    commands,
+    library,
+    confirm: (o) => shown.confirm(o),
+    announce: (text) => shown.announce(text),
+  });
+  const dropped = runtime.load(state.scripts);
+  if (dropped)
+    shown.announce(
+      dropped === 1
+        ? "Ein Skript lief beim letzten Mal; es passt nicht mehr zu dieser Fassung des Spiels und ist beendet."
+        : `${dropped} Skripte liefen beim letzten Mal; sie passen nicht mehr zu dieser Fassung des Spiels und sind beendet.`,
+    );
+  // A badge while scripts run, which opens the dialog; it and the menu's
+  // «Skripte …» show only once scripts are unlocked.
+  const badge = root.querySelector<HTMLButtonElement>("[data-scripts-badge]");
+  const menuItem = root.querySelector<HTMLElement>("[data-scripts-item]");
+  const showBadge = () => {
+    const on = unlocked("scripts");
+    if (menuItem) menuItem.hidden = !on;
+    if (!badge) return;
+    const n = on ? runtime.runs.length : 0;
+    badge.hidden = !n;
+    badge.textContent = n === 1 ? "▶ 1 Skript" : `▶ ${n} Skripte`;
+  };
+  badge?.addEventListener("click", () => scriptsDialog?.open());
+  runtime.onChange(showBadge);
+  keysChanged(showBadge);
+  showBadge();
+  scriptRuns = () => runtime.save();
+  // Saved forests and files take the runs as they stand, every two seconds.
+  window.setInterval(() => (state.scripts = runtime.save()), 2000);
   keys = new KeysDialog({
     root,
     commands,
@@ -322,6 +407,7 @@ async function start(root: HTMLElement) {
   app.ticker.add((ticker) => {
     const dt = Math.min(0.1, ticker.deltaMS / 1000);
     game.step(dt, still.matches);
+    runtime.tick();
     renderer?.frame(dt);
     if (stage && renderer) {
       const area = { w: STAGE.u1 - STAGE.u0, h: STAGE.v1 - STAGE.v0 };

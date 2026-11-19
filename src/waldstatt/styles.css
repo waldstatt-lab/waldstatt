@@ -477,6 +477,8 @@
 }
 .wg-dialog[open] {
   display: grid;
+  /* One column no wider than the dialog, so content wraps on a phone. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
 }
 .wg-confirm {
@@ -691,6 +693,75 @@
   font-family: ui-monospace, monospace;
   font-weight: 700;
   text-align: center;
+}
+
+/* Scripts running: a badge that opens the dialog «Skripte». */
+.wg-scripts-badge {
+  position: absolute;
+  right: max(0.75rem, env(safe-area-inset-right));
+  bottom: max(9.5rem, env(safe-area-inset-bottom));
+  padding: 0.25rem 0.6rem;
+  border: 2px solid var(--wg-wood-edge);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.wg-scripts {
+  width: min(48rem, calc(100vw - 1.5rem));
+}
+.wg-script-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-wood-light);
+}
+.wg-script-on {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+
+.wg-scripts-new {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.wg-scripts-new input,
+.wg-script-editor textarea {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+  border: 2px solid var(--wg-wood-edge);
+  border-radius: 0.25rem;
+  background: var(--wg-parchment);
+  color: var(--wg-ink);
+  font: inherit;
+}
+.wg-script-editor textarea {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+}
+.wg-script-vim {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0.4rem 0;
+}
+.wg-script-error {
+  color: #ffb4a0;
+}
+@media (max-width: 30rem) {
+  .wg-script-row {
+    grid-template-columns: 1fr auto;
+  }
+  .wg-script-row .wg-keymap-name {
+    grid-column: 1 / -1;
+  }
 }
 
 /* A macro being recorded, as vim shows «recording». */

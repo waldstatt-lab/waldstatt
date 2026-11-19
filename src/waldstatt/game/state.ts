@@ -144,6 +144,13 @@ export interface Saved {
   tombs: { x: number; y: number }[];
   /** Waldleute who died, of age and of hunger. */
   deaths: { age: number; hunger: number };
+  /** Seconds of play, the clock scripts wait and time out by (ADR 0007). */
+  clock: number;
+  /**
+   * The scripts' runs and their programs (script/runtime.ts), as plain
+   * data; checked by the runtime when it takes them back.
+   */
+  scripts: unknown;
   /** Chunks changed since the last save; not saved itself. */
   dirtyChunks: Set<string>;
 }
@@ -175,6 +182,8 @@ export function freshState(): Saved {
     moods: [],
     tombs: [],
     deaths: { age: 0, hunger: 0 },
+    clock: 0,
+    scripts: undefined,
     dirtyChunks: new Set(),
   };
 }
@@ -548,6 +557,10 @@ function parse(data: unknown, rawPeople: unknown, gameIds: Set<string>): Saved {
   const deaths = d.deaths as Record<string, unknown> | undefined;
   if (deaths && isInt(deaths.age, 0, 1e7) && isInt(deaths.hunger, 0, 1e7))
     state.deaths = { age: deaths.age, hunger: deaths.hunger };
+  // Saves before scripts had neither; the runtime checks the runs itself.
+  if (isNum(d.clock, 0, 1e10)) state.clock = d.clock;
+  if (typeof d.scripts === "object" && d.scripts !== null)
+    state.scripts = d.scripts;
   return state;
 }
 
@@ -592,6 +605,8 @@ function records(state: Saved): { save: unknown; people: unknown } {
     moods: state.moods.map((m) => ({ ...m })),
     tombs: state.tombs.flatMap((t) => [t.x, t.y]),
     deaths: { ...state.deaths },
+    clock: round(state.clock, 1000),
+    scripts: state.scripts,
   };
   // Only what a person is; what they are doing is found anew.
   const people = state.people.map((p) => ({

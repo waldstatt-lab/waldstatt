@@ -1661,6 +1661,7 @@ export class Game {
 
   /** Advances the game by dt seconds; `instant` skips walking and sailing. */
   step(dt: number, instant: boolean) {
+    this.state.clock += dt;
     this.searches = 2;
     for (const w of [...this.workers]) this.stepWorker(w, dt, instant);
     this.stepShips(dt, instant);

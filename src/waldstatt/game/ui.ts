@@ -16,16 +16,15 @@
  * the same commands, and the help texts list their keys.
  * Nodes are created with the DOM API, never from HTML strings.
  */
-import { buildingPicture } from "./art";
+import { BuildMenu } from "./buildMenu";
+import { describeKeys } from "./keysHelp";
+import { BuildingCard } from "./card";
+import { Finder } from "./finder";
+import { el, need } from "./dom";
 import {
-  balance,
-  crewKinds,
   goodKeys,
-  goodMax,
   goodName,
-  groups,
   kinds,
-  recipes,
   STAGE,
   type Cost,
   type Good,
@@ -37,7 +36,6 @@ import type { attachInput, MapHandlers, Tile } from "./input";
 import {
   keyLabel,
   keysFor,
-  keySpoken,
   macroName,
   onChange as onKeysChange,
   setMacro,
@@ -56,64 +54,13 @@ import {
 import { STAGE_RES, type Stage } from "./stage";
 import type { Building } from "./state";
 import type { GameInfo } from "./texts";
-import { most, points, share, wearLevel, wearNames } from "./wear";
+import { most, points } from "./wear";
 import { damSite, start } from "./world";
 
 /** «fell» is Holzhacken: the axe, upgraded to the saw once it is found. */
 type Tool = "none" | "fell" | "pave" | "repair" | "demolish";
 type PlaceMode = "mouse" | "keys" | "touch";
 
-/** An entry of the finder: what it shows, a hint, and what it does. */
-interface FinderItem {
-  label: string;
-  hint?: string;
-  /** Why it cannot run now; it shows greyed. */
-  why?: string;
-  run(): void;
-}
-
-/** Lower case, without accents: «Säge» matches «sage». */
-const plain = (text: string) =>
-  text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "");
-
-/**
- * How well a query matches a label, as in a fuzzy finder: its letters in
- * order, anywhere; more for letters in a row and at word starts, less for
- * gaps. −1 if it does not match.
- */
-function fuzzy(query: string, label: string): number {
-  const q = plain(query.trim());
-  const t = plain(label);
-  if (!q) return 0;
-  let score = 0;
-  let at = 0;
-  let run = 0;
-  for (const c of q) {
-    const i = t.indexOf(c, at);
-    if (i < 0) return -1;
-    run = i === at ? run + 1 : 0;
-    const start = i === 0 || /[:\s-]/.test(t[i - 1]);
-    score += 1 + run * 2 + (start ? 3 : 0) - Math.min(3, i - at) * 0.3;
-    at = i + 1;
-  }
-  return score - t.length * 0.01;
-}
-
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const element = document.createElement(tag);
-  Object.assign(element, props);
-  element.append(...children);
-  return element;
-}
-
-/** An action's first letter key, as vim names it, or else its first key. */
 /** The first key bound to a command, as shown, or «:command» if none is. */
 const firstKey = (command: string) => {
   const keys = keysFor(command)[0];
@@ -125,15 +72,6 @@ const letterKey = (command: string) =>
   keysFor(command)
     .find((k) => k.every((x) => [...x].length === 1))
     ?.join("") ?? firstKey(command);
-
-function need<T extends Element = HTMLElement>(
-  root: ParentNode,
-  selector: string,
-): T {
-  const element = root.querySelector<T>(selector);
-  if (!element) throw new Error(`Missing ${selector}`);
-  return element;
-}
 
 export interface UiOptions {
   root: HTMLElement;
@@ -148,6 +86,8 @@ export interface UiOptions {
   saves(): void;
   /** Opens the keymap. */
   keys(): void;
+  /** Opens the scripts. */
+  scripts(): void;
   /** The commands, which keys and the «:» finder run. */
   commands: Commands;
   moved(): void;
@@ -220,44 +160,18 @@ export class Ui {
   private buildMenu: HTMLElement;
   private mainMenu: HTMLElement;
   private backBar: HTMLElement;
-  /** The card over a tapped building, and the parts of it that change. */
-  card: {
-    b: Building;
-    state: HTMLElement;
-    condition: HTMLElement;
-    note: HTMLElement;
-    stock: HTMLElement;
-    crew?: {
-      count: HTMLElement;
-      minus: HTMLButtonElement;
-      plus: HTMLButtonElement;
-    };
-    repair: HTMLButtonElement;
-    clear: HTMLButtonElement;
-  } | null = null;
+  /** The card over a tapped building (card.ts). */
+  private cards: BuildingCard;
+  /** The card open, if any. */
+  get card() {
+    return this.cards.current;
+  }
   private live: HTMLElement;
   private confirmDialog: HTMLDialogElement;
-  /** The building chosen when the finder opened, for its commands. */
-  private chosen: Building | undefined;
-  /** The finder: «/» for the texts found, «:» for commands. */
-  private finder: {
-    element: HTMLElement;
-    input: HTMLInputElement;
-    list: HTMLElement;
-    prefix: HTMLElement;
-    mode: "/" | ":";
-    shown: FinderItem[];
-    selected: number;
-  };
-  private menuItems: {
-    kind: Kind;
-    game?: string;
-    button: HTMLButtonElement;
-    item: HTMLElement;
-    picture: HTMLCanvasElement;
-    drawn: boolean;
-  }[] = [];
-  private menuGroups: { element: HTMLElement; kinds: Kind[] }[] = [];
+  /** The finders «/» and «:» (finder.ts). */
+  private finder: Finder;
+  /** The build menu's pictures and buttons (buildMenu.ts). */
+  private build: BuildMenu;
   /** Where focus goes back to when an open menu closes with Escape. */
   private menuBack: HTMLElement | null = null;
 
@@ -269,15 +183,11 @@ export class Ui {
     this.backBar = need(root, "[data-back]");
     this.live = need(root, "[data-live]");
     this.confirmDialog = need(root, "[data-confirm]");
-    this.finder = {
-      element: need(root, "[data-finder]"),
-      input: need<HTMLInputElement>(root, "[data-finder-input]"),
-      list: need(root, "[data-finder-list]"),
-      prefix: need(root, "[data-finder-prefix]"),
-      mode: ":",
-      shown: [],
-      selected: 0,
-    };
+    this.finder = new Finder(root, {
+      commands: o.commands,
+      announce: (text) => this.announce(text),
+      focusMap: () => this.mapHost().focus({ preventScroll: true }),
+    });
     this.dispatcher = new Dispatcher(o.commands, {
       contexts: () => this.contexts(),
       status: (count, keys) => this.showStatus(count, keys),
@@ -285,7 +195,16 @@ export class Ui {
       announce: (text) => this.announce(text),
     });
     o.commands.onChange(() => this.showStatus());
-    this.attachFinder();
+    this.cards = new BuildingCard({
+      game: o.game,
+      world: o.world,
+      dispatcher: this.dispatcher,
+      announce: (text) => this.announce(text),
+      label: (kind, game) => this.label(kind, game),
+      costText: (c) => this.costText(c),
+      repair: (b) => this.repair(b),
+      focusMap: () => this.mapHost().focus({ preventScroll: true }),
+    });
     this.attachShortcuts();
     // Ctrl+C copies the text mode's selection, as y does.
     document.addEventListener("copy", (event) => {
@@ -295,9 +214,9 @@ export class Ui {
       event.preventDefault();
       this.announce("Kopiert.");
     });
-    this.describeKeys();
+    describeKeys(this.o.root);
     onKeysChange(() => {
-      this.describeKeys();
+      describeKeys(this.o.root);
       // The placing card names the key that builds.
       if (this.placing?.at) this.ghostAt(this.placing.at);
     });
@@ -339,7 +258,7 @@ export class Ui {
         this.closeMenus(true);
         event.preventDefault();
       } else if (this.card) {
-        this.closeCard();
+        this.cards.close();
       } else if (this.placing) {
         this.stopPlacing();
       } else if (this.reading) {
@@ -365,7 +284,17 @@ export class Ui {
       if (!this.mainMenu.hidden && !this.mainMenu.contains(target))
         this.closeMenus();
     });
-    this.renderBuildMenu();
+    this.build = new BuildMenu({
+      game: o.game,
+      games: o.games,
+      menu: this.buildMenu,
+      announce: (text) => this.announce(text),
+      label: (kind, game) => this.label(kind, game),
+      gameTitle: (id) => this.gameTitle(id),
+      closeMenus: () => this.closeMenus(),
+      pointerKind: () => this.pointerKind,
+      startPlacing: (kind, game, mode) => this.startPlacing(kind, game, mode),
+    });
     this.items();
     this.unlocked();
   }
@@ -373,7 +302,7 @@ export class Ui {
   /** Something appeared in the build menu: the Bauen button shows it. */
   unlocked() {
     need(this.toolbox, "[data-fresh]").hidden = !this.o.game.state.fresh;
-    if (!this.buildMenu.hidden) this.updateBuildMenu();
+    if (!this.buildMenu.hidden) this.build.update();
   }
 
   /**
@@ -400,205 +329,14 @@ export class Ui {
   }
 
   // --- The card over a building ------------------------------------------------
-
-  /**
-   * Opens a card over a building: its name, state and condition, its stock,
-   * for a producing building − and + for its crew, its repair, and for a
-   * ruin its clearing away.
-   */
-  private openCard(b: Building) {
-    const g = this.o.game;
-    const name = this.label(b.kind, b.game);
-    const state = el("p", { className: "wg-card-state" });
-    const condition = el("p", { className: "wg-card-condition" });
-    const stock = el("p", { className: "wg-card-stock" });
-    const note = el("p", { className: "wg-card-note" });
-    const close = el(
-      "button",
-      { type: "button", className: "wg-card-close" },
-      "×",
-    );
-    close.setAttribute("aria-label", "Schliessen");
-    close.addEventListener("click", () => this.closeCard(true));
-    const card = el(
-      "div",
-      {},
-      el("p", { className: "wg-card-title" }, name),
-      close,
-      state,
-      condition,
-    );
-    card.setAttribute("role", "group");
-    card.setAttribute("aria-label", name);
-    // The card keeps its keys from the map, so its own keys are taken here.
-    card.addEventListener("keydown", (event) => {
-      if (this.dispatcher.keydown(event, "card")) event.preventDefault();
-    });
-    card.addEventListener("keyup", (event) => this.dispatcher.keyup(event));
-    const repair = el("button", {
-      type: "button",
-      className: "wg-button wg-primary",
-    });
-    repair.addEventListener("click", () => {
-      this.repair(b);
-      this.updateCard();
-    });
-    const clear = el(
-      "button",
-      { type: "button", className: "wg-button wg-primary" },
-      "Wegräumen",
-    );
-    clear.addEventListener("click", () => {
-      if (g.demolish(b) === "clearing")
-        this.announce(`Die Waldleute räumen die Ruine ${name} weg.`);
-      this.updateCard();
-    });
-    const entry: NonNullable<Ui["card"]> = {
-      b,
-      state,
-      condition,
-      note,
-      stock,
-      repair,
-      clear,
-    };
-    if (b.state === "done" && crewKinds.includes(b.kind)) {
-      const step = (by: number) => this.stepCrew(by);
-      const minus = el(
-        "button",
-        { type: "button", className: "wg-button" },
-        "−",
-      );
-      minus.setAttribute("aria-label", "Einen Waldmenschen weniger");
-      minus.addEventListener("click", () => step(-1));
-      const plus = el(
-        "button",
-        { type: "button", className: "wg-button" },
-        "+",
-      );
-      plus.setAttribute("aria-label", "Einen Waldmenschen mehr");
-      plus.addEventListener("click", () => step(1));
-      const count = el("span", { className: "wg-card-count" });
-      card.append(el("div", { className: "wg-card-crew" }, minus, count, plus));
-      entry.crew = { count, minus, plus };
-    }
-    card.append(repair, clear, stock, note);
-    this.card = entry;
-    this.o.world.showCard(b, card);
-    this.updateCard();
-    this.announce(
-      [
-        name,
-        state.textContent,
-        condition.textContent,
-        stock.textContent,
-        note.textContent,
-      ]
-        .filter(Boolean)
-        .join(" "),
-    );
-  }
-
-  private closeCard(focusMap = false) {
-    if (!this.card) return;
-    this.card = null;
-    this.o.world.closeCard();
-    if (focusMap) this.mapHost().focus({ preventScroll: true });
-  }
-
-  /** Repairs the building of the open card (`card:repair`). */
-  repairCard() {
-    const card = this.card;
-    if (!card) return;
-    this.repair(card.b);
-    this.updateCard();
+  /** Repairs the building of the open card (`card:repair`); why not, if not. */
+  repairCard(): string | undefined {
+    return this.cards.repair();
   }
 
   /** Puts one Waldmensch more or fewer into the building of the open card. */
   stepCrew(by: number) {
-    const b = this.card?.b;
-    if (!b || !this.card?.crew) return;
-    this.o.game.setCrew(b, (b.crew ?? 0) + by);
-    this.updateCard();
-    this.announce(this.crewText(b));
-  }
-
-  /** How many Waldleute work in a building, of how many it asks for. */
-  private crewText(b: Building): string {
-    const there = this.o.game.crewOf(b);
-    const want = b.crew ?? 0;
-    return `${there} von ${want} Waldleuten`;
-  }
-
-  /** Keeps the card's state, crew and stock current, without moving focus. */
-  private updateCard() {
-    const card = this.card;
-    if (!card) return;
-    const g = this.o.game;
-    const b = card.b;
-    if (!g.state.buildings.includes(b)) return this.closeCard();
-    const set = (element: HTMLElement, text: string) => {
-      if (element.textContent !== text) element.textContent = text;
-      element.hidden = !text;
-    };
-    const recipe = recipes[b.kind];
-    let note = "";
-    let stock = "";
-    if (card.crew && recipe) {
-      const there = g.crewOf(b);
-      const want = b.crew ?? 0;
-      set(card.crew.count, this.crewText(b));
-      card.crew.minus.disabled = want <= 0;
-      card.crew.plus.disabled = want >= balance.maxCrew;
-      const makes = Object.keys(recipe.makes) as Good[];
-      const takes = Object.keys(recipe.takes) as Good[];
-      stock = makes
-        .map(
-          (key) =>
-            `${goodName(key)}: ${g.state.stock[key]} von ${goodMax(key)}`,
-        )
-        .join(" · ");
-      const lacking = takes.filter(
-        (key) => g.state.stock[key] < (recipe.takes[key] ?? 0),
-      );
-      if (want === 0) note = "Niemand arbeitet hier.";
-      else if (there < want)
-        note =
-          there === 0
-            ? "Niemand ist frei: Alle anderen haben schon Arbeit oder sind Kinder."
-            : `Es fehlen ${want - there}: Alle anderen haben schon Arbeit oder sind Kinder.`;
-      else if (makes.every((key) => g.state.stock[key] >= goodMax(key)))
-        note = "Das Lager ist voll. Die Arbeit ruht.";
-      else if (lacking.length)
-        note = `Es fehlt ${lacking.map((key) => goodName(key)).join(" und ")}.`;
-    }
-    // Its condition, its repair, and for a ruin its clearing away.
-    const ruin = b.state === "ruin";
-    const repairable = !g.unrepairable(b);
-    const cost = this.costText(g.repairCost(b));
-    set(
-      card.repair,
-      repairable ? (cost ? `Reparieren (${cost})` : "Reparieren") : "",
-    );
-    card.clear.hidden = !ruin || !!b.clearing;
-    card.clear.disabled = !g.canDemolish(b);
-    let condition = "";
-    if (b.state === "done" && most(b) > 0)
-      condition = `Zustand: ${points(b)} von ${most(b)}, ${wearNames[wearLevel(b)]}.`;
-    if (b.repair) note = `Wird repariert: ${Math.round(share(b) * 100)} %.`;
-    else if (b.clearing)
-      note = `Wird weggeräumt: ${Math.round(g.progress(b) * 100)} %.`;
-    else if (repairable && g.economy.missing(g.repairCost(b)))
-      note = `Für die Reparatur fehlen ${g.economy.missing(g.repairCost(b))}.`;
-    else if (ruin)
-      note =
-        g.undemolishable(b) ??
-        "Wegräumen gibt nichts zurück und ist viel Arbeit.";
-    set(card.condition, condition);
-    const state = this.stateText(b);
-    set(card.state, state.charAt(0).toUpperCase() + state.slice(1));
-    set(card.stock, stock);
-    set(card.note, note);
+    this.cards.stepCrew(by);
   }
 
   /** The map's input, so that jumps of the view take the cursor along. */
@@ -671,8 +409,8 @@ export class Ui {
       if (value && value.textContent !== values[key])
         value.textContent = values[key] ?? "";
     }
-    if (!this.buildMenu.hidden) this.updateBuildMenu();
-    this.updateCard();
+    if (!this.buildMenu.hidden) this.build.update();
+    this.cards.update();
   }
 
   private clock = 0;
@@ -724,7 +462,7 @@ export class Ui {
     if (menu === this.buildMenu) {
       this.o.game.state.fresh = false;
       this.unlocked();
-      this.updateBuildMenu();
+      this.build.update();
     }
     if (menu === this.mainMenu) this.suppliesDirty = true;
     menu.hidden = false;
@@ -756,80 +494,6 @@ export class Ui {
   // --- Keyboard shortcuts and the finder ----------------------------------------
 
   /**
-   * Writes the keys into the map's description for screen readers and into
-   * the menu's list, from the keymap, again after each change.
-   */
-  private describeKeys() {
-    const said = (command: string) =>
-      keysFor(command).map(keySpoken).join(" oder ") || "keine Taste";
-    need(this.o.root, "[data-map-help]").textContent = [
-      `${said("left")}, ${said("right")}, ${said("up")} und ${said("down")} bewegen die Auswahl nach links, rechts, oben und unten; Ziffern davor bewegen so viele Felder weit, mit Umschalt verschieben sie die Karte.`,
-      `${said("zoom:in")} und ${said("zoom:out")} zoomen.`,
-      `${said("enter")} wendet das Werkzeug an oder tippt an, was unter der Auswahl liegt; ${said("selection:start")} beginnt ein Rechteck für Holzhacken mit der Säge oder Pflaster, ${said("selection:other")} springt zu seiner anderen Ecke.`,
-      `${said("tool:holzhacken")}, ${said("tool:pflastern")}, ${said("tool:reparieren")} und ${said("tool:abreissen")} wählen Holzhacken, Pflastern, Reparieren und Abreissen, ${said("menu:build")} öffnet Bauen, ${said("menu:main")} das Menü, ${said("find:texts")} springt zum Start oder zu gefundenen Schriften, ${said("find:commands")} öffnet Befehle.`,
-      `${said("macro:record")} nimmt ein Makro auf und beendet die Aufnahme, ${said("macro:replay")} spielt das letzte ab; Ziffern davor so oft.`,
-      `Liest du eine Schrift von oben, macht ${said("enter")} auf ihr die Auswahl zum Textcursor, bis Escape: ${said("text:left")}, ${said("text:right")}, ${said("text:up")} und ${said("text:down")} bewegen ihn um Zeichen und Zeilen, ${said("text:word-next")}, ${said("text:word-back")} und ${said("text:word-end")} um Wörter, ${said("text:start")} zum Anfang, ${said("text:end")} zur letzten Zeile, Ziffern davor so oft; ${said("text:select")} wählt Zeichen aus, ${said("text:select-line")} Zeilen, ${said("text:other")} springt zum anderen Ende, ${said("text:copy")} kopiert.`,
-      `Auf der Karte eines Gebäudes repariert ${said("card:repair")} es; auf der Karte einer Werkstatt geben ${said("crew:more")} einen Waldmenschen mehr hinein und ${said("crew:less")} einen weniger.`,
-      "Escape bricht ab. Im Menü unter «Tasten» lassen sich die Tasten und Makros ändern.",
-    ].join(" ");
-    const keys = (command: string) => keysFor(command).map(keyLabel).join(" ");
-    const list = (pairs: [string, string][]) =>
-      pairs
-        .filter(([c]) => keysFor(c).length)
-        .map(([c, n]) => `${keys(c)} ${n}`);
-    const moves = ["left", "right", "up", "down"].map(keys).filter(Boolean);
-    need(this.o.root, "[data-keys-help]").textContent = [
-      ...(moves.length
-        ? [`${moves.join(", ")} bewegen, Ziffern davor so weit`]
-        : []),
-      ...list([
-        ["selection:start", "Auswahl"],
-        ["selection:other", "andere Ecke"],
-        ["tool:holzhacken", "Holzhacken"],
-        ["tool:pflastern", "Pflastern"],
-        ["tool:reparieren", "Reparieren"],
-        ["tool:abreissen", "Abreissen"],
-        ["menu:build", "Bauen"],
-        ["menu:main", "Menü"],
-        ["find:texts", "Start und Schriften"],
-        ["find:commands", "Befehle"],
-        ["macro:record", "Makro aufnehmen"],
-        ["macro:replay", "Makro abspielen"],
-      ]),
-      `im Text: ${[
-        "text:left",
-        "text:down",
-        "text:up",
-        "text:right",
-        "text:word-next",
-        "text:word-back",
-        "text:word-end",
-        "text:start",
-        "text:end",
-        "text:select",
-        "text:select-line",
-        "text:other",
-        "text:copy",
-      ]
-        // Letters first, as «h» before «←», and «g g» as «gg».
-        .map((c) => {
-          const all = keysFor(c);
-          const letters = all.find((k) => k.every((x) => [...x].length === 1));
-          return (letters ?? all[0])?.join("") ?? "";
-        })
-        .filter(Boolean)
-        .join(" ")}`,
-      `auf der Karte eines Gebäudes: ${list([
-        ["card:repair", "reparieren"],
-        ["crew:more", "mehr"],
-        ["crew:less", "weniger Waldleute"],
-      ]).join(", ")}`,
-    ]
-      .join(" · ")
-      .replace(/^/, "Tasten: ");
-  }
-
-  /**
    * Keys anywhere on the page, as long as nothing else takes them (a text
    * field, a dialog, the finder, or the stage while somebody plays): the
    * commands that work anywhere, such as the tools, menus and finders.
@@ -839,7 +503,7 @@ export class Ui {
       if (event.defaultPrevented) return;
       const target = event.target as HTMLElement;
       if (target.closest("input, textarea, select, dialog[open], a")) return;
-      if (!this.finder.element.hidden || this.reading?.stage) return;
+      if (this.finder.isOpen || this.reading?.stage) return;
       // Escape on a menu opened by key returns where the key was pressed.
       this.menuBack =
         target instanceof HTMLElement && target !== document.body
@@ -876,178 +540,16 @@ export class Ui {
     need(this.o.root, "[data-recording]").hidden = !this.o.commands.isRecording;
   }
 
-  private attachFinder() {
-    const f = this.finder;
-    f.input.addEventListener("input", () => this.filterFinder());
-    f.input.addEventListener("keydown", (event) => {
-      const move = (by: number) => {
-        event.preventDefault();
-        if (!f.shown.length) return;
-        f.selected = (f.selected + by + f.shown.length) % f.shown.length;
-        this.markFinder();
-      };
-      if (event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey))
-        move(1);
-      else if (
-        event.key === "ArrowUp" ||
-        (event.key === "Tab" && event.shiftKey)
-      )
-        move(-1);
-      else if (event.key === "Enter") {
-        event.preventDefault();
-        this.runFinder(f.shown[f.selected]);
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        this.closeFinder(true);
-      } else if (event.key === "Backspace" && !f.input.value) {
-        // Like a command line: deleting the prefix leaves it.
-        event.preventDefault();
-        this.closeFinder(true);
-      }
-    });
-    f.input.addEventListener("blur", () => {
-      // Clicking an item happens before the blur closes the finder.
-      window.setTimeout(() => {
-        if (!f.element.contains(document.activeElement)) this.closeFinder();
-      }, 150);
-    });
-  }
-
   /** Opens the finder: «/» for the texts found, «:» for commands. */
   openFinder(mode: "/" | ":") {
     this.closeMenus();
     // The building chosen: the one whose card is open, or under the cursor.
     const cursor = this.keyCursor;
-    this.chosen =
+    const chosen =
       this.card?.b ??
       (cursor ? this.o.game.buildingAt(cursor.x, cursor.y) : undefined);
-    this.closeCard();
-    const f = this.finder;
-    f.mode = mode;
-    f.prefix.textContent = mode;
-    f.input.value = "";
-    f.input.setAttribute(
-      "aria-label",
-      mode === "/" ? "Schrift suchen" : "Befehl suchen",
-    );
-    f.element.hidden = false;
-    this.filterFinder();
-    f.input.focus();
-  }
-
-  private closeFinder(focusMap = false) {
-    const f = this.finder;
-    if (f.element.hidden) return;
-    f.element.hidden = true;
-    this.chosen = undefined;
-    if (focusMap) this.mapHost().focus({ preventScroll: true });
-  }
-
-  /**
-   * What the finder lists for what is typed. «/»: the start and the texts
-   * found (the `goto` commands). «:»: every command, matched fuzzily by its
-   * id and its German description; what is typed runs as it is if it reads
-   * as a command or a chain, such as `up:20` or `build:hütte;enter;right:3`,
-   * and «rep 30» reads as `repair:under:30`.
-   */
-  private finderItems(query: string): FinderItem[] {
-    const c = this.o.commands;
-    const keys = (text: string) => {
-      const k = keysFor(text)[0];
-      return k ? ` · ${keyLabel(k)}` : "";
-    };
-    const item = (
-      text: string,
-      description: string,
-      why?: string,
-    ): FinderItem => ({
-      label: text,
-      hint: `${description}${keys(text)}`,
-      why,
-      run: () => {
-        if (!c.runText(text) && why) this.announce(why);
-      },
-    });
-    const all = c.entries();
-    if (this.finder.mode === "/") {
-      return all
-        .filter((e) => e.text === "goto:start" || e.text.startsWith("goto:"))
-        .map((e) => ({
-          ...item(e.text, e.description, e.why),
-          label: e.text.replace(/^goto:/, ""),
-        }))
-        .map((i) => ({ i, score: query.trim() ? fuzzy(query, i.label) : 0 }))
-        .filter((m) => m.score >= 0)
-        .sort((a, b) => b.score - a.score)
-        .map((m) => m.i);
-    }
-    const typed: FinderItem[] = [];
-    const q = query.trim();
-    if (q) {
-      // As typed, or with spaces for colons, such as «rep 30».
-      for (const text of [q, q.replace(/\s+/g, ":")]) {
-        const parsed = c.parse(text);
-        if ("steps" in parsed) {
-          const written = parsed.steps.map((s) => s.text).join(";");
-          typed.push({
-            label: written,
-            hint: c.describe(parsed.steps),
-            why:
-              parsed.steps.length === 1
-                ? parsed.steps[0].spec.unavailable?.(parsed.steps[0].args)
-                : undefined,
-            run: () => c.run(parsed.steps),
-          });
-          break;
-        }
-      }
-      if (!typed.length && q.includes(";")) {
-        const parsed = c.parse(q);
-        if ("error" in parsed)
-          typed.push({
-            label: q,
-            hint: `Schritt ${parsed.step}`,
-            why: parsed.error,
-            run: () => this.announce(`Schritt ${parsed.step}: ${parsed.error}`),
-          });
-      }
-      const number = /^(\S+?)[\s:-]+(\d{1,4})$/.exec(q);
-      if (!typed.length && number) {
-        // A number after a partial id: the first command that takes one.
-        const hit = all.find(
-          (e) =>
-            fuzzy(number[1], e.text) >= 0 &&
-            "steps" in c.parse(`${e.text.replace(/:\d+$/, "")}:${number[2]}`),
-        );
-        if (hit) {
-          const text = `${hit.text.replace(/:\d+$/, "")}:${number[2]}`;
-          const parsed = c.parse(text);
-          if ("steps" in parsed)
-            typed.push({
-              label: text,
-              hint: c.describe(parsed.steps),
-              run: () => c.run(parsed.steps),
-            });
-        }
-      }
-    }
-    const listed = all
-      .filter((e) => !e.text.startsWith("goto:") || e.text === "goto:start")
-      .map((e) => item(e.text, e.description, e.why))
-      .map((i) => {
-        // The id fuzzily; the German description by its words, costs and
-        // keys left out, so «holz» finds Holzhacken, not every cost in wood.
-        const words = plain((i.hint ?? "").split(" · ")[0]);
-        const said = q && words.includes(plain(q)) ? 1 : -1;
-        return { i, score: q ? Math.max(fuzzy(q, i.label), said) : 0 };
-      })
-      .filter((m) => m.score >= 0 && !typed.some((t) => t.label === m.i.label))
-      .sort(
-        (a, b) => b.score - a.score || Number(!!a.i.why) - Number(!!b.i.why),
-      )
-      .map((m) => m.i);
-    return [...typed, ...listed];
+    this.cards.close();
+    this.finder.open(mode, chosen);
   }
 
   /** How many buildings a repair command takes, and what it costs. */
@@ -1065,90 +567,29 @@ export class Ui {
     return cost ? `${count} · ${cost}` : count;
   }
 
-  /** Orders the repair of every building in a list the stock pays for, the most worn first. */
-  repairAll(list: Building[]): string | void {
+  /**
+   * Orders the repair of every building in a list the stock pays for, the
+   * most worn first; returns why not, or those ordered.
+   */
+  repairAll(list: Building[]): string | Building[] {
     const g = this.o.game;
     if (!list.length) return "Nichts zu reparieren.";
-    let ordered = 0;
+    const done: Building[] = [];
     let short = 0;
     for (const b of [...list].sort((a, c) => points(a) - points(c))) {
       if (!g.state.buildings.includes(b)) continue;
       if (g.repair(b)) short++;
-      else ordered++;
+      else done.push(b);
     }
-    const done =
+    const ordered = done.length;
+    const said =
       ordered === 1
         ? "Ein Gebäude wird repariert."
         : `${ordered} Gebäude werden repariert.`;
     this.announce(
-      short ? `${done} Für ${short} weitere fehlen die Güter.` : done,
+      short ? `${said} Für ${short} weitere fehlen die Güter.` : said,
     );
-  }
-
-  /** Keeps the items that match what is typed, best first. */
-  private filterFinder() {
-    const f = this.finder;
-    const query = f.input.value;
-    f.shown = this.finderItems(query).slice(0, 200);
-    f.selected = 0;
-    f.list.replaceChildren(
-      ...(f.shown.length
-        ? f.shown.map((item, i) => {
-            const option = el(
-              "li",
-              { id: `wg-finder-${i}`, className: "wg-finder-item" },
-              el("span", {}, item.label),
-              el(
-                "span",
-                { className: "wg-finder-hint" },
-                item.why
-                  ? `${item.hint ?? ""} – ${item.why}`
-                  : (item.hint ?? ""),
-              ),
-            );
-            if (item.why) option.classList.add("wg-finder-unavailable");
-            option.setAttribute("role", "option");
-            option.addEventListener("pointerdown", (event) => {
-              event.preventDefault();
-              this.runFinder(item);
-            });
-            return option;
-          })
-        : [
-            el(
-              "li",
-              { className: "wg-finder-empty" },
-              f.mode === ":" || query
-                ? "Nichts passt."
-                : "Noch nichts gefunden.",
-            ),
-          ]),
-    );
-    this.markFinder();
-  }
-
-  private markFinder() {
-    const f = this.finder;
-    f.list.querySelectorAll<HTMLElement>("[role=option]").forEach((o, i) => {
-      o.setAttribute("aria-selected", String(i === f.selected));
-      if (i === f.selected) o.scrollIntoView({ block: "nearest" });
-    });
-    if (f.shown.length)
-      f.input.setAttribute("aria-activedescendant", `wg-finder-${f.selected}`);
-    else f.input.removeAttribute("aria-activedescendant");
-  }
-
-  private runFinder(item: FinderItem | undefined) {
-    if (!item) return;
-    // The building chosen when it opened stays chosen for the command.
-    const chosen = this.chosen;
-    this.closeFinder(true);
-    this.chosen = chosen;
-    try {
-      item.run();
-    } finally {
-      this.chosen = undefined;
-    }
+    return done;
   }
 
   menuAction(action: string) {
@@ -1169,6 +610,8 @@ export class Ui {
       this.o.saves();
     } else if (action === "keys") {
       this.o.keys();
+    } else if (action === "scripts") {
+      this.o.scripts();
     } else if (action === "reset") {
       void this.confirm({
         title: "Neu beginnen?",
@@ -1198,121 +641,6 @@ export class Ui {
       .join(", ");
   }
 
-  /**
-   * Builds the menu once, as a grid of pictures and names per group;
-   * updateBuildMenu() shows what is available and keeps it current in place.
-   */
-  private renderBuildMenu() {
-    const list = need(this.buildMenu, "[data-build-list]");
-    list.replaceChildren();
-    this.menuItems = [];
-    this.menuGroups = [];
-    for (const group of groups) {
-      const items = el("ul", { className: "wg-build-items" });
-      const kindsHere: Kind[] = [];
-      for (const [kind, info] of Object.entries(kinds) as [
-        Kind,
-        (typeof kinds)[Kind],
-      ][]) {
-        if (info.group !== group) continue;
-        kindsHere.push(kind);
-        const games =
-          info.limit === "game" ? this.o.games.map((g) => g.id) : [undefined];
-        for (const game of games) {
-          const picture = el("canvas", { width: 144, height: 112 });
-          picture.setAttribute("aria-hidden", "true");
-          const button = el(
-            "button",
-            { type: "button", className: "wg-build-item" },
-            picture,
-            el("span", { className: "wg-build-name" }, this.label(kind, game)),
-          );
-          button.dataset.build = `${kind}:${game ?? ""}`;
-          button.addEventListener("click", (event) => {
-            const why = this.o.game.unavailable(kind, game);
-            if (why) return this.announce(`${this.label(kind, game)}: ${why}`);
-            this.closeMenus();
-            // The keyboard's click has no detail; a pointer's says which.
-            const mode: PlaceMode =
-              event.detail === 0
-                ? "keys"
-                : this.pointerKind === "mouse"
-                  ? "mouse"
-                  : "touch";
-            this.startPlacing(kind, game, mode);
-          });
-          const item = el("li", {}, button);
-          items.append(item);
-          this.menuItems.push({
-            kind,
-            game,
-            button,
-            item,
-            picture,
-            drawn: false,
-          });
-        }
-      }
-      const element = el(
-        "section",
-        {},
-        el("h3", { className: "wg-build-group" }, group),
-        items,
-      );
-      list.append(element);
-      this.menuGroups.push({ element, kinds: kindsHere });
-    }
-    this.updateBuildMenu();
-  }
-
-  /** Paints a building's picture small for its place in the menu. */
-  private drawPicture(entry: (typeof this.menuItems)[number]) {
-    if (entry.drawn) return;
-    entry.drawn = true;
-    const info = kinds[entry.kind];
-    const w = entry.kind === "bruecke" ? 3 : info.w;
-    const { canvas, flat } = buildingPicture(
-      entry.kind,
-      w,
-      info.h,
-      entry.game,
-      "x",
-      this.gameTitle(entry.game),
-    );
-    const ctx = entry.picture.getContext("2d");
-    if (!ctx) return;
-    const { width, height } = entry.picture;
-    const k = Math.min(width / canvas.width, height / canvas.height);
-    // A field's or pasture's ground first, then its house.
-    for (const part of [flat, canvas])
-      if (part)
-        ctx.drawImage(
-          part,
-          (width - canvas.width * k) / 2,
-          (height - canvas.height * k) / 2,
-          canvas.width * k,
-          canvas.height * k,
-        );
-  }
-
-  /** Shows what is available and marks what cannot be built now. */
-  private updateBuildMenu() {
-    const g = this.o.game;
-    const shown = new Set<Kind>();
-    for (const entry of this.menuItems) {
-      const visible = g.shown(entry.kind, entry.game);
-      entry.item.hidden = !visible;
-      if (!visible) continue;
-      shown.add(entry.kind);
-      this.drawPicture(entry);
-      if (g.unavailable(entry.kind, entry.game))
-        entry.button.setAttribute("aria-disabled", "true");
-      else entry.button.removeAttribute("aria-disabled");
-    }
-    for (const group of this.menuGroups)
-      group.element.hidden = !group.kinds.some((k) => shown.has(k));
-  }
-
   // --- Placing ----------------------------------------------------------------
 
   /**
@@ -1325,7 +653,7 @@ export class Ui {
   private startPlacing(kind: Kind, game?: string, mode: PlaceMode = "touch") {
     if (this.reading) this.leaveReading();
     this.setDoomed(null);
-    this.closeCard();
+    this.cards.close();
     this.placing = { kind, game, mode };
     this.mapHost().dataset.mode = "place";
     const text = this.placingText();
@@ -1518,7 +846,7 @@ export class Ui {
           return;
         }
         // A tap beside an open card only closes it.
-        if (this.card) return this.closeCard();
+        if (this.card) return this.cards.close();
         this.activateTile(tile);
       },
       // With a mouse, the building being placed follows the pointer.
@@ -1535,7 +863,7 @@ export class Ui {
         if (!done) return;
         // Holzhacken on one tile is a tap, as with the axe.
         if (this.tool === "fell" && from.x === to.x && from.y === to.y) {
-          if (this.card) return this.closeCard();
+          if (this.card) return this.cards.close();
           return this.activateTile(to);
         }
         this.sawArea(from, to);
@@ -1570,7 +898,7 @@ export class Ui {
           this.o.renderer.setSaw(null);
         } else if (this.placing) this.stopPlacing();
         else if (this.reading) this.leaveReading();
-        else if (this.card) this.closeCard();
+        else if (this.card) this.cards.close();
         else if (this.doomed) this.setDoomed(null);
         else if (this.tool !== "none") this.setTool(this.tool);
       },
@@ -1583,6 +911,27 @@ export class Ui {
   /** The keyboard cursor's tile, shown at the middle of the view if it was not. */
   private here(): Tile {
     return this.input?.here() ?? { x: start.x, y: start.y };
+  }
+
+  /** The keyboard cursor's tile, or the middle of the view, for queries. */
+  cursorTile(): Tile {
+    const cursor = this.input?.cursor();
+    if (cursor) return cursor;
+    const box = this.mapHost().getBoundingClientRect();
+    const t = this.o.renderer.screenToTile(box.width / 2, box.height / 2);
+    return { x: Math.floor(t.x), y: Math.floor(t.y) };
+  }
+
+  /** The tool chosen, as the `tool:` commands name it, or null. */
+  toolName(): string | null {
+    const names: Record<Tool, string | null> = {
+      none: null,
+      fell: "holzhacken",
+      pave: "pflastern",
+      repair: "reparieren",
+      demolish: "abreissen",
+    };
+    return names[this.tool];
   }
 
   /** Moves the keyboard cursor (`left`, `right`, `up`, `down`). */
@@ -1624,7 +973,7 @@ export class Ui {
       } else this.closeArea(tile);
       return;
     }
-    if (this.card) return this.closeCard();
+    if (this.card) return this.cards.close();
     this.activateTile(tile);
   }
 
@@ -1719,7 +1068,7 @@ export class Ui {
   /** The buildings the build menu shows, as choices for `build:…`. */
   buildChoices(): (Choice & { cost: string })[] {
     const g = this.o.game;
-    return this.menuItems
+    return this.build.items
       .filter((e) => g.shown(e.kind, e.game))
       .map((e) => ({
         value: slug(this.label(e.kind, e.game)),
@@ -1729,7 +1078,7 @@ export class Ui {
   }
 
   private buildEntry(value: string) {
-    return this.menuItems.find(
+    return this.build.items.find(
       (e) =>
         this.o.game.shown(e.kind, e.game) &&
         slug(this.label(e.kind, e.game)) === value,
@@ -1758,7 +1107,7 @@ export class Ui {
   chosenBuilding(): Building | undefined {
     const cursor = this.input?.cursor();
     const b =
-      this.chosen ??
+      this.finder.chosen ??
       this.card?.b ??
       (cursor ? this.o.game.buildingAt(cursor.x, cursor.y) : undefined);
     return b && this.o.game.state.buildings.includes(b) ? b : undefined;
@@ -1782,8 +1131,11 @@ export class Ui {
         : `${near.length === 1 ? "1 Ruine" : `${near.length} Ruinen`} · viel Arbeit`;
   }
 
-  /** Clears away the ruins a Recyclinghof is near (`clear:ruins`). */
-  clearRuins(): string | void {
+  /**
+   * Clears away the ruins a Recyclinghof is near (`clear:ruins`); returns
+   * why not, or those being cleared.
+   */
+  clearRuins(): string | Building[] {
     const g = this.o.game;
     const ruins = g.state.buildings.filter(
       (b) => b.state === "ruin" && !b.clearing,
@@ -1807,6 +1159,7 @@ export class Ui {
         .join(" "),
     );
     if (!near.length) return "";
+    return near;
   }
 
   /**
@@ -1972,12 +1325,12 @@ export class Ui {
       this.announce(text);
     };
     if (b.state === "done" && b.kind === "theater") {
-      if (!g.economy.open(b)) return this.openCard(b);
+      if (!g.economy.open(b)) return this.cards.open(b);
       return this.readStage(b);
     }
     const game = this.o.games.find((x) => x.id === b.game);
     if (b.state === "done" && game && b.kind === "spielhaus") {
-      if (!g.economy.open(b)) return this.openCard(b);
+      if (!g.economy.open(b)) return this.cards.open(b);
       g.mood.event("play");
       this.openGame(game.playUrl);
       return say(`${game.title} öffnet sich in einem neuen Tab.`);
@@ -1988,75 +1341,16 @@ export class Ui {
         `Der Quellcode von ${game.title} öffnet sich in einem neuen Tab.`,
       );
     }
-    this.openCard(b);
+    this.cards.open(b);
   }
 
   /** Called when something on a building changes. */
   building(b: Building, removed: boolean) {
     if (removed && this.doomed?.id === b.id) this.setDoomed(null);
     if (removed && this.reading?.id === b.id) this.leaveReading();
-    if (removed && this.card?.b.id === b.id) this.closeCard();
+    if (removed && this.card?.b.id === b.id) this.cards.close();
     if (!removed) this.repairTool();
-    if (!this.buildMenu.hidden) this.updateBuildMenu();
-  }
-
-  private stateText(b: Building): string {
-    const g = this.o.game;
-    const s = g.state;
-    if (b.state === "drowned") return "überflutet.";
-    if (b.state === "ruin")
-      return "eine Ruine. Hier geht nichts mehr, und sie drückt auf die Stimmung.";
-    if (b.state === "site") {
-      const percent = Math.round(g.progress(b) * 100);
-      return percent === 0 ? "Baustelle." : `im Bau, ${percent} %.`;
-    }
-    const condition =
-      (b.condition ?? 1) < balance.working ? " Es verfällt." : "";
-    switch (b.kind) {
-      case "huette":
-      case "steinhaus":
-        return `${kinds[b.kind].beds} Betten. In der Waldstatt leben ${g.workers.length}, Betten gibt es ${g.people.beds()}.`;
-      case "klause":
-        return `hier lebte einst der Einsiedler Meinrad.${condition}`;
-      case "kirche":
-        return `die Glocken läuten.${condition}`;
-      case "kloster":
-        return `der Stolz der Waldstatt.${condition}`;
-      case "friedhof":
-        return `${b.graves ?? 0} von ${balance.graves} Gräbern.`;
-      case "brot": {
-        const thrown = b.thrown ?? 0;
-        return thrown
-          ? `${thrown} von ${balance.brotLoaves} Broten ausgeworfen.`
-          : `wartet auf ${balance.brotLoaves} Brote. Vorrat: ${s.stock.bread}.`;
-      }
-      case "ise":
-        return "in der Schmiede glüht das Feuer.";
-      case "spielhaus":
-        return g.economy.open(b) ? "offen." : "geschlossen, kein Bier.";
-      case "damm":
-        return `der Sihlsee ist zu ${Math.round(s.flood.level * 100)} % voll.`;
-      case "bruecke":
-        return "hier kommen die Waldleute über den Fluss.";
-      case "hafen":
-        return this.portText(b);
-      case "schiff":
-        return "fährt die Waldleute zu den anderen Häfen am See.";
-      case "recyclinghof":
-        return "was im Umkreis von 10 km abgerissen wird, gibt hier einen Teil zurück.";
-      default:
-        // Producing buildings show their crew and stock instead.
-        return "";
-    }
-  }
-
-  private portText(b: Building): string {
-    const { ports, ships } = this.o.game.harbour(b);
-    if (!ships) return "noch liegt kein Schiff hier.";
-    if (ports < 2) return "kein zweiter Hafen am See.";
-    return ships === 1
-      ? "ein Schiff fährt über diesen See."
-      : `${ships} Schiffe fahren über diesen See.`;
+    if (!this.buildMenu.hidden) this.build.update();
   }
 
   /** The Abreissen tool: the first tap marks a building, the second tears it down. */
@@ -2092,8 +1386,8 @@ export class Ui {
     );
   }
 
-  /** Orders a building's repair, and says so. */
-  repair(b: Building) {
+  /** Orders a building's repair, and says so; returns why not, if not. */
+  repair(b: Building): string | undefined {
     const g = this.o.game;
     const name = this.label(b.kind, b.game);
     const cost = this.costText(g.repairCost(b));
@@ -2101,6 +1395,27 @@ export class Ui {
     const text = why ?? `${name} wird repariert${cost ? ` (${cost})` : ""}.`;
     this.o.world.toast(b, text);
     this.announce(text);
+    return why;
+  }
+
+  /**
+   * Places a building at the keyboard cursor in one step (`place:…`), for
+   * scripts and keys: no placing mode. Returns why not, or the site.
+   */
+  placeAt(value: string): string | Building {
+    const e = this.buildEntry(value);
+    if (!e) return "Das gibt es noch nicht.";
+    const g = this.o.game;
+    const why = g.unavailable(e.kind, e.game);
+    if (why) return `${this.label(e.kind, e.game)}: ${why}`;
+    const tile = this.here();
+    const { w, h } = g.size(e.kind);
+    const at = { x: tile.x - Math.floor(w / 2), y: tile.y - Math.floor(h / 2) };
+    const spot = g.placement(e.kind, at.x, at.y);
+    if (!spot.ok) return spot.reason ?? "Hier nicht.";
+    const b = g.place(e.kind, e.game, at.x, at.y);
+    if (!b) return g.unavailable(e.kind, e.game) ?? "Hier nicht.";
+    return b;
   }
 
   private setDoomed(b: Building | null) {
@@ -2281,7 +1596,7 @@ export class Ui {
     const title = this.o.world.title(t);
     if (found) this.announce(`Unter den Bäumen liegt etwas: ${title}.`);
     else if (isExplored(t)) this.announce(`${title} liegt ganz frei.`);
-    if (!this.buildMenu.hidden) this.updateBuildMenu();
+    if (!this.buildMenu.hidden) this.build.update();
   }
 
   /** A raven took up a new scroll to lead to. */

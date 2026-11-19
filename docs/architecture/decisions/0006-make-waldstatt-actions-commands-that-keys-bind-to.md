@@ -4,6 +4,8 @@ status: accepted
 date: 2026-11-19
 amends:
   - 0005-keep-the-waldstatt-keymap-in-a-settings-database.md
+amended-by:
+  - 0007-run-waldstatt-scripts-in-a-language-of-our-own.md
 sources:
   - src/waldstatt/game/commands.ts
   - src/waldstatt/game/commandSet.ts
@@ -16,6 +18,11 @@ sources:
 ---
 
 # 0006 — Make the Waldstatt's actions named commands that keys bind to
+
+**Amended by [ADR 0007](0007-run-waldstatt-scripts-in-a-language-of-our-own.md):**
+commands may return the work they leave, which scripts await; queries are a
+second, read-only registry for scripts; and the `script:` commands start and
+stop the players' scripts.
 
 ## Context
 

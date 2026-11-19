@@ -12,6 +12,8 @@
  * the dispatcher runs them (dispatch.ts).
  */
 
+import type { Work } from "./script/machine";
+
 /** The places a binding can apply: where the keyboard is and what is open. */
 export type Context = "map" | "placing" | "reading" | "text" | "card";
 
@@ -49,8 +51,11 @@ export interface Spec {
   describe(args: string[]): string;
   /** Why it cannot run now, in German; undefined if it can. */
   unavailable?(args: string[]): string | undefined;
-  /** Runs it; returns why it failed, in German, if it did. */
-  run(args: string[]): string | void;
+  /**
+   * Runs it; returns why it failed, in German, if it did, or the work it
+   * left, which a script can await (ADR 0007).
+   */
+  run(args: string[]): string | void | Work;
   /**
    * How a count typed before its key combines with it: as its number (or its
    * number times the count), as so many runs, or not at all (the default).
@@ -71,6 +76,11 @@ export interface Spec {
   interactive?: boolean;
   /** Arguments the finder offers as examples, such as `repair:under:10`. */
   examples?: string[][];
+  /**
+   * Left out of the finder's list and the completions now: it runs only
+   * when typed out, such as a cheat or the scripts before they are unlocked.
+   */
+  hidden?(): boolean;
 }
 
 /** A command with its arguments, ready to run. */
@@ -233,6 +243,7 @@ export class Commands {
         why: spec.unavailable?.(args),
       });
     for (const spec of this.specs) {
+      if (spec.hidden?.()) continue;
       const declared = spec.args ?? [];
       const choice = declared.find((a) => a.kind === "choice");
       if (choice?.kind === "choice") {
@@ -345,6 +356,46 @@ export class Commands {
       if (typeof failed === "string") return fail(failed);
     }
     return true;
+  }
+
+  // --- Scripts (ADR 0007) ------------------------------------------------------------
+
+  /**
+   * Whether a command reads for a script, or why not. With values put in
+   * by `{…}`, only its fixed beginning is known, ending in «:».
+   */
+  scriptCommand(text: string): string | undefined {
+    if (text.endsWith(":")) {
+      const id = text.slice(0, -1);
+      const spec =
+        this.byId.get(id) ??
+        this.specs.find(
+          (s) => s.id.startsWith(`${id}:`) || id.startsWith(`${s.id}:`),
+        );
+      if (!spec) return `«${id}» ist kein Befehl.`;
+      return spec.interactive
+        ? `«${id}» geht nicht in einem Skript.`
+        : undefined;
+    }
+    const step = this.parseStep(text);
+    if (typeof step === "string") return step;
+    return step.spec.interactive
+      ? `«${step.text}» geht nicht in einem Skript.`
+      : undefined;
+  }
+
+  /** Runs one command for a script: why not, or the work it left. */
+  runScript(text: string): { error?: string; work?: Work } {
+    const step = this.parseStep(text);
+    if (typeof step === "string") return { error: step };
+    if (step.spec.interactive)
+      return { error: `«${step.text}» geht nicht in einem Skript.` };
+    const why = step.spec.unavailable?.(step.args);
+    if (why) return { error: why };
+    const result = step.spec.run(step.args);
+    if (typeof result === "string")
+      return { error: result || `«${step.text}» ging nicht.` };
+    return result ? { work: result } : {};
   }
 
   // --- Recording ------------------------------------------------------------------

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Run the unit tests (Vitest)"
+set -euo pipefail
+npm test

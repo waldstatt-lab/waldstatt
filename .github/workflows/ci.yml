@@ -1,4 +1,5 @@
-# Checks every pull request: formatting, the Astro type check, and the build.
+# Checks every pull request: formatting, the Astro type check, the unit tests,
+# and the build.
 # Pushes to main are not checked again; Pages builds the site there.
 # See CONTRIBUTING.md.
 name: CI
@@ -24,5 +25,5 @@ jobs:
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
       - name: Install dependencies
         run: mise run install
-      - name: Formatting, type check, and build
+      - name: Formatting, type check, unit tests, and build
         run: mise run check

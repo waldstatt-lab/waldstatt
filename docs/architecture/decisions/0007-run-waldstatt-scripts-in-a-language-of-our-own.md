@@ -1,12 +1,22 @@
 ---
 tags: [adr]
-status: proposed
+status: accepted
 date: 2026-11-19
 amends:
   - 0003-save-the-waldstatt-in-indexeddb.md
   - 0004-keep-named-waldstatt-saves-and-files.md
   - 0006-make-waldstatt-actions-commands-that-keys-bind-to.md
 sources:
+  - src/waldstatt/game/script/parse.ts
+  - src/waldstatt/game/script/check.ts
+  - src/waldstatt/game/script/compile.ts
+  - src/waldstatt/game/script/machine.ts
+  - src/waldstatt/game/script/runtime.ts
+  - src/waldstatt/game/script/queries.ts
+  - src/waldstatt/game/scriptsDialog.ts
+  - src/waldstatt/game/scriptEditor.ts
+  - src/waldstatt/game/keymap.ts
+  - src/waldstatt/game/commandSet.ts
   - ../../pitches/pitch--skripte.md
 ---
 
@@ -50,8 +60,11 @@ and Ace and Monaco (larger).
 
 ## Decision
 
-Proposed, not implemented. As shaped in
-the [pitch «Skripte»](../../pitches/pitch--skripte.md):
+As shaped in the
+[pitch «Skripte»](../../pitches/pitch--skripte.md) and
+implemented in [`script/`](../../../src/waldstatt/game/script/),
+[`scriptsDialog.ts`](../../../src/waldstatt/game/scriptsDialog.ts)
+and [`scriptEditor.ts`](../../../src/waldstatt/game/scriptEditor.ts):
 
 - Scripts are written in a **language of our own**, parsed, checked and
   compiled in TypeScript to instructions for a small machine with an
@@ -82,13 +95,21 @@ the [pitch «Skripte»](../../pitches/pitch--skripte.md):
   `waldstatt-games-settings` (ADR 0005, 0006) and in its JSON and files;
   `script:run:<name>` and the other `script:` commands join the registry, so
   keys and the finder start and stop them.
+- Scripts are **unlocked** once per visitor with the hidden command
+  `niklaus:wirth`, typed out in the finder (in honour of Pascal's author);
+  the unlock is kept in `waldstatt-games-settings` in a record of its own, not
+  in the keymap's JSON. Until then the menu item, the badge and the `script:`
+  commands are hidden and nothing runs. The sources are the visitor's, the
+  same in every forest, but each **forest switches on** the scripts that may
+  run in it («In diesem Wald», `script:enable:<name>`,
+  `script:disable:<name>`); the list is saved with the forest's runs, and
+  switching a script off ends its run there. Scripts stay an extra for those
+  who look for them, and a forest is never steered by a script made for
+  another.
 - The editor is **CodeMirror 6** with a mode for the language and completion
   from the command and query registries, and **`@replit/codemirror-vim`** for
   vim's keys, both pinned dependencies, loaded as separate chunks only when
   the editor opens and when the vim mode is on.
-
-Once implemented, this record becomes accepted, and ADRs 0003, 0004 and
-0006 are marked amended by it.
 
 ## Consequences
 
@@ -103,18 +124,21 @@ Once implemented, this record becomes accepted, and ADRs 0003, 0004 and
   runs after a break.
 - The save grows by the runs and their programs; a change of the machine's
   instruction set needs a new version, and older runs are dropped.
+- A new forest runs no scripts until they are switched on in it; a forest
+  saved before this keeps on the scripts that ran or were due in it.
 - Separating commands and queries keeps scripts readable and lets the
   checker refuse mistakes early, at the cost of an extra query after a
   command, such as finding the building just placed.
 
 ## The tell
 
-Once implemented: searching `src/waldstatt` for `eval(`,
+Searching `src/waldstatt` for `eval(`,
 `new Function` or `Function(` should find nothing. `@codemirror/` and
 `@replit/codemirror-vim` should be imported only through dynamic `import()`
 from the editor's module, so the game's main chunk does not grow by them (the
 build's chunk list shows it). The script machine should reach the game only
 through the command and query registries; a focused test that saves a
 waiting run, reloads and finds it waiting at the same instruction shows that
-runs survive. The checks cannot
+runs survive (`script/runtime.test.ts`, «saves runs with their programs and
+continues them after a reload»). The checks cannot
 prove that every limit holds under every script.

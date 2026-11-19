@@ -7,13 +7,22 @@
     "build": "astro build",
     "preview": "astro preview",
     "preview-force": "astro preview --force",
-    "check": "prettier --check . && astro check && astro build",
-    "fmt": "prettier --write ."
+    "check": "prettier --check . && astro check && vitest run && astro build",
+    "fmt": "prettier --write .",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "6.20.4",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/lint": "6.9.7",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
     "@fontsource/bangers": "5.3.0",
     "@fontsource/cinzel": "5.3.0",
     "@fontsource/jersey-10": "5.3.0",
+    "@lezer/highlight": "1.2.5",
+    "@replit/codemirror-vim": "6.4.0",
     "@tailwindcss/typography": "0.5.20",
     "@tailwindcss/vite": "4.3.5",
     "astro": "7.4.12",
@@ -25,7 +34,8 @@
     "@astrojs/check": "0.9.12",
     "prettier": "3.10.1",
     "prettier-plugin-astro": "1.1.2",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
   },
   "overrides": {
     "postcss-selector-parser": "6.1.6"

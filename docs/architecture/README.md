@@ -58,7 +58,16 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/dispatch.ts` | The key dispatcher: counts, sequences, contexts, held movements and Shift to pan |
 | `game/keysDialog.ts` | The dialog «Tasten»: the bindings by context, recording a new one, the macros, and the keymap as JSON and as a file |
 | `game/textCursor.ts` | The text mode on a text read top-down, as vim's normal and visual modes: a block cursor moved by characters, lines, words, gg and G with counts, selections by character (v) or line (V), o, and copying, drawn as CSS highlights |
-| `game/ui.ts` | The HTML interface, reading on the map, and announcements |
+| `game/ui.ts` | The HTML interface: tools and menus, placing, the map's handlers, what the commands do, reading on the map, and announcements |
+| `game/card.ts` | The card over a building: state, condition, stock, crew, repair and clearing away |
+| `game/finder.ts` | The finders «/» and «:» over the commands |
+| `game/buildMenu.ts` | The build menu's pictures and buttons |
+| `game/keysHelp.ts` | The help texts written from the keymap |
+| `game/dom.ts` | Small DOM helpers and the finders' fuzzy matching |
+| `game/script/parse.ts`, `check.ts`, `compile.ts`, `machine.ts` | The script language ([ADR 0007](decisions/0007-run-waldstatt-scripts-in-a-language-of-our-own.md)): reading a script into its syntax tree (`ast.ts`), checking names, imports and the separation of commands and queries, compiling to instructions, and the machine that runs them with a state that can be saved |
+| `game/script/runtime.ts` | Starting, stepping and keeping the scripts' runs, with their programs, `every` and the step budget |
+| `game/script/queries.ts` | The game's queries for scripts, the fields of buildings, and when a command's work is done |
+| `game/scriptsDialog.ts`, `scriptEditor.ts` | The dialog «Skripte», and the editor, CodeMirror 6 with the language's mode, completion, errors and vim's keys, loaded only when it opens |
 | `game/preview.ts`, `previewMoto.ts`, `previewCar.ts` | The previews' rules, copied from the studio website and repainted as a stage set, each with its scene in 2D and in 3D |
 | `game/main.ts` | Start-up, saving and the service worker registration |
 
@@ -382,7 +391,8 @@ a record with the settlement (stock, marks and planned cobbles, buildings with
 their crew, condition, an ordered repair or clearing, graves and how far they sank, the flood's level and the
 wave, the camera, the tools, where the saw lies, the seed and positions of the
 hidden texts, the explored texts, what appeared in the build menu, the goods
-seen, motivation and its passing events, and the tombstones), a record with
+seen, motivation and its passing events, the tombstones, the clock of play,
+and the scripts' runs with their programs and the scripts switched on), a record with
 the people, where they stand and how they are, and one record per chunk with
 its felled trees and cobbles as bitsets and its seedlings as bytes. What a
 Waldmensch is doing is not saved; they look for work anew. A text's length
@@ -523,6 +533,68 @@ and loading leave alone; a keymap of version 1 (keys per action) is
 converted once. Everything read back, typed or loaded is checked: its size,
 shape, contexts, keys and every command and step.
 
+**Scripts** ([ADR 0007](decisions/0007-run-waldstatt-scripts-in-a-language-of-our-own.md),
+[pitch](../pitches/pitch--skripte.md)). Players write scripts
+in a small language of the game's own (`script/`), never evaluated as
+JavaScript. One statement per line, `#` for comments, blocks closed with
+`end`: `var`, assignment, `if … then … elif … else … end`, `for i in 1..10`
+(both ends included), `for b in list`, `while`, `wait 30s`, `wait until
+<query>`, `await <command>`, `timeout 2m … else … end`, `say`, `return` and
+`stop`; at the top `import <script>`, `every 30s` and `timeout 10m` for the
+whole script (10 minutes of play by default). Commands and queries stay
+apart, checked before a script can run: commands, the game's as typed in the
+finder (`repair:under:{n}`) and the script's own `cmd:name(a, b) … end`,
+called as `name:1:2`, are statements and return nothing; queries, the game's
+(`stock.wood`, `people`, `beds`, `mood`, `cursor.x`, `tool`, `time`,
+`buildings(kind)`, `building-at(x, y)`, `count`, `min`, `max`, `abs`,
+`floor`, `round`) and the script's own `qry:name(a) … return … end`, are
+expressions and change nothing; a query holds no command, wait or `say`. So
+`await place:hütte` waits until the hut stands and returns nothing; the hut
+is queried afterwards. `place:<building>` places a building at the keyboard
+cursor in one step. Each game command that leaves work says what «done»
+means: a site finished, ordered repairs done, ruins gone; one that can no
+longer be done fails the script there. Buildings reach scripts as ids, read
+anew at each access; values are numbers, texts with `{…}`, `true`, `false`,
+`none` and lists. Names may contain hyphens, so subtraction needs spaces.
+`import` brings another script's `cmd:` and `qry:`; clashes and circles are
+errors. A script is checked and compiled to instructions for a machine with
+an explicit stack, whose state is plain data. The runtime steps every run up
+to 400 instructions a frame and 2,000 for all, in game time, so scripts pause
+with the game; a script runs once at a time, at most eight at once, and one
+with `every` starts again at that interval, from one second, at once when it
+is first armed. Each run carries its own program, compiled when it began, so
+editing a script leaves a run under way on its version («ältere Fassung»);
+the next start runs the new one. Runs and their programs are saved with the
+forest, so they continue after a reload, and saved forests and files carry
+them; on load each program is compiled again from its own sources and must
+match its hash, and each run must fit it, or it is dropped with a notice.
+Failures and timeouts stop a run and are announced with the line. Scripts
+are unlocked once per visitor by typing the hidden command `niklaus:wirth`
+in the finder; the unlock is kept in `waldstatt-games-settings` in a record
+of its own (`unlocks`), not in the keymap's JSON. Until then the menu item,
+the badge and the `script:` commands are hidden and nothing runs. Sources are
+kept by name with the keymap in `waldstatt-games-settings`, in its JSON and
+files, the same in every forest; each forest switches on the scripts that
+may run in it («In diesem Wald» in the dialog, `script:enable:<name>`,
+`script:disable:<name>`), saved with its runs, and switching one off ends its
+run. A command marked hidden is left out of the finder's list and the
+completions and runs only when typed out. `script:run:<name>`,
+`script:stop:<name>`, `script:stop-all`, `script:edit:<name>` and
+`scripts:open` are commands, so keys and the finder start and stop scripts; scripts may run any command that does not open a
+menu, finder or dialog. The dialog «Skripte» (from the menu, a badge «▶ 2
+Skripte» while scripts run, or `:scripts:open`) lists each script with its
+trigger and state (bereit, aus in diesem Wald, läuft, wartet, ältere Fassung,
+Fehler), the switch «In diesem Wald», ▶ and ■,
+editing and deleting, and makes new ones by name. The editor (CodeMirror 6,
+`scriptEditor.ts`, loaded only when it opens) highlights the language,
+completes keywords, the game's queries and commands with their descriptions,
+the script's own and fields after a dot, and marks the checker's errors as
+they are typed; «Vim-Tasten» switches on `@replit/codemirror-vim`, loaded
+then and remembered, with the selection drawn by CodeMirror, since vim's
+keys hide the browser's own. While the editor has focus, Escape is the editor's.
+«Speichern und starten» saves and starts. The language, the machine and the
+runtime are covered by unit tests (`script/*.test.ts`).
+
 **Access.** The map is a focusable `role="application"`. The keyboard cursor
 moves along the squares' edges (→ and ← along x, ↑ and ↓ along y, so every
 tile is reached), and the view glides after it once it leaves the middle half
@@ -567,9 +639,10 @@ and the texts on the map are in the page as a region «Im Wald». With reduced
 motion Waldleute do not walk or swing their tools, ships do not sail visibly,
 and the previews play no demonstration. Screen-reader users and search engines can hardly reach the
 content: accepted in ADR 0002. The page weighs about
-10 kB of HTML, a 130 kB script (most of it PixiJS, which loads its WebGL parts
+10 kB of HTML, a 190 kB script (most of it PixiJS, which loads its WebGL parts
 as further chunks) and 20 kB of styles, gzipped; the water follows in pages of
-about 1 kB.
+about 1 kB. The script editor loads only when it opens, about 112 kB, and its
+vim mode only when switched on, about 41 kB more.
 
 ## Routes
 

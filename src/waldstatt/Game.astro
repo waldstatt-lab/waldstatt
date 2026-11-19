@@ -69,6 +69,12 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
   <p class="wg-panel wg-recording" data-recording hidden>
     ● Aufnahme
   </p>
+  <button
+    type="button"
+    class="wg-panel wg-scripts-badge"
+    data-scripts-badge
+    hidden
+  ></button>
 
   <div class="wg-panel wg-resources" data-resources data-ready-show hidden>
     <p class="wg-name">{meta.name}</p>
@@ -162,6 +168,11 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
       <li>
         <button type="button" class="wg-button" data-act="keys">
           Tasten …
+        </button>
+      </li>
+      <li data-scripts-item hidden>
+        <button type="button" class="wg-button" data-act="scripts">
+          Skripte …
         </button>
       </li>
       <li class="wg-keys" data-keys-help></li>
@@ -335,6 +346,19 @@ const gameJson = JSON.stringify(gameData).replace(/</g, "\\u003c");
       />
     </div>
     <p class="wg-saves-status" data-saves-status></p>
+    <form method="dialog" class="wg-actions">
+      <button class="wg-button">Schliessen</button>
+    </form>
+  </dialog>
+
+  <dialog
+    class="wg-dialog wg-keymap wg-scripts"
+    data-scripts
+    aria-labelledby="wg-scripts-title"
+  >
+    <h2 id="wg-scripts-title">Skripte</h2>
+    <div data-scripts-body></div>
+    <p class="wg-keymap-status" data-scripts-status role="status"></p>
     <form method="dialog" class="wg-actions">
       <button class="wg-button">Schliessen</button>
     </form>

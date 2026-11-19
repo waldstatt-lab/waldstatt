@@ -7,6 +7,8 @@
  */
 import { slug, type Choice, type Commands, type Spec } from "./commands";
 import { macros, setMacro } from "./keymap";
+import type { Work } from "./script/machine";
+import type { Building } from "./state";
 import type { TextAction } from "./textCursor";
 import type { Ui } from "./ui";
 import { points, wearLevel } from "./wear";
@@ -23,12 +25,39 @@ export interface ForestCommands {
   delete(name: string): void;
 }
 
+/** What the scripts offer as commands (script/runtime.ts, scriptsDialog.ts). */
+export interface ScriptCommands {
+  /** Whether scripts are unlocked, and unlocking them; false if they were. */
+  unlocked(): boolean;
+  unlock(): boolean;
+  names(): string[];
+  /** Whether a script is switched on in this forest, and switching it. */
+  enabled(name: string): boolean;
+  enable(name: string, on: boolean): void;
+  start(name: string): string | undefined;
+  stop(name: string): boolean;
+  stopAll(): number;
+  open(): void;
+  edit(name: string): void;
+}
+
+/** The work a command left for a script to await (ADR 0007). */
+const work = (kind: string, list: string | Building[]): string | Work =>
+  typeof list === "string" ? list : { kind, ids: list.map((b) => b.id) };
+
 export function registerCommands(
   commands: Commands,
   ui: Ui,
   forests: () => ForestCommands | undefined,
+  scripts: () => ScriptCommands | undefined,
 ) {
   const game = () => ui.o.game;
+  /** The script commands hide and refuse until scripts are unlocked. */
+  const locked = {
+    hidden: () => !scripts()?.unlocked(),
+    unavailable: () =>
+      scripts()?.unlocked() ? undefined : "Skripte sind nicht freigeschaltet.",
+  };
   const step = (n: number) => `${n === 1 ? "ein Feld" : `${n} Felder`}`;
   const move = (
     id: string,
@@ -248,22 +277,39 @@ export function registerCommands(
       run: ([value]) => ui.startBuilding(value),
     },
     {
+      id: "place",
+      args: [choice("ein Gebäude", () => ui.buildChoices())],
+      describe: ([value]) => {
+        const c = ui.buildChoices().find((b) => b.value === value);
+        return c
+          ? `${c.label} an der Cursorstelle bauen, in einem Schritt · ${c.cost}`
+          : `${value} an der Cursorstelle bauen`;
+      },
+      unavailable: ([value]) => ui.buildUnavailable(value),
+      run: ([value]) => {
+        const r = ui.placeAt(value);
+        return typeof r === "string" ? r : { kind: "built", ids: [r.id] };
+      },
+    },
+    {
       id: "repair:all",
       describe: () =>
         `Alle abgenutzten Gebäude reparieren · ${ui.repairHint(worn())}`,
-      run: () => ui.repairAll(worn()),
+      run: () => work("repaired", ui.repairAll(worn())),
     },
     {
       id: "repair:worn",
       describe: () =>
         `Abgenutzte und baufällige reparieren · ${ui.repairHint(worn().filter((b) => wearLevel(b) >= 1))}`,
-      run: () => ui.repairAll(worn().filter((b) => wearLevel(b) >= 1)),
+      run: () =>
+        work("repaired", ui.repairAll(worn().filter((b) => wearLevel(b) >= 1))),
     },
     {
       id: "repair:crumbling",
       describe: () =>
         `Baufällige reparieren · ${ui.repairHint(worn().filter((b) => wearLevel(b) >= 2))}`,
-      run: () => ui.repairAll(worn().filter((b) => wearLevel(b) >= 2)),
+      run: () =>
+        work("repaired", ui.repairAll(worn().filter((b) => wearLevel(b) >= 2))),
     },
     {
       id: "repair:under",
@@ -271,7 +317,11 @@ export function registerCommands(
       examples: [["5"], ["10"], ["20"], ["50"]],
       describe: ([n]) =>
         `Gebäude unter Zustand ${n} reparieren · ${ui.repairHint(worn().filter((b) => points(b) < Number(n)))}`,
-      run: ([n]) => ui.repairAll(worn().filter((b) => points(b) < Number(n))),
+      run: ([n]) =>
+        work(
+          "repaired",
+          ui.repairAll(worn().filter((b) => points(b) < Number(n))),
+        ),
     },
     {
       id: "repair:chosen",
@@ -287,20 +337,25 @@ export function registerCommands(
           : "Kein Gebäude gewählt: öffne seine Karte oder stell den Cursor darauf.",
       run: () => {
         const b = ui.chosenBuilding();
-        if (b) ui.repair(b);
+        if (!b) return "Kein Gebäude gewählt.";
+        return ui.repair(b) ?? { kind: "repaired", ids: [b.id] };
       },
     },
     {
       id: "clear:ruins",
       describe: () => `Ruinen wegräumen · ${ui.ruinsHint()}`,
-      run: () => ui.clearRuins(),
+      run: () => work("cleared", ui.clearRuins()),
     },
     // --- A building's card ------------------------------------------------------------
     {
       id: "card:repair",
       describe: () => "Das Gebäude der offenen Karte reparieren",
       unavailable: () => (ui.card ? undefined : "Keine Karte offen."),
-      run: () => ui.repairCard(),
+      run: () => {
+        const b = ui.card?.b;
+        if (!b) return "Keine Karte offen.";
+        return ui.repairCard() ?? { kind: "repaired", ids: [b.id] };
+      },
     },
     {
       id: "crew:more",
@@ -425,5 +480,100 @@ export function registerCommands(
         ui.announce(`Makro «${name}» gelöscht.`);
       },
     },
+    // --- Scripts (ADR 0007) -----------------------------------------------------------
+    {
+      // A cheat, in honour of Pascal's author: it unlocks the scripts.
+      id: "niklaus:wirth",
+      interactive: true,
+      hidden: () => true,
+      describe: () => "Skripte freischalten",
+      run: () => {
+        const s = scripts();
+        if (!s) return "Skripte gibt es hier nicht.";
+        if (!s.unlock()) return "Die Skripte sind schon freigeschaltet.";
+        ui.announce(
+          "Skripte freigeschaltet: im Menü unter «Skripte …», in jedem Wald.",
+        );
+      },
+    },
+    {
+      id: "scripts:open",
+      global: true,
+      interactive: true,
+      ...locked,
+      describe: () => "Die Skripte: starten, anhalten, bearbeiten",
+      run: () => scripts()?.open(),
+    },
+    {
+      id: "script:run",
+      args: [scriptChoice()],
+      ...locked,
+      describe: ([name]) => `Skript «${name}» starten`,
+      run: ([name]) => {
+        const why = scripts()?.start(name);
+        if (why) return why;
+        ui.announce(`Skript «${name}» läuft.`);
+      },
+    },
+    {
+      id: "script:stop",
+      args: [scriptChoice()],
+      ...locked,
+      describe: ([name]) => `Skript «${name}» anhalten`,
+      run: ([name]) =>
+        scripts()?.stop(name)
+          ? ui.announce(`Skript «${name}» angehalten.`)
+          : `«${name}» läuft nicht.`,
+    },
+    {
+      id: "script:stop-all",
+      global: true,
+      ...locked,
+      describe: () => "Alle Skripte anhalten",
+      run: () => {
+        const n = scripts()?.stopAll() ?? 0;
+        ui.announce(
+          n === 1 ? "Ein Skript angehalten." : `${n} Skripte angehalten.`,
+        );
+      },
+    },
+    {
+      id: "script:edit",
+      interactive: true,
+      args: [scriptChoice()],
+      ...locked,
+      describe: ([name]) => `Skript «${name}» bearbeiten`,
+      run: ([name]) => scripts()?.edit(name),
+    },
+    {
+      id: "script:enable",
+      args: [scriptChoice()],
+      ...locked,
+      describe: ([name]) => `Skript «${name}» in diesem Wald einschalten`,
+      run: ([name]) => {
+        if (scripts()?.enabled(name))
+          return `«${name}» ist in diesem Wald schon eingeschaltet.`;
+        scripts()?.enable(name, true);
+        ui.announce(`«${name}» ist in diesem Wald eingeschaltet.`);
+      },
+    },
+    {
+      id: "script:disable",
+      args: [scriptChoice()],
+      ...locked,
+      describe: ([name]) => `Skript «${name}» in diesem Wald ausschalten`,
+      run: ([name]) => {
+        if (!scripts()?.enabled(name))
+          return `«${name}» ist in diesem Wald nicht eingeschaltet.`;
+        scripts()?.enable(name, false);
+        ui.announce(`«${name}» ist in diesem Wald ausgeschaltet.`);
+      },
+    },
   );
+
+  function scriptChoice() {
+    return choice("ein Skript", () =>
+      (scripts()?.names() ?? []).map((name) => ({ value: name, label: name })),
+    );
+  }
 }

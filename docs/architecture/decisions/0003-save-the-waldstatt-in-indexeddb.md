@@ -5,6 +5,7 @@ date: 2026-11-18
 amends:
   - 0002-make-the-waldstatt-a-browser-game.md
 amended-by:
+  - 0007-run-waldstatt-scripts-in-a-language-of-our-own.md
   - 0004-keep-named-waldstatt-saves-and-files.md
 sources:
   - src/waldstatt/game/state.ts
@@ -13,6 +14,10 @@ sources:
 ---
 
 # 0003 — Save the Waldstatt in IndexedDB
+
+**Amended by [ADR 0007](0007-run-waldstatt-scripts-in-a-language-of-our-own.md):**
+the save also keeps a clock of play and the players' scripts' runs with their
+programs; the runtime checks them when it takes them back.
 
 **Amended by [ADR 0004](0004-keep-named-waldstatt-saves-and-files.md):**
 forests saved under a name live in a second database, `waldstatt-games-saves`,

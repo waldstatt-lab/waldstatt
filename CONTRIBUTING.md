@@ -69,14 +69,20 @@ which runs:
 ```sh
 prettier --check .
 astro check
+vitest run
 astro build
 ```
+
+`mise run test` runs only the unit tests (Vitest, `src/**/*.test.ts`), which
+cover modules without the DOM, such as the game's rules, commands or script
+language. Add or update tests with changes to such modules; behavior in the
+browser is still checked by hand as below.
 
 `mise run fmt` applies Prettier. Project Markdown in the repository root and
 `docs/` keeps its hand-wrapped style and is not formatted.
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs `mise run check` on
-every pull request. Every push to `main` runs
+every pull request, so the unit tests run there too. Every push to `main` runs
 [.github/workflows/pages.yml](.github/workflows/pages.yml): it builds the site with
 the origin and base path of the repository's Pages settings and publishes `dist/`
 to GitHub Pages. Pages must use "GitHub Actions" as its source in the repository
