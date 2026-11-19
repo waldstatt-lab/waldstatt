@@ -5,7 +5,8 @@
  * own `cmd:` and `qry:`, the namespaces after `$` and their names after
  * `$ns:`, and the fields after a dot, and the checker's errors and warnings
  * marked where they stand as the text is typed. Vim's keys come from `@replit/codemirror-vim`,
- * loaded only when they are switched on. This module is loaded only when
+ * loaded only when they are switched on, and yank and paste through the
+ * system clipboard (vimClipboard.ts). This module is loaded only when
  * the editor opens (scriptsDialog.ts), so the game's own script does not
  * carry it.
  */
@@ -36,6 +37,7 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { scriptKeywords } from "./script/parse";
+import { shareClipboard } from "./vimClipboard";
 
 export interface EditorOptions {
   parent: HTMLElement;
@@ -356,7 +358,8 @@ export class ScriptEditor {
       this.view.dispatch({ effects: this.vim.reconfigure([]) });
       return;
     }
-    const { vim } = await import("@replit/codemirror-vim");
+    const { vim, Vim } = await import("@replit/codemirror-vim");
+    shareClipboard(Vim, navigator.clipboard);
     this.view.dispatch({ effects: this.vim.reconfigure(vim()) });
   }
 

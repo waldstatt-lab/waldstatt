@@ -70,6 +70,7 @@ the map. Its folder `src/waldstatt/` holds:
 | `game/script/runtime.ts` | Starting, stepping and keeping the scripts' runs, with their programs, `every` and the step budget |
 | `game/script/queries.ts` | The game's queries for scripts, the fields of buildings, and when a command's work is done |
 | `game/scriptsDialog.ts`, `scriptEditor.ts` | The dialog «Skripte», and the editor, CodeMirror 6 with the language's mode, completion, errors and vim's keys, loaded only when it opens |
+| `game/vimClipboard.ts` | Vim's yank and paste in the editor through the system clipboard |
 | `game/preview.ts`, `previewMoto.ts`, `previewCar.ts` | The previews' rules, copied from the studio website and repainted as a stage set, each with its scene in 2D and in 3D |
 | `game/main.ts` | Start-up, saving and the service worker registration |
 
@@ -632,7 +633,11 @@ descriptions, the namespaces after `$` and their names after `$ns:`, the
 script's own and fields after a dot, and marks the checker's errors and
 warnings as they are typed; «Vim-Tasten» switches on `@replit/codemirror-vim`, loaded
 then and remembered, with the selection drawn by CodeMirror, since vim's
-keys hide the browser's own. While the editor has focus, Escape is the editor's.
+keys hide the browser's own. As vim's `clipboard=unnamedplus`
+(`vimClipboard.ts`), `y`, `d`, `c` and `x` also put their text on the system
+clipboard and `p` pastes from it, so a yank survives a reload; a named
+register such as `"a` stays apart, and where the browser refuses the
+clipboard, the register works alone. While the editor has focus, Escape is the editor's.
 «Speichern und starten» saves and starts. The language, the machine and the
 runtime are covered by unit tests (`script/*.test.ts`).
 
