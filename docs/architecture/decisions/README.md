@@ -40,3 +40,4 @@ does not prove correctness.
 | [0005 — Let visitors bind the Waldstatt's keys, kept in a settings database](0005-keep-the-waldstatt-keymap-in-a-settings-database.md) | accepted; amends 0004; amended by 0006 |
 | [0006 — Make the Waldstatt's actions named commands that keys bind to](0006-make-waldstatt-actions-commands-that-keys-bind-to.md) | accepted; amends 0005; amended by 0007 |
 | [0007 — Run the Waldstatt's player scripts in a small language of our own](0007-run-waldstatt-scripts-in-a-language-of-our-own.md) | accepted; amends 0003, 0004, 0006 |
+| [0008 — Pass the Waldstatt's command values in parentheses, and name scripts as namespaces](0008-pass-waldstatt-command-values-in-parentheses.md) | proposed; amends 0006, 0007 |
