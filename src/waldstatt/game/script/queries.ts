@@ -12,6 +12,7 @@ import { slug } from "../commands";
 import type { Game } from "../sim";
 import type { Building } from "../state";
 import { most, points } from "../wear";
+import { isKnown, isNaturalLake, isRiver } from "../world";
 import type { Library } from "./check";
 import type { Value } from "./compile";
 import type { MachineHost, Work } from "./machine";
@@ -46,6 +47,15 @@ export const gameQueries: Library["queries"] = {
     args: [2, 2],
     describe: "Das Gebäude an einer Stelle, oder none",
   },
+  "field-at": {
+    args: [2, 2],
+    describe:
+      'Was auf einem Feld ist: "building", "lake", "river", "tree", "seedling", "grass", oder "unknown", solange es nicht geladen ist',
+  },
+  "marked-at": {
+    args: [2, 2],
+    describe: "Ob ein Baum an einer Stelle zum Fällen markiert ist",
+  },
   count: { args: [1, 1], describe: "Wie viele Einträge eine Liste hat" },
   min: { args: [2, 2], describe: "Die kleinere von zwei Zahlen" },
   max: { args: [2, 2], describe: "Die grössere von zwei Zahlen" },
@@ -72,6 +82,33 @@ export const buildingFields: Record<string, string> = {
 };
 
 /** A kind of building by its id or its German name, such as «hütte». */
+/** What a field holds, as the map shows it (`field-at`). */
+export interface FieldFacts {
+  /** Whether its page of the map has loaded. */
+  known: boolean;
+  building: boolean;
+  /** A lake, natural or the Sihlsee, or the flood wave. */
+  lake: boolean;
+  river: boolean;
+  /** A tree, also one over a hidden text. */
+  tree: boolean;
+  seedling: boolean;
+}
+
+/**
+ * What `field-at` says of a field, the first that holds. A hidden text
+ * lies under forest and reads as a tree, so nothing hidden shows.
+ */
+export function fieldKind(f: FieldFacts): string {
+  if (!f.known) return "unknown";
+  if (f.building) return "building";
+  if (f.lake) return "lake";
+  if (f.river) return "river";
+  if (f.tree) return "tree";
+  if (f.seedling) return "seedling";
+  return "grass";
+}
+
 function kindOf(name: string): Kind | undefined {
   if (Object.hasOwn(kinds, name)) return name as Kind;
   const s = slug(name);
@@ -128,6 +165,35 @@ export function gameHost(
             return { error: "«building-at» braucht zwei Zahlen." };
           const b = game.buildingAt(Math.floor(x), Math.floor(y));
           return b ? { b: b.id } : null;
+        }
+        case "field-at": {
+          const [x, y] = args;
+          if (typeof x !== "number" || typeof y !== "number")
+            return { error: "«field-at» braucht zwei Zahlen." };
+          const tx = Math.floor(x);
+          const ty = Math.floor(y);
+          // A natural lake is water too; what is water but no lake is a river.
+          const lake =
+            isNaturalLake(tx, ty) ||
+            game.isLake(tx, ty) ||
+            (!isRiver(tx, ty) && game.isWater(tx, ty));
+          return fieldKind({
+            known: isKnown(tx, ty),
+            building: !!game.buildingAt(tx, ty),
+            lake,
+            river: isRiver(tx, ty),
+            tree: game.isTree(tx, ty),
+            seedling: game.seedling(tx, ty) > 0,
+          });
+        }
+        case "marked-at": {
+          const [x, y] = args;
+          if (typeof x !== "number" || typeof y !== "number")
+            return { error: "«marked-at» braucht zwei Zahlen." };
+          const tx = Math.floor(x);
+          const ty = Math.floor(y);
+          // The marks show on the map, so a script may see them.
+          return game.isTree(tx, ty) && game.isMarked(tx, ty);
         }
         case "count": {
           const v = args[0];

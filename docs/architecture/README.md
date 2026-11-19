@@ -573,9 +573,13 @@ the script's own `cmd:name(a, b) … end` (names may have colons, as
 nothing; the checker knows each game command's values and refuses a wrong
 number of them, a text for a number and a literal out of range; queries, the game's
 (`stock.wood`, `people`, `beds`, `mood`, `cursor.x`, `tool`, `time`,
-`buildings(kind)`, `building-at(x, y)`, `count`, `min`, `max`, `abs`,
-`floor`, `round`) and the script's own `qry:name(a) … return … end`, are
-expressions and change nothing; a query holds no command, wait or `say`. So
+`buildings(kind)`, `building-at(x, y)`, `field-at(x, y)`, `marked-at(x, y)`, `count`, `min`,
+`max`, `abs`, `floor`, `round`) and the script's own `qry:name(a) … return …
+end`, are expressions and change nothing; `field-at` says what a field holds,
+the first of `"unknown"` (its page of the map not loaded yet), `"building"`,
+`"lake"` (a natural lake, the Sihlsee or the flood wave), `"river"`,
+`"tree"` (also over a hidden text, so nothing hidden shows), `"seedling"` and
+`"grass"`, and `marked-at` whether a tree there is marked for felling; a query holds no command, wait or `say`. So
 `await place:hütte` waits until the hut stands and returns nothing; the hut
 is queried afterwards. `place:<building>` places a building at the keyboard
 cursor in one step. Each game command that leaves work says what «done»
