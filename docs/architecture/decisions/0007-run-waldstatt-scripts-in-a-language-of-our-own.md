@@ -112,7 +112,9 @@ and [`scriptEditor.ts`](../../../src/waldstatt/game/scriptEditor.ts):
   same in every forest, but each **forest switches on** the scripts that may
   run in it («In diesem Wald», `script:enable:<name>`,
   `script:disable:<name>`); the list is saved with the forest's runs, and
-  switching a script off ends its run there. Scripts stay an extra for those
+  switching a script off ends its run there; `scripts:disable` switches off
+  all of a forest's, and `scripts:disable:all` locks scripts again until
+  `niklaus:wirth` is typed anew. Scripts stay an extra for those
   who look for them, and a forest is never steered by a script made for
   another.
 - The editor is **CodeMirror 6** with a mode for the language and completion

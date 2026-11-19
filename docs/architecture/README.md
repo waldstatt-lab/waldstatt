@@ -607,12 +607,15 @@ Failures and timeouts stop a run and show as an alert with the line. Scripts
 are unlocked once per visitor by typing the hidden command `niklaus:wirth`
 in the finder; the unlock is kept in `waldstatt-games-settings` in a record
 of its own (`unlocks`), not in the keymap's JSON. Until then the menu item,
-the badge and the `script:` commands are hidden and nothing runs. Sources are
+the badge and the `script:` commands are hidden and nothing runs.
+`scripts:disable:all` locks them again in every forest, stopping the runs of
+the forest at hand, until `niklaus:wirth` is typed anew; the sources and each
+forest's choice stay, and the runs saved with other forests wait. Sources are
 kept by name with the keymap in `waldstatt-games-settings`, in its JSON and
 files, the same in every forest; each forest switches on the scripts that
 may run in it («In diesem Wald» in the dialog, `script:enable:<name>`,
-`script:disable:<name>`), saved with its runs, and switching one off ends its
-run. A command marked hidden is left out of the finder's list and the
+`script:disable:<name>`, and `scripts:disable` for all at once), saved with
+its runs, and switching one off ends its run. A command marked hidden is left out of the finder's list and the
 completions and runs only when typed out. A script's `cmd:` definitions are
 commands too, `$helfer:bauen:dorf(3)`: the finder lists those of the scripts
 switched on in the forest, described by the comment above each; run from the

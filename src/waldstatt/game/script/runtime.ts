@@ -155,6 +155,16 @@ export class Runtime {
     this.changed();
   }
 
+  /** Switches every script off in this forest; how many were on. */
+  disableAll(): number {
+    const n = this.on.size;
+    this.on.clear();
+    this.due.clear();
+    this.runs.length = 0;
+    if (n) this.changed();
+    return n;
+  }
+
   /** Starts a script by name; returns why not, if not. */
   start(name: string): string | undefined {
     if (!this.host.unlocked()) return "Skripte sind nicht freigeschaltet.";

@@ -18,6 +18,7 @@ import {
   load as loadKeys,
   onChange as keysChanged,
   scripts as savedScripts,
+  lock,
   unlock,
   unlocked,
 } from "./keymap";
@@ -359,9 +360,11 @@ async function start(root: HTMLElement) {
     () => ({
       unlocked: () => unlocked("scripts"),
       unlock: () => unlock("scripts"),
+      lock: () => lock("scripts"),
       names: () => Object.keys(savedScripts()),
       enabled: (name) => runtime.enabled(name),
       enable: (name, on) => runtime.enable(name, on),
+      disableAll: () => runtime.disableAll(),
       start: (name) => runtime.start(name),
       stop: (name) => runtime.stop(name),
       stopAll: () => runtime.stopAll(),

@@ -7,6 +7,7 @@ import {
   keyLabel,
   keyName,
   keysFor,
+  lock,
   readContext,
   readJson,
   readKeys,
@@ -16,6 +17,8 @@ import {
   resolve,
   setUserKeymap,
   unbind,
+  unlock,
+  unlocked,
   unshifted,
 } from "./keymap";
 
@@ -180,5 +183,15 @@ describe("unlocks", () => {
     ]).toEqual(["scripts"]);
     expect(readUnlocks(null).size).toBe(0);
     expect(readUnlocks({ unlocked: "scripts" }).size).toBe(0);
+  });
+
+  it("locks again what was unlocked, until it is unlocked anew", () => {
+    expect(unlock("scripts")).toBe(true);
+    expect(unlock("scripts")).toBe(false);
+    expect(lock("scripts")).toBe(true);
+    expect(unlocked("scripts")).toBe(false);
+    expect(lock("scripts")).toBe(false);
+    expect(unlock("scripts")).toBe(true);
+    lock("scripts");
   });
 });

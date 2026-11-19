@@ -165,6 +165,21 @@ describe("the runtime", () => {
     );
   });
 
+  it("switches every script off in this forest at once", () => {
+    const { runtime, g, advance } = setup({
+      a: "wait 50s",
+      tick: "import waldstatt\nevery 10s\nup",
+    });
+    runtime.start("a");
+    expect(runtime.disableAll()).toBe(2);
+    expect(runtime.runs).toHaveLength(0);
+    advance(20);
+    expect(g.ran).toEqual([]);
+    expect(runtime.enabled("a")).toBe(false);
+    expect(runtime.save().enabled).toEqual([]);
+    expect(runtime.disableAll()).toBe(0);
+  });
+
   it("keeps which scripts are switched on with the forest", () => {
     const first = setup({ a: "say 1", b: "say 2" });
     first.runtime.enable("b", false);

@@ -867,11 +867,26 @@ export function unlocked(feature: Feature): boolean {
 export function unlock(feature: Feature): boolean {
   if (unlocks.has(feature)) return false;
   unlocks = new Set([...unlocks, feature]);
+  saveUnlocks();
+  return true;
+}
+
+/**
+ * Locks a feature again, in every forest, until it is unlocked anew; false
+ * if it was not unlocked.
+ */
+export function lock(feature: Feature): boolean {
+  if (!unlocks.has(feature)) return false;
+  unlocks = new Set([...unlocks].filter((f) => f !== feature));
+  saveUnlocks();
+  return true;
+}
+
+function saveUnlocks() {
   for (const listener of listeners) listener();
   void put(unlocksKey, { version: 1, unlocked: [...unlocks] }).catch(
     () => undefined,
   );
-  return true;
 }
 
 let opening: Promise<IDBDatabase> | null = null;

@@ -31,10 +31,14 @@ export interface ScriptCommands {
   /** Whether scripts are unlocked, and unlocking them; false if they were. */
   unlocked(): boolean;
   unlock(): boolean;
+  /** Locks scripts again, in every forest; false if they were not unlocked. */
+  lock(): boolean;
   names(): string[];
   /** Whether a script is switched on in this forest, and switching it. */
   enabled(name: string): boolean;
   enable(name: string, on: boolean): void;
+  /** Switches every script off in this forest; how many were on. */
+  disableAll(): number;
   start(name: string): string | undefined;
   stop(name: string): boolean;
   stopAll(): number;
@@ -522,6 +526,37 @@ export function registerCommands(
       ...locked,
       describe: () => "Die Skripte: starten, anhalten, bearbeiten",
       run: () => scripts()?.open(),
+    },
+    {
+      id: "scripts:disable",
+      ...locked,
+      describe: () => "Alle Skripte in diesem Wald ausschalten",
+      run: () => {
+        const n = scripts()?.disableAll() ?? 0;
+        if (!n) return "In diesem Wald ist kein Skript eingeschaltet.";
+        ui.announce(
+          n === 1
+            ? "Ein Skript in diesem Wald ausgeschaltet."
+            : `${n} Skripte in diesem Wald ausgeschaltet.`,
+        );
+      },
+    },
+    {
+      // Undoes the cheat: the scripts stay saved, but nothing runs and the
+      // script commands hide until «niklaus:wirth» unlocks them again.
+      id: "scripts:disable:all",
+      global: true,
+      ...locked,
+      describe: () =>
+        "Skripte überall ausschalten, bis sie wieder freigeschaltet werden",
+      run: () => {
+        const s = scripts();
+        s?.stopAll();
+        if (!s?.lock()) return "Skripte sind nicht freigeschaltet.";
+        ui.announce(
+          "Skripte ausgeschaltet, in jedem Wald. Sie bleiben gespeichert.",
+        );
+      },
     },
     {
       id: "script:run",
