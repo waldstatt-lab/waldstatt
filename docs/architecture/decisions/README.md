@@ -39,3 +39,4 @@ does not prove correctness.
 | [0004 — Keep named Waldstatt saves in a database of their own, and as files](0004-keep-named-waldstatt-saves-and-files.md) | accepted; amends 0003; amended by 0005 |
 | [0005 — Let visitors bind the Waldstatt's keys, kept in a settings database](0005-keep-the-waldstatt-keymap-in-a-settings-database.md) | accepted; amends 0004; amended by 0006 |
 | [0006 — Make the Waldstatt's actions named commands that keys bind to](0006-make-waldstatt-actions-commands-that-keys-bind-to.md) | accepted; amends 0005 |
+| [0007 — Run the Waldstatt's player scripts in a small language of our own](0007-run-waldstatt-scripts-in-a-language-of-our-own.md) | proposed; would amend 0003, 0004, 0006 |

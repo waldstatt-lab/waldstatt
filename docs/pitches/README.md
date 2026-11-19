@@ -47,3 +47,4 @@ What this pitch explicitly does not include.
 | [Wälder speichern, laden und als Datei mitnehmen](pitch--waelder-speichern.md) | implemented |
 | [Verfall und Reparatur – buildings wear, fall into ruins and are repaired](pitch--verfall-und-reparatur.md) | implemented |
 | [Befehle und Tasten – every action a named command that keys bind to, and macros](pitch--befehle-und-tasten.md) | implemented |
+| [Skripte – scripts in a language of our own, with commands and queries kept apart, waits, triggers, and runs that survive a reload](pitch--skripte.md) | shaped |
