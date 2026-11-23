@@ -1,12 +1,12 @@
 # Working on the Waldstatt
 
 A building game in the browser, published as a static site at
-<https://2raben.github.io/waldstatt/> from the repository `2raben/waldstatt`.
+<https://waldstatt-lab.github.io/waldstatt/> from the repository `waldstatt-lab/waldstatt`.
 The forest hides the studio's texts and links to its games, which are built and
 deployed from their own repositories: Moto Devil
-(<https://2raben.github.io/moto-devil/>, `2raben/moto-devil`) and Car Drive
-(<https://2raben.github.io/carrrgh/>, `2raben/carrrgh`). "2raben" is a temporary
-organization name. The site is built with Astro 7, Tailwind CSS 4, daisyUI 5 and
+(<https://waldstatt-lab.github.io/moto-devil/>, `waldstatt-lab/moto-devil`) and Car Drive
+(<https://waldstatt-lab.github.io/carrrgh/>, `waldstatt-lab/carrrgh`).
+The site is built with Astro 7, Tailwind CSS 4, daisyUI 5 and
 PixiJS 8. Use the versions pinned in `package.json` and `package-lock.json`.
 
 ## Start here
