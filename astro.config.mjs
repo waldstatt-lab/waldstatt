@@ -5,7 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 // settings, so the build works both as the organization site (base "/") and as
 // a project site (base "/<repository>/"). Locally the defaults apply.
 export default defineConfig({
-  site: process.env.SITE_URL || "https://2raben.github.io",
+  site: process.env.SITE_URL || "https://waldstatt-lab.github.io",
   base: process.env.BASE_PATH || "/",
   trailingSlash: "always",
   vite: {
