@@ -745,6 +745,8 @@ under the base path, `/waldstatt/` on GitHub Pages.
 push to `main`; [ci.yml](../../.github/workflows/ci.yml) runs `mise run check` on
 pull requests. The repository name decides the address: a repository named
 `<owner>.github.io` is served at `https://<owner>.github.io/`; any other name, like
-this one, at `https://<owner>.github.io/<repository>/`. On the free organization
-plan the repository must be public, and Pages must use "GitHub Actions" as its
-source.
+this one, at `https://<owner>.github.io/<repository>/`. The organization site's
+custom domain applies to all of the organization's Pages sites, so the game is
+served at <https://waldstatt-lab.ch/waldstatt/>, and its github.io address
+redirects there. On the free organization plan the repository must be public, and
+Pages must use "GitHub Actions" as its source.
